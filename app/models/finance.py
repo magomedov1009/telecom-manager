@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Enum, ForeignKey, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,6 +41,10 @@ class FinanceTransaction(BaseModel):
     __tablename__ = "finance_transactions"
     __table_args__ = (
         CheckConstraint("amount <> 0", name="ck_finance_transactions_amount_non_zero"),
+        CheckConstraint(
+            "num_nonnulls(connection_id, expense_id, extra_work_id) <= 1",
+            name="ck_finance_transactions_single_source",
+        ),
     )
 
     connection_id: Mapped[int | None] = mapped_column(

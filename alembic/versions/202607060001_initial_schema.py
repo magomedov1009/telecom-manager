@@ -1,4 +1,4 @@
-﻿"""initial schema
+"""initial schema
 
 Revision ID: 202607060001
 Revises:
@@ -18,9 +18,9 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-user_role = postgresql.ENUM("ADMIN", "OFFICE", "INSTALLER", name="user_role")
-material_unit = postgresql.ENUM("PIECE", "METER", name="material_unit")
-provider = postgresql.ENUM("ELLKO", "OPTIMASET", name="provider")
+user_role = postgresql.ENUM("ADMIN", "OFFICE", "INSTALLER", name="user_role", create_type=False)
+material_unit = postgresql.ENUM("PIECE", "METER", name="material_unit", create_type=False)
+provider = postgresql.ENUM("ELLKO", "OPTIMASET", name="provider", create_type=False)
 inventory_transaction_type = postgresql.ENUM(
     "RECEIPT",
     "CONNECTION",
@@ -31,6 +31,7 @@ inventory_transaction_type = postgresql.ENUM(
     "WRITE_OFF",
     "ADJUSTMENT",
     name="inventory_transaction_type",
+    create_type=False,
 )
 connection_type = postgresql.ENUM(
     "NEW",
@@ -40,6 +41,7 @@ connection_type = postgresql.ENUM(
     "CABLE_REPLACE",
     "CUSTOM",
     name="connection_type",
+    create_type=False,
 )
 finance_transaction_type = postgresql.ENUM(
     "CONNECTION",
@@ -49,6 +51,7 @@ finance_transaction_type = postgresql.ENUM(
     "PAYMENT_FROM_OFFICE",
     "ADJUSTMENT",
     name="finance_transaction_type",
+    create_type=False,
 )
 expense_category = postgresql.ENUM(
     "FUEL",
@@ -57,6 +60,7 @@ expense_category = postgresql.ENUM(
     "COMMUNICATION",
     "OTHER",
     name="expense_category",
+    create_type=False,
 )
 event_action = postgresql.ENUM(
     "CREATE",
@@ -67,6 +71,7 @@ event_action = postgresql.ENUM(
     "INVENTORY_TRANSACTION",
     "FINANCE_OPERATION",
     name="event_action",
+    create_type=False,
 )
 
 
@@ -418,13 +423,3 @@ def seed_initial_data() -> None:
             },
         ],
     )
-
-
-
-
-
-
-
-
-
-

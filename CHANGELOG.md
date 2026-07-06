@@ -1,4 +1,16 @@
-﻿# Changelog
+# Changelog
+
+## Sprint 4
+
+- Реализован модуль Финансы.
+- Добавлена страница финансовых операций.
+- Добавлены финансовые карточки на Dashboard.
+- Добавлена страница взаиморасчетов.
+- Добавлены ручные операции PAYMENT_FROM_OFFICE, PAYMENT_TO_OFFICE и ADJUSTMENT.
+- Добавлен журнал финансов с фильтрами, поиском и пагинацией.
+- Автоматические операции подключений переведены на FinanceTransactionType.CONNECTION.
+- В первую миграцию добавлен user_id для finance_transactions.
+- Исправлено создание PostgreSQL ENUM в первой миграции без повторного CREATE TYPE.
 
 ## Sprint 3.5
 
