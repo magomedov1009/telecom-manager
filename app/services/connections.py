@@ -244,12 +244,36 @@ def get_connection(db: Session, connection_id: int) -> Connection | None:
     )
 
 
+def normalize_client_identity(
+    provider: Provider,
+    contract_number: str | None,
+    login: str | None,
+    phone: str | None,
+) -> tuple[str, str, str | None]:
+    normalized_contract = contract_number.strip() if contract_number else ""
+    normalized_login = login.strip() if login else ""
+    normalized_phone = phone.strip() if phone else None
+
+    if provider == Provider.ELLKO:
+        if not normalized_login:
+            raise ConnectionError("Для Эллко обязателен логин клиента")
+        return normalized_contract or normalized_login, normalized_login, normalized_phone
+
+    if provider == Provider.OPTIMASET:
+        if not normalized_phone:
+            raise ConnectionError("Для Оптимасеть обязателен телефон")
+        phone_contract = normalized_phone[1:] if normalized_phone.startswith("8") and len(normalized_phone) > 1 else normalized_phone
+        return normalized_contract or phone_contract, normalized_login or phone_contract, normalized_phone
+
+    raise ConnectionError("Неизвестный провайдер")
+
+
 def find_or_create_client(
     db: Session,
     *,
     provider: Provider,
     contract_number: str,
-    login: str,
+    login: str | None,
     address: str,
     phone: str | None,
     comment: str | None,
@@ -349,7 +373,7 @@ def create_connection(
     connection_date: date,
     provider: str,
     contract_number: str,
-    login: str,
+    login: str | None,
     address: str,
     phone: str | None,
     client_comment: str | None,
@@ -363,6 +387,7 @@ def create_connection(
     material_quantities: list[str],
 ) -> Connection:
     provider_enum = Provider(provider)
+    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(provider_enum, contract_number, login, phone)
     connection_type_enum = ConnectionType(connection_type)
     parsed_price = parse_decimal(price, "Цена подключения")
     parsed_installer_amount, parsed_office_amount = calculate_finance(parsed_price, installer_amount, office_amount)
@@ -376,10 +401,10 @@ def create_connection(
     client = find_or_create_client(
         db,
         provider=provider_enum,
-        contract_number=contract_number.strip(),
-        login=login.strip(),
+        contract_number=normalized_contract_number,
+        login=normalized_login,
         address=address.strip(),
-        phone=phone.strip() if phone else None,
+        phone=normalized_phone,
         comment=client_comment.strip() if client_comment else None,
     )
     connection = Connection(
@@ -410,7 +435,7 @@ def update_connection(
     connection_date: date,
     provider: str,
     contract_number: str,
-    login: str,
+    login: str | None,
     address: str,
     phone: str | None,
     client_comment: str | None,
@@ -424,6 +449,7 @@ def update_connection(
     material_quantities: list[str],
 ) -> Connection:
     provider_enum = Provider(provider)
+    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(provider_enum, contract_number, login, phone)
     connection_type_enum = ConnectionType(connection_type)
     parsed_price = parse_decimal(price, "Цена подключения")
     parsed_installer_amount, parsed_office_amount = calculate_finance(parsed_price, installer_amount, office_amount)
@@ -438,10 +464,10 @@ def update_connection(
 
     client = connection.client
     client.provider = provider_enum
-    client.contract_number = contract_number.strip()
-    client.login = login.strip()
+    client.contract_number = normalized_contract_number
+    client.login = normalized_login
     client.address = address.strip()
-    client.phone = phone.strip() if phone else None
+    client.phone = normalized_phone
     client.comment = client_comment.strip() if client_comment else None
 
     connection.warehouse_id = warehouse_id

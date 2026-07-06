@@ -39,12 +39,12 @@
           <div class="input-group"><span class="input-group-text"><i class="bi bi-file-earmark-text"></i></span><input class="form-control" name="contract_number" value="{{ connection.client.contract_number if connection else '' }}" required></div>
         </div>
         <div class="col-md-4">
-          <label class="form-label">Логин клиента</label>
-          <div class="input-group"><span class="input-group-text"><i class="bi bi-person"></i></span><input class="form-control" name="login" value="{{ connection.client.login if connection else '' }}" required></div>
+          <label class="form-label" id="login-label">Логин клиента <span class="text-danger" id="login-required">*</span></label>
+          <div class="input-group"><span class="input-group-text"><i class="bi bi-person"></i></span><input class="form-control" id="login-input" name="login" value="{{ connection.client.login if connection else '' }}" data-provider-ellko-required></div>
         </div>
         <div class="col-md-4">
-          <label class="form-label">Телефон</label>
-          <div class="input-group"><span class="input-group-text"><i class="bi bi-telephone"></i></span><input class="form-control" name="phone" value="{{ connection.client.phone if connection and connection.client.phone else '' }}"></div>
+          <label class="form-label" id="phone-label">Телефон <span class="text-danger" id="phone-required">*</span></label>
+          <div class="input-group"><span class="input-group-text"><i class="bi bi-telephone"></i></span><input class="form-control" id="phone-input" name="phone" value="{{ connection.client.phone if connection and connection.client.phone else '' }}" data-provider-optimaset-required></div>
         </div>
 
         <div class="col-12">
@@ -112,4 +112,31 @@
     </div>
   </div>
 </form>
+<script>
+(function() {
+  var providerSelect = document.querySelector('select[name="provider"]');
+  var loginInput = document.getElementById('login-input');
+  var phoneInput = document.getElementById('phone-input');
+  var loginRequired = document.getElementById('login-required');
+  var phoneRequired = document.getElementById('phone-required');
+
+  function toggleRequired() {
+    var v = providerSelect.value;
+    if (v === 'ELLKO') {
+      loginInput.setAttribute('required', '');
+      phoneInput.removeAttribute('required');
+      loginRequired.style.display = '';
+      phoneRequired.style.display = 'none';
+    } else {
+      phoneInput.setAttribute('required', '');
+      loginInput.removeAttribute('required');
+      phoneRequired.style.display = '';
+      loginRequired.style.display = 'none';
+    }
+  }
+
+  toggleRequired();
+  providerSelect.addEventListener('change', toggleRequired);
+})();
+</script>
 {% endblock %}
