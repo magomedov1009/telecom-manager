@@ -4,12 +4,14 @@
 {% block page_heading %}{{ title }}{% endblock %}
 
 {% block content %}
-<section class="tm-panel">
-  <div class="tm-empty-state">
-    <i class="bi bi-layout-text-window-reverse"></i>
-    <div>
-      <h1 class="h5 mb-1">{{ title }}</h1>
-      <p class="text-secondary mb-0">Раздел подключён к навигации и готов для следующего функционального шага.</p>
+<section class="card">
+  <div class="card-body">
+    <div class="alert alert-secondary d-flex align-items-center gap-3 mb-0" role="alert">
+      <i class="bi bi-layout-text-window-reverse fs-3"></i>
+      <div>
+        <h1 class="h5 mb-1">{{ title }}</h1>
+        <p class="mb-0">Раздел подключён к навигации и готов для следующего функционального шага.</p>
+      </div>
     </div>
   </div>
 </section>

@@ -4,47 +4,71 @@
 {% block page_heading %}Подключение #{{ connection.id }}{% endblock %}
 
 {% block content %}
-{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <a class="btn btn-outline-secondary" href="/connections"><i class="bi bi-arrow-left"></i> К списку</a>
-  <div class="d-flex gap-2">
-    <a class="btn btn-outline-primary" href="/connections/{{ connection.id }}/edit">Редактировать</a>
-    {% if user.role.value == 'admin' %}<form method="post" action="/connections/{{ connection.id }}/delete"><button class="btn btn-outline-danger" type="submit">Удалить</button></form>{% endif %}
+{% if error %}
+  <div class="alert alert-danger d-flex align-items-center gap-2" role="alert"><i class="bi bi-exclamation-triangle"></i><div>{{ error }}</div></div>
+{% endif %}
+
+<div class="row align-items-center g-3 mb-4">
+  <div class="col-lg">
+    <a class="btn btn-outline-secondary" href="/connections"><i class="bi bi-arrow-left"></i> К списку</a>
+  </div>
+  <div class="col-lg-auto">
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-outline-primary" href="/connections/{{ connection.id }}/edit"><i class="bi bi-pencil"></i> Редактировать</a>
+      {% if user.role.value == 'admin' %}<form method="post" action="/connections/{{ connection.id }}/delete"><button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash"></i> Удалить</button></form>{% endif %}
+    </div>
   </div>
 </div>
 
-<div class="row g-3">
+<div class="row g-3 mb-4">
   <div class="col-lg-8">
-    <section class="tm-panel h-100">
-      <h2 class="h5 mb-3">Данные подключения</h2>
-      <div class="row g-3">
-        <div class="col-md-6"><div class="text-secondary small">Дата</div><div class="fw-semibold">{{ connection.connection_date.strftime('%d.%m.%Y') }}</div></div>
-        <div class="col-md-6"><div class="text-secondary small">Склад</div><div class="fw-semibold">{{ connection.warehouse.name }}</div></div>
-        <div class="col-md-6"><div class="text-secondary small">Провайдер</div><div class="fw-semibold">{{ connection.client.provider.value }}</div></div>
-        <div class="col-md-6"><div class="text-secondary small">Тип</div><div class="fw-semibold">{{ connection.connection_type.value }}</div></div>
-        <div class="col-md-6"><div class="text-secondary small">Договор / телефон</div><div class="fw-semibold">{{ connection.client.contract_number }}</div></div>
-        <div class="col-md-6"><div class="text-secondary small">Логин</div><div class="fw-semibold">{{ connection.client.login }}</div></div>
-        <div class="col-12"><div class="text-secondary small">Адрес</div><div class="fw-semibold">{{ connection.client.address }}</div></div>
-        <div class="col-12"><div class="text-secondary small">Комментарий</div><div>{{ connection.comment or '—' }}</div></div>
+    <section class="card h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0">Данные подключения</h2>
+        <span class="badge text-bg-primary">{{ connection.connection_type.value }}</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-6"><div class="text-secondary small">Дата</div><div class="fw-semibold">{{ connection.connection_date.strftime('%d.%m.%Y') }}</div></div>
+          <div class="col-md-6"><div class="text-secondary small">Склад</div><div class="fw-semibold">{{ connection.warehouse.name }}</div></div>
+          <div class="col-md-6"><div class="text-secondary small">Провайдер</div><span class="badge text-bg-secondary">{{ connection.client.provider.value }}</span></div>
+          <div class="col-md-6"><div class="text-secondary small">Тип</div><div class="fw-semibold">{{ connection.connection_type.value }}</div></div>
+          <div class="col-md-6"><div class="text-secondary small">Договор / телефон</div><div class="fw-semibold">{{ connection.client.contract_number }}</div></div>
+          <div class="col-md-6"><div class="text-secondary small">Логин</div><div class="fw-semibold">{{ connection.client.login }}</div></div>
+          <div class="col-12"><div class="text-secondary small">Адрес</div><div class="fw-semibold">{{ connection.client.address }}</div></div>
+          <div class="col-12"><div class="text-secondary small">Комментарий</div><div>{{ connection.comment or '—' }}</div></div>
+        </div>
       </div>
     </section>
   </div>
   <div class="col-lg-4">
-    <section class="tm-panel h-100">
-      <h2 class="h5 mb-3">Финансы</h2>
-      <div class="d-grid gap-2">
-        <div class="d-flex justify-content-between"><span>Цена</span><strong>{{ connection.price }}</strong></div>
-        <div class="d-flex justify-content-between"><span>Монтажник</span><strong>{{ connection.installer_amount }}</strong></div>
-        <div class="d-flex justify-content-between"><span>Офис</span><strong>{{ connection.office_amount }}</strong></div>
-      </div>
+    <section class="card h-100">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Финансы</h2></div>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between"><span>Цена</span><strong>{{ connection.price }}</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Монтажник</span><strong>{{ connection.installer_amount }}</strong></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Офис</span><strong>{{ connection.office_amount }}</strong></li>
+      </ul>
     </section>
   </div>
 </div>
 
-<section class="tm-panel mt-3">
-  <h2 class="h5 mb-3">Материалы</h2>
-  <div class="table-responsive"><table class="table mb-0"><thead><tr><th>Материал</th><th class="text-end">Количество</th></tr></thead><tbody>
-    {% for item in connection.connection_materials %}<tr><td>{{ item.material.name }}</td><td class="text-end">{{ item.quantity }}</td></tr>{% else %}<tr><td colspan="2" class="text-center text-secondary py-4">Материалы не списывались</td></tr>{% endfor %}
-  </tbody></table></div>
+<section class="card">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <h2 class="h5 mb-0">Материалы</h2>
+    <span class="badge text-bg-light text-dark border">{{ connection.connection_materials|length }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle mb-0">
+      <thead><tr><th>Материал</th><th class="text-end">Количество</th></tr></thead>
+      <tbody>
+        {% for item in connection.connection_materials %}
+          <tr><td>{{ item.material.name }}</td><td class="text-end fw-semibold">{{ item.quantity }}</td></tr>
+        {% else %}
+          <tr><td colspan="2" class="text-center text-secondary py-4">Материалы не списывались</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% endblock %}

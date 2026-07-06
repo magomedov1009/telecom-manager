@@ -6,66 +6,108 @@
 {% block content %}
 <div class="row g-3 mb-4">
   <div class="col-md-6 col-xl-3">
-    <div class="tm-metric">
-      <span>Клиенты</span>
-      <strong>{{ stats.clients }}</strong>
+    <div class="card tm-stat-card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="text-secondary small">Клиенты</div>
+            <div class="display-6 fw-semibold">{{ stats.clients }}</div>
+          </div>
+          <span class="badge text-bg-primary"><i class="bi bi-people"></i></span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-md-6 col-xl-3">
-    <div class="tm-metric">
-      <span>Подключения</span>
-      <strong>{{ stats.connections }}</strong>
+    <div class="card tm-stat-card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="text-secondary small">Подключения</div>
+            <div class="display-6 fw-semibold">{{ stats.connections }}</div>
+          </div>
+          <span class="badge text-bg-success"><i class="bi bi-router"></i></span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-md-6 col-xl-3">
-    <div class="tm-metric">
-      <span>Материалы</span>
-      <strong>{{ stats.materials }}</strong>
+    <div class="card tm-stat-card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="text-secondary small">Материалы</div>
+            <div class="display-6 fw-semibold">{{ stats.materials }}</div>
+          </div>
+          <span class="badge text-bg-info"><i class="bi bi-box-seam"></i></span>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-md-6 col-xl-3">
-    <div class="tm-metric">
-      <span>Операции склада</span>
-      <strong>{{ stats.inventory_transactions }}</strong>
+    <div class="card tm-stat-card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="text-secondary small">Операции склада</div>
+            <div class="display-6 fw-semibold">{{ stats.inventory_transactions }}</div>
+          </div>
+          <span class="badge text-bg-warning"><i class="bi bi-arrow-left-right"></i></span>
+        </div>
+      </div>
     </div>
   </div>
 </div>
-
 
 <div class="row g-3 mb-4">
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Сегодня получено</span><strong>{{ finance_stats.today_received }}</strong></div></div>
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>За месяц получено</span><strong>{{ finance_stats.month_received }}</strong></div></div>
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Монтажнику начислено</span><strong>{{ finance_stats.installer_accrued }}</strong></div></div>
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Офису начислено</span><strong>{{ finance_stats.office_accrued }}</strong></div></div>
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Офис должен мне</span><strong>{{ finance_stats.office_owes_me }}</strong></div></div>
-  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Я должен офису</span><strong>{{ finance_stats.i_owe_office }}</strong></div></div>
+  {% for label, value in [
+    ('Сегодня получено', finance_stats.today_received),
+    ('За месяц получено', finance_stats.month_received),
+    ('Монтажнику начислено', finance_stats.installer_accrued),
+    ('Офису начислено', finance_stats.office_accrued),
+    ('Офис должен мне', finance_stats.office_owes_me),
+    ('Я должен офису', finance_stats.i_owe_office)
+  ] %}
+    <div class="col-md-6 col-xl-2">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="text-secondary small">{{ label }}</div>
+          <div class="h4 mb-0">{{ value }}</div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
 </div>
+
 <div class="row g-3">
   <div class="col-lg-8">
-    <section class="tm-panel">
-      <div class="d-flex justify-content-between align-items-center mb-3">
+    <section class="card h-100">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
         <h2 class="h5 mb-0">Операционный обзор</h2>
-        <span class="badge text-bg-primary">Sprint 1</span>
+        <span class="badge text-bg-primary">Sprint UI</span>
       </div>
-      <div class="tm-empty-state">
-        <i class="bi bi-activity"></i>
-        <div>
-          <h3 class="h6 mb-1">Рабочее пространство готово</h3>
-          <p class="text-secondary mb-0">Авторизация, навигация, Alembic и базовая структура приложения подключены.</p>
+      <div class="card-body">
+        <div class="alert alert-primary d-flex align-items-center gap-3 mb-0" role="alert">
+          <i class="bi bi-activity fs-3"></i>
+          <div>
+            <h3 class="h6 mb-1">Рабочее пространство готово</h3>
+            <p class="mb-0">Авторизация, навигация, склад, подключения и финансы подключены.</p>
+          </div>
         </div>
       </div>
     </section>
   </div>
   <div class="col-lg-4">
-    <section class="tm-panel">
-      <h2 class="h5 mb-3">Финансы</h2>
-      <div class="d-grid gap-3">
-        <div class="d-flex justify-content-between"><span>Транзакции</span><strong>{{ stats.finance_transactions }}</strong></div>
-        <div class="d-flex justify-content-between"><span>Расходы</span><strong>{{ stats.expenses }}</strong></div>
-        <div class="d-flex justify-content-between"><span>Допработы</span><strong>{{ stats.extra_works }}</strong></div>
+    <section class="card h-100">
+      <div class="card-header bg-white">
+        <h2 class="h5 mb-0">Финансы</h2>
       </div>
+      <ul class="list-group list-group-flush">
+        <li class="list-group-item d-flex justify-content-between"><span>Транзакции</span><span class="badge text-bg-primary">{{ stats.finance_transactions }}</span></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Расходы</span><span class="badge text-bg-secondary">{{ stats.expenses }}</span></li>
+        <li class="list-group-item d-flex justify-content-between"><span>Допработы</span><span class="badge text-bg-secondary">{{ stats.extra_works }}</span></li>
+      </ul>
     </section>
   </div>
 </div>
 {% endblock %}
-
