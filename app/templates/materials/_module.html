@@ -1,4 +1,4 @@
-﻿<div id="materials-module">
+<div id="materials-module">
   {% if data.error %}
     <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
       <i class="bi bi-exclamation-triangle"></i>
@@ -12,19 +12,22 @@
     </div>
   {% endif %}
 
-  <div class="row align-items-center g-3 mb-4">
-    <div class="col-lg">
-      <h1 class="h4 mb-1">Материалы и остатки</h1>
-      <p class="text-secondary mb-0">Остатки вычисляются по сумме операций InventoryTransaction.</p>
-    </div>
-    <div class="col-lg-auto">
-      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#materialOperationModal">
-        <i class="bi bi-plus-lg"></i>
-        Новая операция
-      </button>
+  <div class="card border-0 bg-primary text-white mb-4">
+    <div class="card-body p-4">
+      <div class="row align-items-center g-3">
+        <div class="col-lg">
+          <div class="text-white-50 text-uppercase small fw-semibold mb-2">Складской учет</div>
+          <h1 class="h2 mb-1">Материалы и остатки</h1>
+          <p class="mb-0 text-white-75">Остатки вычисляются по сумме операций InventoryTransaction.</p>
+        </div>
+        <div class="col-lg-auto">
+          <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#materialOperationModal">
+            <i class="bi bi-plus-lg me-2"></i>Новая операция
+          </button>
+        </div>
+      </div>
     </div>
   </div>
-
   <div class="row g-3 mb-4">
     {% for warehouse in data.warehouses %}
       <div class="col-md-6 col-xl-4">
@@ -53,7 +56,7 @@
     {% endfor %}
   </div>
 
-  <section class="card mb-4">
+  <section class="card mb-4 tm-data-card">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
       <h2 class="h5 mb-0">Текущие остатки</h2>
       <span class="badge text-bg-secondary">InventoryTransaction</span>
@@ -91,7 +94,7 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card tm-data-card">
     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-3">
       <h2 class="h5 mb-0">История операций</h2>
       <span class="badge text-bg-light text-dark border">Всего: {{ data.history.total }}</span>

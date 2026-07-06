@@ -5,54 +5,18 @@
 
 {% block content %}
 <div class="row g-3 mb-4">
-  <div class="col-md-6 col-xl-3">
-    <div class="card tm-stat-card h-100">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-start">
-          <div>
-            <div class="text-secondary small">Клиенты</div>
-            <div class="display-6 fw-semibold">{{ stats.clients }}</div>
+  <div class="col-12">
+    <div class="card border-0 bg-primary text-white overflow-hidden">
+      <div class="card-body p-4">
+        <div class="row align-items-center g-3">
+          <div class="col-lg">
+            <div class="text-white-50 text-uppercase small fw-semibold mb-2">Операционная панель</div>
+            <h2 class="h1 mb-2">Telecom Manager</h2>
+            <p class="mb-0 text-white-75">Подключения, складские движения и финансы в одном рабочем интерфейсе.</p>
           </div>
-          <span class="badge text-bg-primary"><i class="bi bi-people"></i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-3">
-    <div class="card tm-stat-card h-100">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-start">
-          <div>
-            <div class="text-secondary small">Подключения</div>
-            <div class="display-6 fw-semibold">{{ stats.connections }}</div>
+          <div class="col-lg-auto">
+            <a class="btn btn-light" href="/connections/new"><i class="bi bi-plus-lg me-2"></i>Новое подключение</a>
           </div>
-          <span class="badge text-bg-success"><i class="bi bi-router"></i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-3">
-    <div class="card tm-stat-card h-100">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-start">
-          <div>
-            <div class="text-secondary small">Материалы</div>
-            <div class="display-6 fw-semibold">{{ stats.materials }}</div>
-          </div>
-          <span class="badge text-bg-info"><i class="bi bi-box-seam"></i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="col-md-6 col-xl-3">
-    <div class="card tm-stat-card h-100">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-start">
-          <div>
-            <div class="text-secondary small">Операции склада</div>
-            <div class="display-6 fw-semibold">{{ stats.inventory_transactions }}</div>
-          </div>
-          <span class="badge text-bg-warning"><i class="bi bi-arrow-left-right"></i></span>
         </div>
       </div>
     </div>
@@ -60,19 +24,45 @@
 </div>
 
 <div class="row g-3 mb-4">
-  {% for label, value in [
-    ('Сегодня получено', finance_stats.today_received),
-    ('За месяц получено', finance_stats.month_received),
-    ('Монтажнику начислено', finance_stats.installer_accrued),
-    ('Офису начислено', finance_stats.office_accrued),
-    ('Офис должен мне', finance_stats.office_owes_me),
-    ('Я должен офису', finance_stats.i_owe_office)
+  {% for label, value, icon, color in [
+    ('Клиенты', stats.clients, 'bi-people', 'primary'),
+    ('Подключения', stats.connections, 'bi-router', 'success'),
+    ('Материалы', stats.materials, 'bi-box-seam', 'info'),
+    ('Операции склада', stats.inventory_transactions, 'bi-arrow-left-right', 'warning')
+  ] %}
+    <div class="col-sm-6 col-xl-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <div class="d-flex align-items-center gap-3">
+            <span class="tm-stat-icon bg-{{ color }}-lt text-{{ color }}"><i class="bi {{ icon }}"></i></span>
+            <div>
+              <div class="text-secondary small">{{ label }}</div>
+              <div class="h1 mb-0">{{ value }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3 mb-4">
+  {% for label, value, color in [
+    ('Сегодня получено', finance_stats.today_received, 'primary'),
+    ('За месяц получено', finance_stats.month_received, 'success'),
+    ('Монтажнику начислено', finance_stats.installer_accrued, 'info'),
+    ('Офису начислено', finance_stats.office_accrued, 'secondary'),
+    ('Офис должен мне', finance_stats.office_owes_me, 'warning'),
+    ('Я должен офису', finance_stats.i_owe_office, 'danger')
   ] %}
     <div class="col-md-6 col-xl-2">
       <div class="card h-100">
         <div class="card-body">
-          <div class="text-secondary small">{{ label }}</div>
-          <div class="h4 mb-0">{{ value }}</div>
+          <div class="subheader">{{ label }}</div>
+          <div class="h3 mb-2">{{ value }}</div>
+          <div class="progress progress-sm">
+            <div class="progress-bar bg-{{ color }}" style="width: 74%" role="progressbar" aria-label="{{ label }}"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -80,33 +70,50 @@
 </div>
 
 <div class="row g-3">
-  <div class="col-lg-8">
+  <div class="col-xl-8">
     <section class="card h-100">
-      <div class="card-header bg-white d-flex justify-content-between align-items-center">
-        <h2 class="h5 mb-0">Операционный обзор</h2>
-        <span class="badge text-bg-primary">Sprint UI</span>
-      </div>
-      <div class="card-body">
-        <div class="alert alert-primary d-flex align-items-center gap-3 mb-0" role="alert">
-          <i class="bi bi-activity fs-3"></i>
-          <div>
-            <h3 class="h6 mb-1">Рабочее пространство готово</h3>
-            <p class="mb-0">Авторизация, навигация, склад, подключения и финансы подключены.</p>
-          </div>
+      <div class="card-header">
+        <div>
+          <h2 class="card-title mb-0">Операционные разделы</h2>
+          <div class="card-subtitle">Состояние ключевых модулей</div>
         </div>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle mb-0">
+          <thead><tr><th>Раздел</th><th>Показатель</th><th>Статус</th><th class="text-end">Действие</th></tr></thead>
+          <tbody>
+            <tr><td><span class="fw-semibold">Подключения</span></td><td>{{ stats.connections }}</td><td><span class="badge text-bg-success">Активен</span></td><td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/connections">Открыть</a></td></tr>
+            <tr><td><span class="fw-semibold">Материалы</span></td><td>{{ stats.inventory_transactions }}</td><td><span class="badge text-bg-success">Активен</span></td><td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/materials">Открыть</a></td></tr>
+            <tr><td><span class="fw-semibold">Финансы</span></td><td>{{ stats.finance_transactions }}</td><td><span class="badge text-bg-success">Активен</span></td><td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/finance">Открыть</a></td></tr>
+            <tr><td><span class="fw-semibold">Расходы</span></td><td>{{ stats.expenses }}</td><td><span class="badge text-bg-secondary">Раздел</span></td><td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="/expenses">Открыть</a></td></tr>
+            <tr><td><span class="fw-semibold">Допработы</span></td><td>{{ stats.extra_works }}</td><td><span class="badge text-bg-secondary">Раздел</span></td><td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="/extra-works">Открыть</a></td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
   </div>
-  <div class="col-lg-4">
+  <div class="col-xl-4">
     <section class="card h-100">
-      <div class="card-header bg-white">
-        <h2 class="h5 mb-0">Финансы</h2>
+      <div class="card-header">
+        <h2 class="card-title mb-0">Взаиморасчеты</h2>
       </div>
-      <ul class="list-group list-group-flush">
-        <li class="list-group-item d-flex justify-content-between"><span>Транзакции</span><span class="badge text-bg-primary">{{ stats.finance_transactions }}</span></li>
-        <li class="list-group-item d-flex justify-content-between"><span>Расходы</span><span class="badge text-bg-secondary">{{ stats.expenses }}</span></li>
-        <li class="list-group-item d-flex justify-content-between"><span>Допработы</span><span class="badge text-bg-secondary">{{ stats.extra_works }}</span></li>
-      </ul>
+      <div class="list-group list-group-flush">
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span>Офис должен мне</span>
+          <span class="badge text-bg-warning">{{ finance_stats.office_owes_me }}</span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span>Я должен офису</span>
+          <span class="badge text-bg-danger">{{ finance_stats.i_owe_office }}</span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span>Баланс</span>
+          <strong>{{ finance_stats.balance }}</strong>
+        </div>
+      </div>
+      <div class="card-footer bg-white">
+        <a class="btn btn-primary w-100" href="/finance"><i class="bi bi-cash-coin me-2"></i>Перейти в финансы</a>
+      </div>
     </section>
   </div>
 </div>

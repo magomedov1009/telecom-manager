@@ -4,43 +4,47 @@
 
 {% block guest_content %}
 <div class="tm-login-page">
-  <div class="card tm-login-card shadow-sm">
-    <div class="card-body p-4 p-md-5">
-      <div class="mb-4">
-        <div class="tm-brand-mark mb-3">TM</div>
-        <h1 class="h3 fw-bold mb-2">Telecom Manager</h1>
-        <p class="text-secondary mb-0">Войдите в систему управления подключениями, складом и финансами.</p>
+  <div class="container-tight py-4">
+    <div class="text-center mb-4">
+      <div class="tm-login-brand bg-primary text-white mx-auto mb-3 shadow-sm">TM</div>
+      <h1 class="h2 mb-1">Telecom Manager</h1>
+      <p class="text-secondary mb-0">Управление подключениями, складом и финансами</p>
+    </div>
+
+    <div class="card tm-login-card card-md shadow-sm mx-auto">
+      <div class="card-body p-4 p-md-5">
+        <h2 class="h3 text-center mb-4">Вход в систему</h2>
+
+        {% if error %}
+          <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+            <i class="bi bi-exclamation-triangle"></i>
+            <div>{{ error }}</div>
+          </div>
+        {% endif %}
+
+        <form method="post" action="/login" class="row g-3">
+          <div class="col-12">
+            <label class="form-label" for="username">Логин</label>
+            <div class="input-group input-group-flat">
+              <span class="input-group-text"><i class="bi bi-person"></i></span>
+              <input class="form-control" id="username" name="username" value="{{ username | default('') }}" autocomplete="username" required autofocus>
+            </div>
+          </div>
+          <div class="col-12">
+            <label class="form-label" for="password">Пароль</label>
+            <div class="input-group input-group-flat">
+              <span class="input-group-text"><i class="bi bi-key"></i></span>
+              <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required>
+            </div>
+          </div>
+          <div class="col-12 d-grid mt-2">
+            <button class="btn btn-primary btn-lg" type="submit">
+              <i class="bi bi-shield-lock me-2"></i>
+              Войти
+            </button>
+          </div>
+        </form>
       </div>
-
-      {% if error %}
-        <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
-          <i class="bi bi-exclamation-triangle"></i>
-          <div>{{ error }}</div>
-        </div>
-      {% endif %}
-
-      <form method="post" action="/login" class="row g-3">
-        <div class="col-12">
-          <label class="form-label" for="username">Логин</label>
-          <div class="input-group input-group-lg">
-            <span class="input-group-text"><i class="bi bi-person"></i></span>
-            <input class="form-control" id="username" name="username" value="{{ username | default('') }}" autocomplete="username" required autofocus>
-          </div>
-        </div>
-        <div class="col-12">
-          <label class="form-label" for="password">Пароль</label>
-          <div class="input-group input-group-lg">
-            <span class="input-group-text"><i class="bi bi-key"></i></span>
-            <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required>
-          </div>
-        </div>
-        <div class="col-12 d-grid">
-          <button class="btn btn-primary btn-lg" type="submit">
-            <i class="bi bi-shield-lock"></i>
-            Войти
-          </button>
-        </div>
-      </form>
     </div>
   </div>
 </div>
