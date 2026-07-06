@@ -252,18 +252,18 @@ def normalize_client_identity(
 ) -> tuple[str, str, str | None]:
     normalized_contract = contract_number.strip() if contract_number else ""
     normalized_login = login.strip() if login else ""
-    normalized_phone = phone.strip() if phone else None
 
     if provider == Provider.ELLKO:
         if not normalized_login:
-            raise ConnectionError("Для Эллко обязателен логин клиента")
-        return normalized_contract or normalized_login, normalized_login, normalized_phone
+            raise ConnectionError("Для Эллко обязателен номер договора")
+        return normalized_login, normalized_login, normalized_contract or None
 
     if provider == Provider.OPTIMASET:
-        if not normalized_phone:
-            raise ConnectionError("Для Оптимасеть обязателен телефон")
-        phone_contract = normalized_phone[1:] if normalized_phone.startswith("8") and len(normalized_phone) > 1 else normalized_phone
-        return normalized_contract or phone_contract, normalized_login or phone_contract, normalized_phone
+        if not normalized_login:
+            raise ConnectionError("Для Оптимасеть обязателен номер телефона")
+        phone_value = normalized_login
+        phone_contract = phone_value[1:] if phone_value.startswith("8") and len(phone_value) > 1 else phone_value
+        return normalized_contract or phone_contract, phone_contract, phone_value
 
     raise ConnectionError("Неизвестный провайдер")
 
