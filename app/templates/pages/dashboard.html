@@ -1,0 +1,71 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Dashboard | {{ app_name }}{% endblock %}
+{% block page_heading %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-3">
+    <div class="tm-metric">
+      <span>Клиенты</span>
+      <strong>{{ stats.clients }}</strong>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="tm-metric">
+      <span>Подключения</span>
+      <strong>{{ stats.connections }}</strong>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="tm-metric">
+      <span>Материалы</span>
+      <strong>{{ stats.materials }}</strong>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="tm-metric">
+      <span>Операции склада</span>
+      <strong>{{ stats.inventory_transactions }}</strong>
+    </div>
+  </div>
+</div>
+
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Сегодня получено</span><strong>{{ finance_stats.today_received }}</strong></div></div>
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>За месяц получено</span><strong>{{ finance_stats.month_received }}</strong></div></div>
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Монтажнику начислено</span><strong>{{ finance_stats.installer_accrued }}</strong></div></div>
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Офису начислено</span><strong>{{ finance_stats.office_accrued }}</strong></div></div>
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Офис должен мне</span><strong>{{ finance_stats.office_owes_me }}</strong></div></div>
+  <div class="col-md-6 col-xl-2"><div class="tm-metric"><span>Я должен офису</span><strong>{{ finance_stats.i_owe_office }}</strong></div></div>
+</div>
+<div class="row g-3">
+  <div class="col-lg-8">
+    <section class="tm-panel">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Операционный обзор</h2>
+        <span class="badge text-bg-primary">Sprint 1</span>
+      </div>
+      <div class="tm-empty-state">
+        <i class="bi bi-activity"></i>
+        <div>
+          <h3 class="h6 mb-1">Рабочее пространство готово</h3>
+          <p class="text-secondary mb-0">Авторизация, навигация, Alembic и базовая структура приложения подключены.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="col-lg-4">
+    <section class="tm-panel">
+      <h2 class="h5 mb-3">Финансы</h2>
+      <div class="d-grid gap-3">
+        <div class="d-flex justify-content-between"><span>Транзакции</span><strong>{{ stats.finance_transactions }}</strong></div>
+        <div class="d-flex justify-content-between"><span>Расходы</span><strong>{{ stats.expenses }}</strong></div>
+        <div class="d-flex justify-content-between"><span>Допработы</span><strong>{{ stats.extra_works }}</strong></div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+

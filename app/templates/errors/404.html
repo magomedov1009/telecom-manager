@@ -1,0 +1,27 @@
+﻿{% extends "base.html" %}
+
+{% block title %}404 | {{ app_name }}{% endblock %}
+{% block page_heading %}Страница не найдена{% endblock %}
+
+{% block guest_content %}
+<div class="tm-login-page">
+  <div class="tm-login-card text-center">
+    <div class="display-5 fw-bold text-primary mb-3">404</div>
+    <h1 class="h4 mb-2">Страница не найдена</h1>
+    <p class="text-secondary mb-4">Адрес {{ missing_path }} не существует или был перемещён.</p>
+    <a class="btn btn-primary" href="/login">Перейти ко входу</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<section class="tm-panel">
+  <div class="tm-empty-state">
+    <i class="bi bi-exclamation-triangle"></i>
+    <div>
+      <h1 class="h5 mb-1">Страница не найдена</h1>
+      <p class="text-secondary mb-0">Адрес {{ missing_path }} не существует или был перемещён.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}

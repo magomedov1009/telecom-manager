@@ -1,0 +1,52 @@
+﻿{% extends "base.html" %}
+
+{% set connection = form.connection %}
+{% block title %}{% if mode == 'edit' %}Редактирование{% else %}Новое подключение{% endif %} | {{ app_name }}{% endblock %}
+{% block page_heading %}{% if mode == 'edit' %}Редактирование подключения{% else %}Новое подключение{% endif %}{% endblock %}
+
+{% block content %}
+{% if form.error %}<div class="alert alert-danger">{{ form.error }}</div>{% endif %}
+<form class="tm-panel" method="post" action="{% if mode == 'edit' %}/connections/{{ connection.id }}/edit{% else %}/connections{% endif %}">
+  <div class="row g-3">
+    <div class="col-md-3"><label class="form-label">Дата подключения</label><input class="form-control" type="date" name="connection_date" value="{{ connection.connection_date if connection else '' }}" required></div>
+    <div class="col-md-3"><label class="form-label">Провайдер</label><select class="form-select" name="provider" required>{% for provider in form.providers %}<option value="{{ provider.value }}" {% if connection and connection.client.provider == provider %}selected{% endif %}>{{ form.provider_labels[provider] }}</option>{% endfor %}</select></div>
+    <div class="col-md-3"><label class="form-label">Тип подключения</label><select class="form-select" name="connection_type" required>{% for type in form.connection_types %}<option value="{{ type.value }}" {% if connection and connection.connection_type == type %}selected{% endif %}>{{ form.connection_type_labels[type] }}</option>{% endfor %}</select></div>
+    <div class="col-md-3"><label class="form-label">Склад</label><select class="form-select" name="warehouse_id" required>{% for warehouse in form.warehouses %}<option value="{{ warehouse.id }}" {% if connection and connection.warehouse_id == warehouse.id %}selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}</select></div>
+
+    <div class="col-md-4"><label class="form-label">Номер договора / телефон без 8</label><input class="form-control" name="contract_number" value="{{ connection.client.contract_number if connection else '' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Логин клиента</label><input class="form-control" name="login" value="{{ connection.client.login if connection else '' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Телефон</label><input class="form-control" name="phone" value="{{ connection.client.phone if connection and connection.client.phone else '' }}"></div>
+
+    <div class="col-12"><label class="form-label">Адрес подключения</label><input class="form-control" name="address" value="{{ connection.client.address if connection else '' }}" required></div>
+    <div class="col-md-6"><label class="form-label">Комментарий клиента</label><textarea class="form-control" name="client_comment" rows="3">{{ connection.client.comment if connection and connection.client.comment else '' }}</textarea></div>
+    <div class="col-md-6"><label class="form-label">Комментарий подключения</label><textarea class="form-control" name="connection_comment" rows="3">{{ connection.comment if connection and connection.comment else '' }}</textarea></div>
+  </div>
+
+  <hr class="my-4">
+  <h2 class="h5 mb-3">Материалы</h2>
+  <div class="row g-2 mb-2 fw-semibold text-secondary small"><div class="col-md-7">Материал</div><div class="col-md-3">Количество</div><div class="col-md-2">Ед.</div></div>
+  {% set existing = connection.connection_materials if connection else [] %}
+  {% for idx in range(0, 6) %}
+    {% set row = existing[idx] if idx < existing|length else None %}
+    <div class="row g-2 mb-2">
+      <div class="col-md-7"><select class="form-select" name="material_id"><option value="0">Не выбрано</option>{% for material in form.materials %}<option value="{{ material.id }}" {% if row and row.material_id == material.id %}selected{% endif %}>{{ material.name }}</option>{% endfor %}</select></div>
+      <div class="col-md-3"><input class="form-control" name="material_quantity" value="{{ row.quantity if row else '' }}" inputmode="decimal"></div>
+      <div class="col-md-2"><div class="form-control bg-light">{% if row %}{{ form.unit_labels[row.material.unit] }}{% else %}—{% endif %}</div></div>
+    </div>
+  {% endfor %}
+
+  <hr class="my-4">
+  <h2 class="h5 mb-3">Финансы</h2>
+  <div class="row g-3">
+    <div class="col-md-4"><label class="form-label">Цена подключения</label><input class="form-control" name="price" value="{{ connection.price if connection else '1000' }}" required></div>
+    <div class="col-md-4"><label class="form-label">Монтажник</label><input class="form-control" name="installer_amount" value="{{ connection.installer_amount if connection else '1000' }}"></div>
+    <div class="col-md-4"><label class="form-label">Офис</label><input class="form-control" name="office_amount" value="{{ connection.office_amount if connection else '0' }}"></div>
+  </div>
+  <div class="form-text mt-2">При 1000: монтажник 1000, офис 0. При 3000: монтажник 1000, офис 2000. Для другой суммы заполните доли вручную.</div>
+
+  <div class="d-flex justify-content-between align-items-center mt-4">
+    <a class="btn btn-outline-secondary" href="/connections">Назад</a>
+    <button class="btn btn-primary" type="submit">Сохранить подключение</button>
+  </div>
+</form>
+{% endblock %}
