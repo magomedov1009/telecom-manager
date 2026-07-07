@@ -7,7 +7,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
   <div>
     <h1 class="h4 mb-1">Список клиентов</h1>
-    <p class="text-secondary mb-0">Поиск, фильтрация и быстрый переход к карточке подключения.</p>
+    <p class="text-secondary mb-0">Поиск, фильтрация и быстрый переход к карточке клиента.</p>
   </div>
   <a class="btn btn-primary" href="/connections/new"><i class="bi bi-plus-lg me-2"></i>Добавить клиента</a>
 </div>
@@ -66,11 +66,7 @@
             <td><span class="badge {% if item.connection_id %}text-bg-success{% else %}text-bg-light text-dark border{% endif %}">{{ item.status }}</span></td>
             <td>{{ item.connection_date.strftime('%d.%m.%Y') if item.connection_date else '—' }}</td>
             <td class="text-end">
-              {% if item.connection_id %}
-                <a class="btn btn-sm btn-outline-primary" href="/connections/{{ item.connection_id }}"><i class="bi bi-eye me-1"></i>Открыть карточку</a>
-              {% else %}
-                <button class="btn btn-sm btn-outline-secondary" type="button" disabled>Открыть карточку</button>
-              {% endif %}
+              <a class="btn btn-sm btn-outline-primary" href="/clients/{{ item.client.id }}"><i class="bi bi-eye me-1"></i>Открыть карточку</a>
             </td>
           </tr>
         {% else %}

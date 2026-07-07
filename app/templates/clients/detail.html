@@ -1,0 +1,86 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Клиент #{{ data.client.id }} | {{ app_name }}{% endblock %}
+{% block page_heading %}Клиент #{{ data.client.id }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+  <a class="btn btn-outline-secondary" href="/clients"><i class="bi bi-arrow-left me-1"></i>К списку клиентов</a>
+  <button class="btn btn-outline-primary" type="button" disabled><i class="bi bi-pencil me-1"></i>Редактировать клиента</button>
+</div>
+
+<section class="card mb-4">
+  <div class="card-body p-4">
+    <div class="row align-items-start g-4">
+      <div class="col-lg-7">
+        <div class="text-secondary small text-uppercase fw-semibold mb-2">Карточка клиента</div>
+        <h1 class="h2 mb-2">{{ data.full_name }}</h1>
+        <div class="d-flex flex-wrap gap-2">
+          <span class="badge text-bg-secondary">{{ data.provider_labels[data.client.provider] }}</span>
+          <span class="badge {% if data.connection_date %}text-bg-success{% else %}text-bg-light text-dark border{% endif %}">{{ data.status }}</span>
+        </div>
+      </div>
+      <div class="col-lg-5">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <div class="text-secondary small">Идентификатор клиента</div>
+            <div class="fw-semibold">{{ data.identifier }}</div>
+          </div>
+          <div class="col-sm-6">
+            <div class="text-secondary small">Дата подключения</div>
+            <div class="fw-semibold">{{ data.connection_date.strftime('%d.%m.%Y') if data.connection_date else '—' }}</div>
+          </div>
+          <div class="col-sm-6">
+            <div class="text-secondary small">Телефон</div>
+            <div class="fw-semibold">{{ data.phone }}</div>
+          </div>
+          <div class="col-sm-6">
+            <div class="text-secondary small">ONU</div>
+            <div class="fw-semibold">{{ data.onu }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="text-secondary small">Адрес</div>
+        <div class="fw-semibold">{{ data.client.address }}</div>
+      </div>
+      <div class="col-lg-6">
+        <div class="text-secondary small">Примечание</div>
+        <div>{{ data.note }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="row g-3">
+  <div class="col-lg-4">
+    <section class="card h-100">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">История подключений</h2></div>
+      <div class="card-body">
+        <div class="alert alert-secondary mb-0" role="alert">Нет подключений</div>
+      </div>
+    </section>
+  </div>
+  <div class="col-lg-4">
+    <section class="card h-100">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Финансовые операции</h2></div>
+      <div class="card-body">
+        <div class="alert alert-secondary mb-0" role="alert">Нет финансовых операций</div>
+      </div>
+    </section>
+  </div>
+  <div class="col-lg-4">
+    <section class="card h-100">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Использованные материалы</h2></div>
+      <div class="card-body">
+        <div class="alert alert-secondary mb-0" role="alert">Материалы отсутствуют</div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
