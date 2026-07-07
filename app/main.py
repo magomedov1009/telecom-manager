@@ -1,4 +1,4 @@
-﻿from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user_optional
-from app.routers import connections, finance, materials, pages
+from app.routers import clients, connections, finance, materials, pages
 
 
 def create_app() -> FastAPI:
@@ -20,6 +20,7 @@ def create_app() -> FastAPI:
         debug=settings.app_debug,
     )
     application.mount("/static", StaticFiles(directory="app/static"), name="static")
+    application.include_router(clients.router)
     application.include_router(connections.router)
     application.include_router(finance.router)
     application.include_router(materials.router)
