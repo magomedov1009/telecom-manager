@@ -14,12 +14,14 @@ from app.routers.pages import NAV_ITEMS
 from app.services.inventory import (
     InventoryError,
     create_operation,
+    format_quantity,
     get_materials_page_data,
     normalize_filters,
 )
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["format_quantity"] = format_quantity
 
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
@@ -111,6 +113,3 @@ def create_material_operation(
     filters = normalize_filters(None, None, None, None, None, None)
     data = get_materials_page_data(db, filters=filters, page=1, error=error, success=success)
     return render_materials(request, "materials/_module.html", current_user, data)
-
-
-

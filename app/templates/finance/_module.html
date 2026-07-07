@@ -25,6 +25,8 @@
       ('За месяц получено', data.stats.month_received, 'bi-calendar3', 'success'),
       ('Монтажнику начислено', data.stats.installer_accrued, 'bi-person-check', 'info'),
       ('Офису начислено', data.stats.office_accrued, 'bi-building', 'secondary'),
+      ('Расходы', data.stats.expenses_total, 'bi-receipt', 'danger'),
+      ('Прибыль', data.stats.profit, 'bi-graph-up-arrow', 'success'),
       ('Офис должен мне', data.stats.office_owes_me, 'bi-arrow-down-circle', 'warning'),
       ('Я должен офису', data.stats.i_owe_office, 'bi-arrow-up-circle', 'danger')
     ] %}
@@ -49,9 +51,10 @@
     </div>
     <div class="card-body">
       <div class="row g-3">
-        <div class="col-md-4"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен офис</div><div class="h4 mb-0">{{ data.stats.office_owes_me }}</div></div></div></div>
-        <div class="col-md-4"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен монтажник</div><div class="h4 mb-0">{{ data.stats.i_owe_office }}</div></div></div></div>
-        <div class="col-md-4"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Итоговый баланс</div><div class="h4 mb-0">{{ data.stats.balance }}</div></div></div></div>
+        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен офис</div><div class="h4 mb-0">{{ data.stats.office_owes_me }}</div></div></div></div>
+        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен монтажник</div><div class="h4 mb-0">{{ data.stats.i_owe_office }}</div></div></div></div>
+        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Прибыль</div><div class="h4 mb-0">{{ data.stats.profit }}</div></div></div></div>
+        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Итоговый баланс</div><div class="h4 mb-0">{{ data.stats.balance }}</div></div></div></div>
       </div>
     </div>
   </section>

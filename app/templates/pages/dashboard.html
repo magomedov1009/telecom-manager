@@ -52,10 +52,12 @@
     ('За месяц получено', finance_stats.month_received, 'success'),
     ('Монтажнику начислено', finance_stats.installer_accrued, 'info'),
     ('Офису начислено', finance_stats.office_accrued, 'secondary'),
+    ('Расходы', finance_stats.expenses_total, 'danger'),
+    ('Прибыль', finance_stats.profit, 'success'),
     ('Офис должен мне', finance_stats.office_owes_me, 'warning'),
     ('Я должен офису', finance_stats.i_owe_office, 'danger')
   ] %}
-    <div class="col-md-6 col-xl-2">
+    <div class="col-md-6 col-xl-3">
       <div class="card h-100">
         <div class="card-body">
           <div class="subheader">{{ label }}</div>
@@ -105,6 +107,10 @@
         <div class="list-group-item d-flex justify-content-between align-items-center">
           <span>Я должен офису</span>
           <span class="badge text-bg-danger">{{ finance_stats.i_owe_office }}</span>
+        </div>
+        <div class="list-group-item d-flex justify-content-between align-items-center">
+          <span>Прибыль</span>
+          <strong>{{ finance_stats.profit }}</strong>
         </div>
         <div class="list-group-item d-flex justify-content-between align-items-center">
           <span>Баланс</span>

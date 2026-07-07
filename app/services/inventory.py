@@ -131,6 +131,8 @@ def parse_decimal(value: str) -> Decimal:
         raise InventoryError("Количество должно быть числом") from exc
     if amount <= 0:
         raise InventoryError("Количество должно быть больше нуля")
+    if amount != amount.to_integral_value():
+        raise InventoryError("Количество материала должно быть целым числом")
     return amount
 
 
@@ -316,6 +318,8 @@ def get_materials_page_data(
 
 
 def format_quantity(quantity: Decimal) -> str:
+    if quantity == quantity.to_integral_value():
+        return str(int(quantity))
     normalized = quantity.normalize()
     return format(normalized, "f")
 
@@ -330,6 +334,3 @@ def build_filter_query(filters: dict) -> str:
         if value:
             params[key] = value.isoformat() if hasattr(value, "isoformat") else value
     return urlencode(params)
-
-
-

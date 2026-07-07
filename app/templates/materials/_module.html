@@ -45,7 +45,7 @@
                 {% if cell.warehouse.id == warehouse.id %}
                   <li class="list-group-item d-flex justify-content-between align-items-center gap-3">
                     <span>{{ row.material.name }}</span>
-                    <span class="badge {% if cell.quantity < 0 %}text-bg-danger{% else %}text-bg-light text-dark border{% endif %}">{{ cell.quantity }} {{ row.unit_label }}</span>
+                    <span class="badge {% if cell.quantity < 0 %}text-bg-danger{% else %}text-bg-light text-dark border{% endif %}">{{ format_quantity(cell.quantity) }} {{ row.unit_label }}</span>
                   </li>
                 {% endif %}
               {% endfor %}
@@ -80,9 +80,9 @@
                 <div class="small text-secondary">{{ row.unit_label }}</div>
               </td>
               {% for cell in row.warehouse_quantities %}
-                <td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ cell.quantity }}</td>
+                <td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ format_quantity(cell.quantity) }}</td>
               {% endfor %}
-              <td class="text-end fw-semibold {% if row.total < 0 %}text-danger{% endif %}">{{ row.total }}</td>
+              <td class="text-end fw-semibold {% if row.total < 0 %}text-danger{% endif %}">{{ format_quantity(row.total) }}</td>
             </tr>
           {% else %}
             <tr>
@@ -158,7 +158,7 @@
               <td>{{ item.warehouse.name }}</td>
               <td>{{ item.material.name }}</td>
               <td><span class="badge text-bg-light text-dark border">{{ data.operation_labels[item.operation_type] }}</span></td>
-              <td class="text-end fw-semibold {% if item.quantity < 0 %}text-danger{% else %}text-success{% endif %}">{{ item.quantity }}</td>
+              <td class="text-end fw-semibold {% if item.quantity < 0 %}text-danger{% else %}text-success{% endif %}">{{ format_quantity(item.quantity) }}</td>
               <td>{{ item.comment or '' }}</td>
             </tr>
           {% else %}
@@ -234,7 +234,7 @@
               <div class="col-md-6">
                 <label class="form-label">Количество</label>
                 <div class="input-group">
-                  <input class="form-control" name="quantity" inputmode="decimal" required>
+                  <input class="form-control" name="quantity" inputmode="numeric" step="1" required>
                   <span class="input-group-text">ед.</span>
                 </div>
               </div>

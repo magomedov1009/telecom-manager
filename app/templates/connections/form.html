@@ -70,7 +70,7 @@
             {% set row = existing[idx] if idx < existing|length else None %}
             <div class="row g-2 mb-2">
               <div class="col-md-7"><select class="form-select" name="material_id"><option value="0">Не выбрано</option>{% for material in form.materials %}<option value="{{ material.id }}" {% if row and row.material_id == material.id %}selected{% endif %}>{{ material.name }}</option>{% endfor %}</select></div>
-              <div class="col-md-3"><input class="form-control" name="material_quantity" value="{{ row.quantity if row else '' }}" inputmode="decimal"></div>
+              <div class="col-md-3"><input class="form-control" name="material_quantity" value="{{ format_quantity(row.quantity) if row else '' }}" inputmode="numeric" step="1"></div>
               <div class="col-md-2"><input class="form-control bg-light" value="{% if row %}{{ form.unit_labels[row.material.unit] }}{% else %}—{% endif %}" readonly></div>
             </div>
           {% endfor %}

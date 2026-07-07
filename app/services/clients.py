@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.models.clients import Client, Connection, ConnectionMaterial
 from app.models.enums import Provider
 from app.services.connections import PROVIDER_LABELS
+from app.services.inventory import format_quantity
 
 
 @dataclass(frozen=True)
@@ -148,7 +149,7 @@ def get_client_detail_data(client: Client) -> ClientDetailData:
     if latest_connection is not None:
         for item in latest_connection.connection_materials:
             if item.material.name.upper() == "ONU":
-                onu = str(item.quantity)
+                onu = format_quantity(item.quantity)
                 break
     return ClientDetailData(
         client=client,

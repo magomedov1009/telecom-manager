@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.dependencies.auth import get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
+from app.services.inventory import format_quantity
 from app.services.connections import (
     ConnectionError,
     create_connection,
@@ -24,6 +25,7 @@ from app.services.connections import (
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["format_quantity"] = format_quantity
 
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]

@@ -38,6 +38,8 @@ class FinanceStats:
     month_received: Decimal
     installer_accrued: Decimal
     office_accrued: Decimal
+    expenses_total: Decimal
+    profit: Decimal
     office_owes_me: Decimal
     i_owe_office: Decimal
     balance: Decimal
@@ -135,6 +137,14 @@ def create_manual_transaction(
     db.commit()
 
 
+def apply_period(query, start: datetime | None = None, end: datetime | None = None):
+    if start is not None:
+        query = query.where(FinanceTransaction.created_at >= start)
+    if end is not None:
+        query = query.where(FinanceTransaction.created_at <= end)
+    return query
+
+
 def get_money_received_query(start: datetime | None = None, end: datetime | None = None):
     query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type.in_([
@@ -144,24 +154,50 @@ def get_money_received_query(start: datetime | None = None, end: datetime | None
         ]),
         FinanceTransaction.amount > 0,
     )
-    if start is not None:
-        query = query.where(FinanceTransaction.created_at >= start)
-    if end is not None:
-        query = query.where(FinanceTransaction.created_at <= end)
-    return query
+    return apply_period(query, start, end)
 
 
-def get_finance_stats(db: Session) -> FinanceStats:
+def get_income_query(start: datetime | None = None, end: datetime | None = None):
+    query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type.in_([
+            FinanceTransactionType.CONNECTION,
+            FinanceTransactionType.EXTRA_WORK,
+        ]),
+        FinanceTransaction.amount > 0,
+    )
+    return apply_period(query, start, end)
+
+
+def get_expense_query(start: datetime | None = None, end: datetime | None = None):
+    query = select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.EXPENSE
+    )
+    return apply_period(query, start, end)
+
+
+def period_from_filters(filters: dict | None) -> tuple[datetime | None, datetime | None]:
+    if not filters:
+        return None, None
+    start = datetime.combine(filters["date_from"], time.min) if filters.get("date_from") else None
+    end = datetime.combine(filters["date_to"], time.max) if filters.get("date_to") else None
+    return start, end
+
+
+def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     now = datetime.now()
     today_start = datetime.combine(now.date(), time.min)
     today_end = datetime.combine(now.date(), time.max)
     month_start = datetime(now.year, now.month, 1)
+    period_start, period_end = period_from_filters(filters)
 
     today_received = Decimal(db.scalar(get_money_received_query(today_start, today_end)) or 0)
     month_received = Decimal(db.scalar(get_money_received_query(month_start, None)) or 0)
 
     installer_accrued = Decimal(db.scalar(select(func.coalesce(func.sum(Connection.installer_amount), 0))) or 0)
     office_accrued = Decimal(db.scalar(select(func.coalesce(func.sum(Connection.office_amount), 0))) or 0)
+    expenses_total = Decimal(db.scalar(get_expense_query(period_start, period_end)) or 0)
+    income_total = Decimal(db.scalar(get_income_query(period_start, period_end)) or 0)
+    profit = income_total - expenses_total
     paid_to_office = abs(Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE)) or 0))
     paid_from_office = Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE)) or 0)
     adjustments = Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT)) or 0)
@@ -175,6 +211,8 @@ def get_finance_stats(db: Session) -> FinanceStats:
         month_received=month_received,
         installer_accrued=installer_accrued,
         office_accrued=office_accrued,
+        expenses_total=expenses_total,
+        profit=profit,
         office_owes_me=office_owes_me,
         i_owe_office=i_owe_office,
         balance=raw_balance,
@@ -229,7 +267,7 @@ def get_finance_page_data(
     success: str | None = None,
 ) -> FinancePageData:
     return FinancePageData(
-        stats=get_finance_stats(db),
+        stats=get_finance_stats(db, filters),
         journal=get_journal_page(db, filters, page),
         filters=filters,
         filter_query=build_filter_query(filters),

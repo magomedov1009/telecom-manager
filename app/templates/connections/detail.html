@@ -91,7 +91,7 @@
           <thead><tr><th>Материал</th><th class="text-end">Количество</th></tr></thead>
           <tbody>
             {% for item in connection.connection_materials %}
-              <tr><td>{{ item.material.name }}</td><td class="text-end fw-semibold">{{ item.quantity }}</td></tr>
+              <tr><td>{{ item.material.name }}</td><td class="text-end fw-semibold">{{ format_quantity(item.quantity) }}</td></tr>
             {% endfor %}
           </tbody>
         </table>

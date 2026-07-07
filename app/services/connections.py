@@ -93,6 +93,8 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
         if not material_id or not quantity_value.strip():
             continue
         quantity = parse_decimal(quantity_value, "Количество материала", allow_zero=False)
+        if quantity != quantity.to_integral_value():
+            raise ConnectionError("Количество материала должно быть целым числом")
         rows.append((material_id, quantity))
     return rows
 
@@ -496,6 +498,3 @@ def get_stock_hint(db: Session, warehouse_id: int | None, material_id: int | Non
     if not warehouse_id or not material_id:
         return None
     return get_stock_quantity(db, warehouse_id, material_id)
-
-
-
