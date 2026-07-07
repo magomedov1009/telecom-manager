@@ -1,0 +1,174 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Расходы | {{ app_name }}{% endblock %}
+{% block page_heading %}Расходы{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+  <div>
+    <h1 class="h4 mb-1">Список расходов</h1>
+    <p class="text-secondary mb-0">Учет личных расходов через финансовые операции типа EXPENSE.</p>
+  </div>
+  <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#expenseModal">
+    <i class="bi bi-plus-lg me-2"></i>Добавить расход
+  </button>
+</div>
+
+{% if data.error %}
+  <div class="alert alert-danger d-flex align-items-center" role="alert">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    <div>{{ data.error }}</div>
+  </div>
+{% endif %}
+{% if data.success %}
+  <div class="alert alert-success d-flex align-items-center" role="alert">
+    <i class="bi bi-check-circle me-2"></i>
+    <div>{{ data.success }}</div>
+  </div>
+{% endif %}
+
+<section class="card mb-4">
+  <div class="card-body">
+    <form class="row g-2" method="get" action="/expenses">
+      <div class="col-lg-4 col-md-6">
+        <div class="input-group">
+          <span class="input-group-text"><i class="bi bi-search"></i></span>
+          <input class="form-control" name="search" value="{{ data.filters.search or '' }}" placeholder="Поиск по описанию, комментарию или пользователю">
+        </div>
+      </div>
+      <div class="col-lg-3 col-md-6">
+        <select class="form-select" name="category">
+          <option value="">Все категории</option>
+          {% for key, label in data.categories %}
+            <option value="{{ key }}" {% if data.filters.category == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-lg-2 col-md-4">
+        <input class="form-control" type="date" name="date_from" value="{{ data.filters.date_from.isoformat() if data.filters.date_from else '' }}" aria-label="Дата с">
+      </div>
+      <div class="col-lg-2 col-md-4">
+        <input class="form-control" type="date" name="date_to" value="{{ data.filters.date_to.isoformat() if data.filters.date_to else '' }}" aria-label="Дата по">
+      </div>
+      <div class="col-lg-1 col-md-4 d-grid">
+        <button class="btn btn-outline-primary" type="submit"><i class="bi bi-funnel me-1"></i>OK</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <h2 class="h5 mb-0">Журнал расходов</h2>
+    <span class="badge text-bg-light text-dark border">Всего: {{ data.expenses.total }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Категория</th>
+          <th>Описание</th>
+          <th class="text-end">Сумма</th>
+          <th>Кто оплатил</th>
+          <th>Комментарий</th>
+          <th class="text-end">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in data.expenses.items %}
+          <tr>
+            <td class="text-secondary">{{ row.expense.created_at.strftime('%d.%m.%Y') }}</td>
+            <td><span class="badge text-bg-secondary">{{ row.category_label }}</span></td>
+            <td class="fw-semibold">{{ row.description }}</td>
+            <td class="text-end fw-semibold">{{ row.expense.amount }}</td>
+            <td>{{ row.expense.user.full_name if row.expense.user else '—' }}</td>
+            <td class="text-secondary">{{ row.comment or '—' }}</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-secondary" type="button" disabled><i class="bi bi-eye me-1"></i>Открыть</button>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="7" class="text-center text-secondary py-5">
+              <div class="mb-2"><i class="bi bi-receipt fs-2"></i></div>
+              Расходы не найдены
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if data.expenses.pages > 1 %}
+    <div class="card-footer bg-white">
+      <nav aria-label="Пагинация расходов">
+        <ul class="pagination pagination-sm mb-0">
+          {% for page_number in range(1, data.expenses.pages + 1) %}
+            <li class="page-item {% if page_number == data.expenses.page %}active{% endif %}">
+              <a class="page-link" href="/expenses?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}">{{ page_number }}</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </nav>
+    </div>
+  {% endif %}
+</section>
+
+<div class="modal fade" id="expenseModal" tabindex="-1" aria-labelledby="expenseModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" action="/expenses">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="expenseModalLabel">Добавить расход</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label" for="expense-date">Дата</label>
+              <input class="form-control" id="expense-date" type="date" name="expense_date" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="expense-category">Категория</label>
+              <select class="form-select" id="expense-category" name="category" required>
+                <option value="" selected disabled>Выберите категорию</option>
+                {% for key, label in data.categories %}
+                  <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="expense-amount">Сумма</label>
+              <div class="input-group">
+                <input class="form-control" id="expense-amount" name="amount" inputmode="decimal" placeholder="0.00" required>
+                <span class="input-group-text">₽</span>
+              </div>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label" for="expense-description">Описание</label>
+              <input class="form-control" id="expense-description" name="description" placeholder="Например: бензин для выезда" required>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label" for="expense-user">Кто оплатил</label>
+              <select class="form-select" id="expense-user" name="paid_by_user_id" required>
+                <option value="" selected disabled>Выберите пользователя</option>
+                {% for expense_user in data.users %}
+                  <option value="{{ expense_user.id }}">{{ expense_user.full_name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label" for="expense-comment">Комментарий</label>
+              <textarea class="form-control" id="expense-comment" name="comment" rows="3" placeholder="Дополнительные детали"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-2"></i>Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
