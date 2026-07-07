@@ -8,7 +8,7 @@ from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.clients import Client, Connection, ConnectionMaterial
-from app.models.enums import ConnectionType, FinanceTransactionType, InventoryTransactionType, MaterialUnit, Provider, UserRole
+from app.models.enums import ConnectionType, FinanceTransactionType, InventoryTransactionType, MaterialUnit, PaidBy, Provider, UserRole
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
@@ -354,16 +354,35 @@ def reverse_connection_materials(db: Session, *, connection: Connection, user: U
     db.execute(delete(ConnectionMaterial).where(ConnectionMaterial.connection_id == connection.id))
 
 
-def replace_finance_transaction(db: Session, *, connection: Connection, user: User, amount: Decimal) -> None:
+def replace_finance_transaction(
+    db: Session,
+    *,
+    connection: Connection,
+    user: User,
+    installer_amount: Decimal,
+    office_amount: Decimal,
+) -> None:
     db.execute(delete(FinanceTransaction).where(FinanceTransaction.connection_id == connection.id))
-    if amount != 0:
+    if installer_amount != 0:
         db.add(
             FinanceTransaction(
                 connection_id=connection.id,
-                amount=amount,
+                amount=installer_amount,
                 user_id=user.id,
                 transaction_type=FinanceTransactionType.CONNECTION,
-                comment="Оплата подключения",
+                accrual_to=PaidBy.INSTALLER,
+                comment="Начисление монтажнику",
+            )
+        )
+    if office_amount != 0:
+        db.add(
+            FinanceTransaction(
+                connection_id=connection.id,
+                amount=office_amount,
+                user_id=user.id,
+                transaction_type=FinanceTransactionType.CONNECTION,
+                accrual_to=PaidBy.OFFICE,
+                comment="Начисление офису",
             )
         )
 
@@ -424,7 +443,7 @@ def create_connection(
     db.flush()
 
     add_connection_materials_and_transactions(db, connection=connection, user=user, material_rows=material_rows, comment=connection_comment)
-    replace_finance_transaction(db, connection=connection, user=user, amount=parsed_price)
+    replace_finance_transaction(db, connection=connection, user=user, installer_amount=parsed_installer_amount, office_amount=parsed_office_amount)
     db.commit()
     return connection
 
@@ -481,7 +500,7 @@ def update_connection(
     connection.comment = connection_comment.strip() if connection_comment else None
 
     add_connection_materials_and_transactions(db, connection=connection, user=user, material_rows=material_rows, comment=connection_comment)
-    replace_finance_transaction(db, connection=connection, user=user, amount=parsed_price)
+    replace_finance_transaction(db, connection=connection, user=user, installer_amount=parsed_installer_amount, office_amount=parsed_office_amount)
     db.commit()
     return connection
 

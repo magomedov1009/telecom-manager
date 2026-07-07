@@ -4,7 +4,7 @@ from sqlalchemy import CheckConstraint, Enum, ForeignKey, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
-from app.models.enums import ExpenseCategory, FinanceTransactionType
+from app.models.enums import ExpenseCategory, FinanceTransactionType, PaidBy
 
 
 class Expense(BaseModel):
@@ -24,6 +24,11 @@ class Expense(BaseModel):
         nullable=False,
     )
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_by: Mapped[PaidBy] = mapped_column(
+        Enum(PaidBy, name="paid_by"),
+        nullable=False,
+        default=PaidBy.INSTALLER,
+    )
     comment: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship(
@@ -68,6 +73,10 @@ class FinanceTransaction(BaseModel):
         Enum(FinanceTransactionType, name="finance_transaction_type"),
         index=True,
         nullable=False,
+    )
+    accrual_to: Mapped[PaidBy | None] = mapped_column(
+        Enum(PaidBy, name="paid_by"),
+        nullable=True,
     )
     comment: Mapped[str | None] = mapped_column(Text)
 

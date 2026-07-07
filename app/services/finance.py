@@ -8,16 +8,16 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.clients import Connection, ExtraWork
-from app.models.enums import FinanceTransactionType
+from app.models.enums import FinanceTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
 
 FINANCE_TYPE_LABELS = {
-    FinanceTransactionType.CONNECTION: "Подключение",
+    FinanceTransactionType.CONNECTION: "Начисление за подключение",
     FinanceTransactionType.EXTRA_WORK: "Допработа",
     FinanceTransactionType.EXPENSE: "Расход",
-    FinanceTransactionType.PAYMENT_TO_OFFICE: "Передал деньги в офис",
-    FinanceTransactionType.PAYMENT_FROM_OFFICE: "Получил деньги от офиса",
+    FinanceTransactionType.PAYMENT_TO_OFFICE: "Передача денег в офис",
+    FinanceTransactionType.PAYMENT_FROM_OFFICE: "Выплата офисом монтажнику",
     FinanceTransactionType.ADJUSTMENT: "Корректировка",
 }
 
@@ -193,18 +193,67 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     today_received = Decimal(db.scalar(get_money_received_query(today_start, today_end)) or 0)
     month_received = Decimal(db.scalar(get_money_received_query(month_start, None)) or 0)
 
-    installer_accrued = Decimal(db.scalar(select(func.coalesce(func.sum(Connection.installer_amount), 0))) or 0)
-    office_accrued = Decimal(db.scalar(select(func.coalesce(func.sum(Connection.office_amount), 0))) or 0)
+    installer_accrued = Decimal(db.scalar(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+            FinanceTransaction.accrual_to == PaidBy.INSTALLER,
+            FinanceTransaction.amount > 0,
+        )
+    ) or 0)
+
+    office_accrued = Decimal(db.scalar(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+            FinanceTransaction.accrual_to == PaidBy.OFFICE,
+            FinanceTransaction.amount > 0,
+        )
+    ) or 0)
+
     expenses_total = Decimal(db.scalar(get_expense_query(period_start, period_end)) or 0)
     income_total = Decimal(db.scalar(get_income_query(period_start, period_end)) or 0)
     profit = income_total - expenses_total
-    paid_to_office = abs(Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE)) or 0))
-    paid_from_office = Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE)) or 0)
-    adjustments = Decimal(db.scalar(select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT)) or 0)
 
-    raw_balance = office_accrued - paid_to_office - paid_from_office + adjustments
-    i_owe_office = raw_balance if raw_balance > 0 else Decimal("0")
-    office_owes_me = abs(raw_balance) if raw_balance < 0 else Decimal("0")
+    installer_expenses = Decimal(db.scalar(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(
+            Expense.paid_by == PaidBy.INSTALLER,
+        )
+    ) or 0)
+
+    paid_from_office = Decimal(db.scalar(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE,
+        )
+    ) or 0)
+
+    paid_to_office = Decimal(db.scalar(
+        select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
+            FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
+        )
+    ) or 0)
+
+    client_money = Decimal(db.scalar(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type.in_([
+                FinanceTransactionType.CONNECTION,
+                FinanceTransactionType.EXTRA_WORK,
+            ]),
+            FinanceTransaction.amount > 0,
+        )
+    ) or 0)
+
+    adjustments = Decimal(db.scalar(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
+        )
+    ) or 0)
+
+    office_owes_me_raw = installer_accrued + installer_expenses - paid_from_office + adjustments
+    office_owes_me = office_owes_me_raw if office_owes_me_raw > 0 else Decimal("0")
+
+    i_owe_office_raw = client_money - paid_to_office
+    i_owe_office = i_owe_office_raw if i_owe_office_raw > 0 else Decimal("0")
+
+    balance = office_owes_me - i_owe_office
 
     return FinanceStats(
         today_received=today_received,
@@ -215,7 +264,7 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         profit=profit,
         office_owes_me=office_owes_me,
         i_owe_office=i_owe_office,
-        balance=raw_balance,
+        balance=balance,
     )
 
 

@@ -7,6 +7,11 @@ class UserRole(StrEnum):
     INSTALLER = "installer"
 
 
+class PaidBy(StrEnum):
+    INSTALLER = "INSTALLER"
+    OFFICE = "OFFICE"
+
+
 class MaterialUnit(StrEnum):
     PIECE = "piece"
     METER = "meter"

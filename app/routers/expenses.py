@@ -65,7 +65,7 @@ def create_expense_action(
     category: Annotated[str, Form()],
     description: Annotated[str, Form()],
     amount: Annotated[str, Form()],
-    paid_by_user_id: Annotated[int, Form()],
+    paid_by: Annotated[str, Form()],
     comment: Annotated[str | None, Form()] = None,
 ) -> Response:
     if current_user is None:
@@ -80,7 +80,8 @@ def create_expense_action(
             category=category,
             description=description,
             amount=amount,
-            paid_by_user_id=paid_by_user_id,
+            paid_by_user_id=current_user.id,
+            paid_by=paid_by,
             comment=comment,
         )
         success = "Расход добавлен"

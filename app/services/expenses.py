@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.enums import ExpenseCategory, FinanceTransactionType
+from app.models.enums import ExpenseCategory, FinanceTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
 
@@ -197,12 +197,17 @@ def create_expense(
     description: str,
     amount: str,
     paid_by_user_id: int,
+    paid_by: str,
     comment: str | None,
 ) -> None:
     category_key, _, db_category = get_category_option(category)
     if not description.strip():
         raise ExpenseError("Описание обязательно")
     parsed_amount = parse_amount(amount)
+    try:
+        paid_by_enum = PaidBy(paid_by)
+    except ValueError as exc:
+        raise ExpenseError("Укажите, кто оплатил расход") from exc
     user = db.get(User, paid_by_user_id)
     if user is None or not user.is_active:
         raise ExpenseError("Выберите пользователя, который оплатил расход")
@@ -212,6 +217,7 @@ def create_expense(
         user_id=user.id,
         category=db_category,
         amount=parsed_amount,
+        paid_by=paid_by_enum,
         comment=pack_comment(category_key, description, comment),
         created_at=created_at,
     )

@@ -150,11 +150,10 @@
             </div>
             <div class="col-md-4">
               <label class="form-label" for="expense-user">Кто оплатил</label>
-              <select class="form-select" id="expense-user" name="paid_by_user_id" required>
-                <option value="" selected disabled>Выберите пользователя</option>
-                {% for expense_user in data.users %}
-                  <option value="{{ expense_user.id }}">{{ expense_user.full_name }}</option>
-                {% endfor %}
+              <select class="form-select" id="expense-user" name="paid_by" required>
+                <option value="" selected disabled>Кто оплатил</option>
+                <option value="INSTALLER">Монтажник</option>
+                <option value="OFFICE">Офис</option>
               </select>
             </div>
             <div class="col-12">
