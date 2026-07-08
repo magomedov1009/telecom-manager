@@ -107,18 +107,16 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
     return rows
 
 
-def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, office_amount: str, use_materials: bool, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
+def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, use_materials: bool, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
     provider = db.get(Provider, provider_id)
     if provider is None or not provider.is_active:
         raise AdditionalWorkError("Выберите активного провайдера")
     work_type = db.get(ExtraWorkType, work_type_id)
     if work_type is None or not work_type.is_active:
         raise AdditionalWorkError("Выберите вид дополнительной работы")
-    total = parse_decimal(amount, "Получено от провайдера")
-    office = parse_decimal(office_amount, "Офис получает")
-    if office > total:
-        raise AdditionalWorkError("Офис не может получить больше стоимости работы")
-    installer = total - office
+    total = parse_decimal(amount, "Стоимость работы")
+    office = Decimal("0")
+    installer = total
     rows = parse_material_rows(material_ids, material_quantities) if use_materials else []
     warehouse = None
     if rows:
@@ -145,8 +143,6 @@ def create_additional_work(db: Session, *, user: User, provider_id: int, work_da
         db.add(ExtraWorkMaterial(extra_work_id=work.id, material_id=material_id, quantity=quantity, comment=comment))
         db.add(InventoryTransaction(warehouse_id=warehouse.id, material_id=material_id, user_id=user.id, provider_id=provider.id, operation_type=InventoryTransactionType.WRITE_OFF, quantity=-quantity, comment=f"Допработа #{work.id}"))
     if installer:
-        db.add(FinanceTransaction(extra_work_id=work.id, provider_id=provider.id, user_id=user.id, amount=installer, transaction_type=FinanceTransactionType.EXTRA_WORK, accrual_to=PaidBy.INSTALLER, comment="Допработа: монтажнику"))
-    if office:
-        db.add(FinanceTransaction(extra_work_id=work.id, provider_id=provider.id, user_id=user.id, amount=office, transaction_type=FinanceTransactionType.EXTRA_WORK, accrual_to=PaidBy.OFFICE, comment="Допработа: офису"))
+        db.add(FinanceTransaction(extra_work_id=work.id, provider_id=provider.id, user_id=user.id, amount=installer, transaction_type=FinanceTransactionType.EXTRA_WORK, accrual_to=PaidBy.INSTALLER, comment="Допработа: офис должен монтажнику"))
     db.commit()
     return work

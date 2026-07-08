@@ -210,7 +210,7 @@ def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None
     finance_stats = get_finance_stats(db, finance_filters)
     customer_received_query = period_filter(
         select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
+            FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
             FinanceTransaction.amount > 0,
         ),
         FinanceTransaction.created_at,
@@ -274,11 +274,11 @@ def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None
     if provider_id:
         extra_query = extra_query.where(ExtraWork.provider_id == provider_id)
     extra_subquery = extra_query.subquery()
+    extra_total = scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.amount), 0)))
     extra_works = {
         "count": db.scalar(select(func.count()).select_from(extra_subquery)) or 0,
-        "total": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.amount), 0))),
-        "installer": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.installer_amount), 0))),
-        "office": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.office_amount), 0))),
+        "total": extra_total,
+        "office_owes": extra_total,
     }
 
     finance_events = [

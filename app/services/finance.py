@@ -165,7 +165,6 @@ def get_money_received_query(start: datetime | None = None, end: datetime | None
     query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type.in_([
             FinanceTransactionType.CONNECTION,
-            FinanceTransactionType.EXTRA_WORK,
             FinanceTransactionType.PAYMENT_FROM_OFFICE,
         ]),
         FinanceTransaction.amount > 0,
@@ -211,7 +210,7 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     month_received = Decimal(db.scalar(get_money_received_query(month_start, None)) or 0)
 
     installer_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-        FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+        FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
         FinanceTransaction.accrual_to == PaidBy.INSTALLER,
         FinanceTransaction.amount > 0,
     )
@@ -282,7 +281,10 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
 
     balance = office_owes_me - i_owe_office
 
-    customer_received = income_total
+    customer_received_query = get_money_received_query(period_start, period_end)
+    if provider_id:
+        customer_received_query = customer_received_query.where(FinanceTransaction.provider_id == int(provider_id))
+    customer_received = Decimal(db.scalar(customer_received_query) or 0)
     available_installer_cash = customer_received - paid_to_office - installer_expenses
 
     return FinanceStats(
