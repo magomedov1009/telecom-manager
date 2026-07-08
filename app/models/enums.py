@@ -12,6 +12,11 @@ class PaidBy(StrEnum):
     OFFICE = "OFFICE"
 
 
+class InventoryItemType(StrEnum):
+    MATERIAL = "MATERIAL"
+    EQUIPMENT = "EQUIPMENT"
+
+
 class MaterialUnit(StrEnum):
     PIECE = "piece"
     METER = "meter"

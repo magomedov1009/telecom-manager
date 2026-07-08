@@ -1,262 +1,62 @@
-<div id="materials-module">
-  {% if data.error %}
-    <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
-      <i class="bi bi-exclamation-triangle"></i>
-      <div>{{ data.error }}</div>
-    </div>
-  {% endif %}
-  {% if data.success %}
-    <div class="alert alert-success d-flex align-items-center gap-2" role="alert">
-      <i class="bi bi-check-circle"></i>
-      <div>{{ data.success }}</div>
-    </div>
-  {% endif %}
+﻿<div id="materials-module">
+  {% if data.error %}<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>{{ data.error }}</div>{% endif %}
+  {% if data.success %}<div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>{{ data.success }}</div>{% endif %}
 
-  <div class="card border-0 bg-primary text-white mb-4">
+  <section class="card border-0 bg-primary text-white mb-4">
     <div class="card-body p-4">
       <div class="row align-items-center g-3">
         <div class="col-lg">
-          <div class="text-white-50 text-uppercase small fw-semibold mb-2">Складской учет</div>
-          <h1 class="h2 mb-1">Материалы и остатки</h1>
-          <p class="mb-0 text-white-75">Остатки вычисляются по сумме операций InventoryTransaction.</p>
+          <div class="text-white-50 text-uppercase small fw-semibold mb-2">Единый учет имущества</div>
+          <h1 class="h2 mb-1">Склад</h1>
+          <p class="mb-0 text-white-75">Материалы и оборудование учитываются через движения InventoryTransaction.</p>
         </div>
-        <div class="col-lg-auto">
-          <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#materialOperationModal">
-            <i class="bi bi-plus-lg me-2"></i>Новая операция
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="row g-3 mb-4">
-    {% for warehouse in data.warehouses %}
-      <div class="col-md-6 col-xl-4">
-        <div class="card h-100">
-          <div class="card-header bg-white d-flex justify-content-between align-items-start">
-            <div>
-              <div class="text-secondary small">Склад</div>
-              <h2 class="h5 mb-0">{{ warehouse.name }}</h2>
-            </div>
-            <span class="badge text-bg-success">Активен</span>
-          </div>
-          <ul class="list-group list-group-flush">
-            {% for row in data.stock_rows %}
-              {% for cell in row.warehouse_quantities %}
-                {% if cell.warehouse.id == warehouse.id %}
-                  <li class="list-group-item d-flex justify-content-between align-items-center gap-3">
-                    <span>{{ row.material.name }}</span>
-                    <span class="badge {% if cell.quantity < 0 %}text-bg-danger{% else %}text-bg-light text-dark border{% endif %}">{{ format_quantity(cell.quantity) }} {{ row.unit_label }}</span>
-                  </li>
-                {% endif %}
-              {% endfor %}
-            {% endfor %}
-          </ul>
+        <div class="col-lg-auto d-flex gap-2">
+          <button class="btn btn-light" data-bs-toggle="modal" data-bs-target="#inventoryItemModal"><i class="bi bi-plus-lg me-2"></i>Новая позиция</button>
+          <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#materialOperationModal"><i class="bi bi-arrow-left-right me-2"></i>Операция</button>
         </div>
       </div>
-    {% endfor %}
-  </div>
-
-  <section class="card mb-4 tm-data-card">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <h2 class="h5 mb-0">Текущие остатки</h2>
-      <span class="badge text-bg-secondary">InventoryTransaction</span>
-    </div>
-    <div class="table-responsive">
-      <table class="table table-striped table-hover align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Материал</th>
-            {% for warehouse in data.warehouses %}
-              <th class="text-end">{{ warehouse.name }}</th>
-            {% endfor %}
-            <th class="text-end">Итого</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in data.stock_rows %}
-            <tr>
-              <td>
-                <div class="fw-semibold">{{ row.material.name }}</div>
-                <div class="small text-secondary">{{ row.unit_label }}</div>
-              </td>
-              {% for cell in row.warehouse_quantities %}
-                <td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ format_quantity(cell.quantity) }}</td>
-              {% endfor %}
-              <td class="text-end fw-semibold {% if row.total < 0 %}text-danger{% endif %}">{{ format_quantity(row.total) }}</td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="4" class="text-center text-secondary py-4">Материалы не найдены</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
     </div>
   </section>
 
-  <section class="card tm-data-card">
-    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-3">
-      <h2 class="h5 mb-0">История операций</h2>
-      <span class="badge text-bg-light text-dark border">Всего: {{ data.history.total }}</span>
-    </div>
+  <ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#warehouse-materials" type="button">Материалы</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#warehouse-equipment" type="button">Оборудование</button></li>
+  </ul>
+
+  {% macro stock_table(rows, empty_text) %}
+    <section class="card mb-4">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Остатки</h2></div>
+      <div class="table-responsive">
+        <table class="table table-striped table-hover align-middle mb-0">
+          <thead><tr><th>Название</th><th>Категория</th><th>Ед.</th>{% for warehouse in data.warehouses %}<th class="text-end">{{ warehouse.name }}</th>{% endfor %}<th class="text-end">Итого</th></tr></thead>
+          <tbody>{% for row in rows %}<tr><td class="fw-semibold">{{ row.material.name }}</td><td>{{ row.material.category or '-' }}</td><td>{{ row.unit_label }}</td>{% for cell in row.warehouse_quantities %}<td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ format_quantity(cell.quantity) }}</td>{% endfor %}<td class="text-end fw-semibold">{{ format_quantity(row.total) }}</td></tr>{% else %}<tr><td colspan="{{ data.warehouses|length + 4 }}" class="text-center text-secondary py-4">{{ empty_text }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </section>
+  {% endmacro %}
+
+  <div class="tab-content">
+    <div class="tab-pane fade show active" id="warehouse-materials">{{ stock_table(data.material_stock_rows, 'Материалы не найдены') }}</div>
+    <div class="tab-pane fade" id="warehouse-equipment">{{ stock_table(data.equipment_stock_rows, 'Оборудование не найдено') }}</div>
+  </div>
+
+  <section class="card">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center"><h2 class="h5 mb-0">История операций</h2><span class="badge text-bg-light text-dark border">Всего: {{ data.history.total }}</span></div>
     <div class="card-body border-bottom">
       <form class="row g-2" method="get" action="/materials" hx-get="/materials" hx-target="#materials-module" hx-swap="outerHTML">
-        <div class="col-md-3">
-          <div class="input-group">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input class="form-control" name="search" value="{{ data.filters.search or '' }}" placeholder="Поиск">
-          </div>
-        </div>
-        <div class="col-md-2">
-          <select class="form-select" name="warehouse_id">
-            <option value="">Все склады</option>
-            {% for warehouse in data.warehouses %}
-              <option value="{{ warehouse.id }}" {% if data.filters.warehouse_id == warehouse.id %}selected{% endif %}>{{ warehouse.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-2">
-          <select class="form-select" name="material_id">
-            <option value="">Все материалы</option>
-            {% for material in data.materials %}
-              <option value="{{ material.id }}" {% if data.filters.material_id == material.id %}selected{% endif %}>{{ material.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="col-md-2">
-          <select class="form-select" name="operation_type">
-            <option value="">Все операции</option>
-            {% for operation_type in data.operation_types %}
-              <option value="{{ operation_type.value }}" {% if data.filters.operation_type == operation_type.value %}selected{% endif %}>{{ data.operation_labels[operation_type] }}</option>
-            {% endfor %}
-          </select>
-        </div>
+        <div class="col-md-3"><div class="input-group"><span class="input-group-text"><i class="bi bi-search"></i></span><input class="form-control" name="search" value="{{ data.filters.search or '' }}" placeholder="Поиск"></div></div>
+        <div class="col-md-2"><select class="form-select" name="item_type"><option value="">Все типы</option>{% for key, label in data.item_type_labels.items() %}<option value="{{ key.value }}" {% if data.filters.item_type == key.value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><select class="form-select" name="warehouse_id"><option value="">Все склады</option>{% for warehouse in data.warehouses %}<option value="{{ warehouse.id }}" {% if data.filters.warehouse_id == warehouse.id %}selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><select class="form-select" name="operation_type"><option value="">Все операции</option>{% for operation_type in data.operation_types %}<option value="{{ operation_type.value }}" {% if data.filters.operation_type == operation_type.value %}selected{% endif %}>{{ data.operation_labels[operation_type] }}</option>{% endfor %}</select></div>
         <div class="col-md-1"><input class="form-control" type="date" name="date_from" value="{{ data.filters.date_from or '' }}"></div>
         <div class="col-md-1"><input class="form-control" type="date" name="date_to" value="{{ data.filters.date_to or '' }}"></div>
-        <div class="col-md-1 d-grid"><button class="btn btn-outline-primary" type="submit"><i class="bi bi-search"></i></button></div>
+        <div class="col-md-1 d-grid"><button class="btn btn-outline-primary"><i class="bi bi-search"></i></button></div>
       </form>
     </div>
-
-    <div class="table-responsive">
-      <table class="table table-striped table-hover table-sm align-middle mb-0">
-        <thead>
-          <tr>
-            <th>Дата</th>
-            <th>Пользователь</th>
-            <th>Склад</th>
-            <th>Материал</th>
-            <th>Тип операции</th>
-            <th class="text-end">Количество</th>
-            <th>Комментарий</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in data.history.items %}
-            <tr>
-              <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
-              <td>{{ item.user.full_name }}</td>
-              <td>{{ item.warehouse.name }}</td>
-              <td>{{ item.material.name }}</td>
-              <td><span class="badge text-bg-light text-dark border">{{ data.operation_labels[item.operation_type] }}</span></td>
-              <td class="text-end fw-semibold {% if item.quantity < 0 %}text-danger{% else %}text-success{% endif %}">{{ format_quantity(item.quantity) }}</td>
-              <td>{{ item.comment or '' }}</td>
-            </tr>
-          {% else %}
-            <tr>
-              <td colspan="7" class="text-center text-secondary py-4">Операции не найдены</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    {% if data.history.pages > 1 %}
-      <div class="card-footer bg-white">
-        <nav aria-label="Пагинация операций">
-          <ul class="pagination pagination-sm mb-0">
-            {% for page_number in range(1, data.history.pages + 1) %}
-              <li class="page-item {% if page_number == data.history.page %}active{% endif %}">
-                <a class="page-link" href="/materials?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-get="/materials?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-target="#materials-module" hx-swap="outerHTML">{{ page_number }}</a>
-              </li>
-            {% endfor %}
-          </ul>
-        </nav>
-      </div>
-    {% endif %}
+    <div class="table-responsive"><table class="table table-striped table-hover table-sm align-middle mb-0"><thead><tr><th>Дата</th><th>Пользователь</th><th>Склад</th><th>Позиция</th><th>Тип</th><th class="text-end">Количество</th><th>Комментарий</th></tr></thead><tbody>{% for item in data.history.items %}<tr><td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td>{{ item.user.full_name }}</td><td>{{ item.warehouse.name }}</td><td>{{ item.material.name }}</td><td><span class="badge text-bg-light text-dark border">{{ data.operation_labels[item.operation_type] }}</span></td><td class="text-end fw-semibold {% if item.quantity < 0 %}text-danger{% else %}text-success{% endif %}">{{ format_quantity(item.quantity) }}</td><td>{{ item.comment or '' }}</td></tr>{% else %}<tr><td colspan="7" class="text-center text-secondary py-4">Операций не найдено</td></tr>{% endfor %}</tbody></table></div>
   </section>
 
-  <div class="modal fade" id="materialOperationModal" tabindex="-1" aria-labelledby="materialOperationModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-      <div class="modal-content">
-        <form method="post" action="/materials/operations" hx-post="/materials/operations" hx-target="#materials-module" hx-swap="outerHTML">
-          <div class="modal-header">
-            <h2 class="modal-title h5" id="materialOperationModalLabel">Новая операция</h2>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-          </div>
-          <div class="modal-body">
-            <div class="row g-3">
-              <div class="col-md-6">
-                <label class="form-label">Операция</label>
-                <select class="form-select" name="operation" required>
-                  <option value="receipt">Приход материалов</option>
-                  <option value="transfer">Перемещение между складами</option>
-                  <option value="issue">Выдача третьему лицу</option>
-                  <option value="return">Возврат</option>
-                  <option value="write_off">Списание</option>
-                  <option value="adjustment">Корректировка</option>
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Склад</label>
-                <select class="form-select" name="warehouse_id" required>
-                  {% for warehouse in data.warehouses %}
-                    <option value="{{ warehouse.id }}">{{ warehouse.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Склад назначения</label>
-                <select class="form-select" name="destination_warehouse_id">
-                  <option value="">Только для перемещения</option>
-                  {% for warehouse in data.warehouses %}
-                    <option value="{{ warehouse.id }}">{{ warehouse.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Материал</label>
-                <select class="form-select" name="material_id" required>
-                  {% for material in data.materials %}
-                    <option value="{{ material.id }}">{{ material.name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Количество</label>
-                <div class="input-group">
-                  <input class="form-control" name="quantity" inputmode="numeric" step="1" required>
-                  <span class="input-group-text">ед.</span>
-                </div>
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Направление корректировки</label>
-                <select class="form-select" name="adjustment_direction">
-                  <option value="plus">Плюс</option>
-                  <option value="minus">Минус</option>
-                </select>
-              </div>
-              <div class="col-12">
-                <label class="form-label">Комментарий</label>
-                <textarea class="form-control" name="comment" rows="3" placeholder="Документ, получатель, причина или служебная заметка"></textarea>
-              </div>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
-            <button type="submit" class="btn btn-primary">Создать операцию</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
+  <div class="modal fade" id="inventoryItemModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post" action="/materials/items" hx-post="/materials/items" hx-target="#materials-module" hx-swap="outerHTML"><div class="modal-header"><h2 class="modal-title h5">Новая складская позиция</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-12"><label class="form-label">Тип</label><select class="form-select" name="item_type" required><option value="MATERIAL">Материал</option><option value="EQUIPMENT">Оборудование</option></select></div><div class="col-12"><label class="form-label">Название</label><input class="form-control" name="name" required></div><div class="col-12"><label class="form-label">Категория</label><input class="form-control" name="category" placeholder="Например: кабель, ONU, роутер"></div><div class="col-12"><label class="form-label">Единица измерения</label><input class="form-control" name="unit_name" list="unit-options" required><datalist id="unit-options">{% for unit in data.unit_options %}<option value="{{ unit }}">{% endfor %}</datalist></div></div></div><div class="modal-footer"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Отмена</button><button class="btn btn-primary">Создать</button></div></form></div></div></div>
+
+  <div class="modal fade" id="materialOperationModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><form method="post" action="/materials/operations" hx-post="/materials/operations" hx-target="#materials-module" hx-swap="outerHTML"><div class="modal-header"><h2 class="modal-title h5">Новая операция</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-md-6"><label class="form-label">Операция</label><select class="form-select" name="operation" required><option value="receipt">Приход</option><option value="transfer">Перемещение</option><option value="issue">Выдача третьему лицу</option><option value="return">Возврат</option><option value="write_off">Списание</option><option value="adjustment">Корректировка</option></select></div><div class="col-md-6"><label class="form-label">Склад</label><select class="form-select" name="warehouse_id" required>{% for warehouse in data.warehouses %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></div><div class="col-md-6"><label class="form-label">Склад назначения</label><select class="form-select" name="destination_warehouse_id"><option value="">Только для перемещения</option>{% for warehouse in data.warehouses %}<option value="{{ warehouse.id }}">{{ warehouse.name }}</option>{% endfor %}</select></div><div class="col-md-6"><label class="form-label">Позиция</label><select class="form-select" name="material_id" required>{% for row in data.stock_rows %}<option value="{{ row.material.id }}">{{ row.material.name }} - {{ data.item_type_labels[row.material.item_type] }}</option>{% endfor %}</select></div><div class="col-md-6"><label class="form-label">Количество</label><input class="form-control" name="quantity" inputmode="decimal" required></div><div class="col-md-6"><label class="form-label">Направление корректировки</label><select class="form-select" name="adjustment_direction"><option value="plus">Плюс</option><option value="minus">Минус</option></select></div><div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="3"></textarea></div></div></div><div class="modal-footer"><button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Отмена</button><button class="btn btn-primary">Создать операцию</button></div></form></div></div></div>
 </div>

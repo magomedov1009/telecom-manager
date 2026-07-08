@@ -4,7 +4,7 @@ from sqlalchemy import CheckConstraint, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
-from app.models.enums import InventoryTransactionType, MaterialUnit
+from app.models.enums import InventoryItemType, InventoryTransactionType, MaterialUnit
 
 
 class Warehouse(BaseModel):
@@ -27,6 +27,14 @@ class Material(BaseModel):
         Enum(MaterialUnit, name="material_unit"),
         nullable=False,
     )
+    item_type: Mapped[InventoryItemType] = mapped_column(
+        Enum(InventoryItemType, name="inventory_item_type"),
+        default=InventoryItemType.MATERIAL,
+        nullable=False,
+        index=True,
+    )
+    category: Mapped[str | None] = mapped_column(String(128), index=True)
+    unit_name: Mapped[str | None] = mapped_column(String(64))
     active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     connection_materials: Mapped[list["ConnectionMaterial"]] = relationship(

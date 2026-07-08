@@ -1,6 +1,8 @@
-﻿from typing import Annotated
+﻿from datetime import date, datetime, time, timedelta
+from decimal import Decimal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request, status
+from fastapi import APIRouter, Depends, Form, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -11,13 +13,16 @@ from app.core.security import SESSION_COOKIE_NAME, create_session_token, verify_
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user_optional
 from app.models.clients import Client, Connection, ExtraWork
+from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material
 from app.models.users import User
 from app.services.finance import get_finance_stats
+from app.services.inventory import format_quantity
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["format_quantity"] = format_quantity
 
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
@@ -27,7 +32,7 @@ NAV_ITEMS = [
     {"label": "Dashboard", "endpoint": "/dashboard", "icon": "bi-speedometer2"},
     {"label": "Подключения", "endpoint": "/connections", "icon": "bi-router"},
     {"label": "Клиенты", "endpoint": "/clients", "icon": "bi-people"},
-    {"label": "Материалы", "endpoint": "/materials", "icon": "bi-box-seam"},
+    {"label": "Склад", "endpoint": "/materials", "icon": "bi-box-seam"},
     {"label": "Финансы", "endpoint": "/finance", "icon": "bi-cash-coin"},
     {"label": "Расходы", "endpoint": "/expenses", "icon": "bi-receipt"},
     {"label": "Допработы", "endpoint": "/extra-works", "icon": "bi-tools"},
@@ -98,22 +103,208 @@ def logout() -> RedirectResponse:
     return response
 
 
+
+PERIOD_LABELS = {
+    "today": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f",
+    "yesterday": "\u0412\u0447\u0435\u0440\u0430",
+    "week": "\u042d\u0442\u0430 \u043d\u0435\u0434\u0435\u043b\u044f",
+    "month": "\u042d\u0442\u043e\u0442 \u043c\u0435\u0441\u044f\u0446",
+    "custom": "\u041f\u0440\u043e\u0438\u0437\u0432\u043e\u043b\u044c\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434",
+}
+
+EXPENSE_CATEGORY_LABELS = {
+    ExpenseCategory.FUEL: "\u0411\u0435\u043d\u0437\u0438\u043d",
+    ExpenseCategory.TOOLS: "\u0418\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442",
+    ExpenseCategory.TRANSPORT: "\u0422\u0440\u0430\u043d\u0441\u043f\u043e\u0440\u0442",
+    ExpenseCategory.COMMUNICATION: "\u0421\u0432\u044f\u0437\u044c",
+    ExpenseCategory.OTHER: "\u041f\u0440\u043e\u0447\u0435\u0435",
+}
+
+FINANCE_EVENT_LABELS = {
+    FinanceTransactionType.CONNECTION: "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435",
+    FinanceTransactionType.EXTRA_WORK: "\u0414\u043e\u043f\u0440\u0430\u0431\u043e\u0442\u0430",
+    FinanceTransactionType.EXPENSE: "\u0420\u0430\u0441\u0445\u043e\u0434",
+    FinanceTransactionType.PAYMENT_TO_OFFICE: "\u041f\u0435\u0440\u0435\u0434\u0430\u0447\u0430 \u0434\u0435\u043d\u0435\u0433 \u043e\u0444\u0438\u0441\u0443",
+    FinanceTransactionType.PAYMENT_FROM_OFFICE: "\u0412\u044b\u043f\u043b\u0430\u0442\u0430 \u043e\u0444\u0438\u0441\u043e\u043c",
+    FinanceTransactionType.ADJUSTMENT: "\u041a\u043e\u0440\u0440\u0435\u043a\u0442\u0438\u0440\u043e\u0432\u043a\u0430",
+}
+
+INVENTORY_EVENT_LABELS = {
+    InventoryTransactionType.RECEIPT: "\u041f\u0440\u0438\u0445\u043e\u0434 \u043c\u0430\u0442\u0435\u0440\u0438\u0430\u043b\u043e\u0432",
+    InventoryTransactionType.CONNECTION: "\u0421\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043d\u0430 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435",
+    InventoryTransactionType.TRANSFER_IN: "\u041f\u0435\u0440\u0435\u043c\u0435\u0449\u0435\u043d\u0438\u0435: \u043f\u0440\u0438\u0445\u043e\u0434",
+    InventoryTransactionType.TRANSFER_OUT: "\u041f\u0435\u0440\u0435\u043c\u0435\u0449\u0435\u043d\u0438\u0435: \u0440\u0430\u0441\u0445\u043e\u0434",
+    InventoryTransactionType.RETURN: "\u0412\u043e\u0437\u0432\u0440\u0430\u0442",
+    InventoryTransactionType.ISSUE_TO_THIRD_PARTY: "\u0412\u044b\u0434\u0430\u0447\u0430",
+    InventoryTransactionType.WRITE_OFF: "\u0421\u043f\u0438\u0441\u0430\u043d\u0438\u0435",
+    InventoryTransactionType.ADJUSTMENT: "\u041a\u043e\u0440\u0440\u0435\u043a\u0442\u0438\u0440\u043e\u0432\u043a\u0430",
+}
+
+
+def resolve_dashboard_period(period: str, date_from: date | None, date_to: date | None) -> dict:
+    today = date.today()
+    if period == "yesterday":
+        start_date = end_date = today - timedelta(days=1)
+    elif period == "week":
+        start_date = today - timedelta(days=today.weekday())
+        end_date = today
+    elif period == "month":
+        start_date = today.replace(day=1)
+        end_date = today
+    elif period == "custom":
+        start_date = date_from or today
+        end_date = date_to or start_date
+    else:
+        period = "today"
+        start_date = end_date = today
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+    return {
+        "period": period,
+        "label": PERIOD_LABELS[period],
+        "date_from": start_date,
+        "date_to": end_date,
+        "start": datetime.combine(start_date, time.min),
+        "end": datetime.combine(end_date, time.max),
+    }
+
+
+def period_filter(query, column, period_data: dict):
+    return query.where(column >= period_data["start"], column <= period_data["end"])
+
+
+def scalar_decimal(db: Session, query) -> Decimal:
+    return Decimal(db.scalar(query) or 0)
+
+
+def build_dashboard_data(db: Session, period_data: dict) -> dict:
+    connection_period = period_filter(select(Connection), Connection.connection_date, {
+        **period_data,
+        "start": period_data["date_from"],
+        "end": period_data["date_to"],
+    })
+    connection_ids_subquery = connection_period.with_only_columns(Connection.id).subquery()
+
+    connections = {
+        "total": db.scalar(select(func.count()).select_from(connection_ids_subquery)) or 0,
+        "new_clients": db.scalar(select(func.count()).select_from(period_filter(select(Client), Client.created_at, period_data).subquery())) or 0,
+        "reconnects": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.RECONNECT)) or 0,
+        "onu_replacements": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.ONU_REPLACE)) or 0,
+    }
+
+    finance_filters = {"date_from": period_data["date_from"], "date_to": period_data["date_to"]}
+    finance_stats = get_finance_stats(db, finance_filters)
+    customer_received = scalar_decimal(
+        db,
+        period_filter(
+            select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+                FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
+                FinanceTransaction.amount > 0,
+            ),
+            FinanceTransaction.created_at,
+            period_data,
+        ),
+    )
+
+    def stock_summary(item_type: InventoryItemType) -> list[dict]:
+        rows = []
+        items = list(db.scalars(select(Material).where(Material.active.is_(True), Material.item_type == item_type).order_by(Material.name)))
+        for item in items:
+            balance = scalar_decimal(db, select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == item.id))
+            spent = scalar_decimal(
+                db,
+                period_filter(
+                    select(func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0)).where(InventoryTransaction.material_id == item.id, InventoryTransaction.quantity < 0),
+                    InventoryTransaction.created_at,
+                    period_data,
+                ),
+            )
+            rows.append({"label": item.name, "balance": balance, "spent": spent})
+        return rows
+
+    materials = stock_summary(InventoryItemType.MATERIAL)
+    equipment = stock_summary(InventoryItemType.EQUIPMENT)
+
+    expenses_total = scalar_decimal(
+        db,
+        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.created_at, period_data),
+    )
+    installer_expenses = scalar_decimal(
+        db,
+        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.INSTALLER), Expense.created_at, period_data),
+    )
+    office_expenses = scalar_decimal(
+        db,
+        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.OFFICE), Expense.created_at, period_data),
+    )
+    top_expense_row = db.execute(
+        period_filter(
+            select(Expense.category, func.coalesce(func.sum(Expense.amount), 0).label("total")).group_by(Expense.category).order_by(func.coalesce(func.sum(Expense.amount), 0).desc()),
+            Expense.created_at,
+            period_data,
+        ).limit(1)
+    ).first()
+    top_expense = {"label": "?", "amount": Decimal("0")}
+    if top_expense_row is not None:
+        top_expense = {"label": EXPENSE_CATEGORY_LABELS.get(top_expense_row[0], top_expense_row[0].value), "amount": Decimal(top_expense_row[1] or 0)}
+
+    finance_events = [
+        {
+            "date": item.created_at,
+            "type": FINANCE_EVENT_LABELS.get(item.transaction_type, item.transaction_type.value),
+            "title": item.comment or FINANCE_EVENT_LABELS.get(item.transaction_type, item.transaction_type.value),
+            "amount": item.amount,
+            "icon": "bi-cash-coin",
+        }
+        for item in db.scalars(select(FinanceTransaction).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(10))
+    ]
+    inventory_events = [
+        {
+            "date": item.created_at,
+            "type": INVENTORY_EVENT_LABELS.get(item.operation_type, item.operation_type.value),
+            "title": item.material.name if item.material else "Склад",
+            "amount": format_quantity(item.quantity),
+            "icon": "bi-box-seam",
+        }
+        for item in db.scalars(select(InventoryTransaction).order_by(InventoryTransaction.created_at.desc(), InventoryTransaction.id.desc()).limit(10))
+    ]
+    events = sorted(finance_events + inventory_events, key=lambda item: item["date"], reverse=True)[:10]
+
+    return {
+        "connections": connections,
+        "finance": finance_stats,
+        "customer_received": customer_received,
+        "materials": materials,
+        "equipment": equipment,
+        "expenses": {
+            "total": expenses_total,
+            "installer": installer_expenses,
+            "office": office_expenses,
+            "top": top_expense,
+        },
+        "events": events,
+    }
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, db: DbSession, current_user: CurrentUser) -> Response:
+def dashboard(
+    request: Request,
+    db: DbSession,
+    current_user: CurrentUser,
+    period: Annotated[str, Query()] = "today",
+    date_from: Annotated[date | None, Query()] = None,
+    date_to: Annotated[date | None, Query()] = None,
+) -> Response:
     if current_user is None:
         return redirect_to_login()
 
-    stats = {
-        "clients": db.scalar(select(func.count(Client.id))) or 0,
-        "connections": db.scalar(select(func.count(Connection.id))) or 0,
-        "materials": db.scalar(select(func.count(Material.id))) or 0,
-        "inventory_transactions": db.scalar(select(func.count(InventoryTransaction.id))) or 0,
-        "finance_transactions": db.scalar(select(func.count(FinanceTransaction.id))) or 0,
-        "expenses": db.scalar(select(func.count(Expense.id))) or 0,
-        "extra_works": db.scalar(select(func.count(ExtraWork.id))) or 0,
-    }
-    finance_stats = get_finance_stats(db)
-    return render(request, "pages/dashboard.html", {"user": current_user, "stats": stats, "finance_stats": finance_stats})
+    period_data = resolve_dashboard_period(period, date_from, date_to)
+    dashboard_data = build_dashboard_data(db, period_data)
+    return render(
+        request,
+        "pages/dashboard.html",
+        {"user": current_user, "period": period_data, "dashboard": dashboard_data, "period_labels": PERIOD_LABELS},
+    )
 
 
 @router.get("/{section}", response_class=HTMLResponse)
@@ -128,7 +319,7 @@ def section_page(
     section_titles = {
         "connections": "Подключения",
         "clients": "Клиенты",
-        "materials": "Материалы",
+        "materials": "Склад",
         "finance": "Финансы",
         "expenses": "Расходы",
         "extra-works": "Допработы",
@@ -139,6 +330,3 @@ def section_page(
     if title is None:
         return render(request, "errors/404.html", {"user": current_user, "missing_path": request.url.path})
     return render(request, "pages/section.html", {"user": current_user, "title": title})
-
-
-

@@ -8,7 +8,7 @@ from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.clients import Client, Connection, ConnectionMaterial
-from app.models.enums import ConnectionType, FinanceTransactionType, InventoryTransactionType, MaterialUnit, PaidBy, Provider, UserRole
+from app.models.enums import ConnectionType, FinanceTransactionType, InventoryItemType, InventoryTransactionType, MaterialUnit, PaidBy, Provider, UserRole
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
