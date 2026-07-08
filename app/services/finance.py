@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.clients import Connection, ExtraWork
 from app.models.enums import FinanceTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
+from app.services.expenses import ExpensesPageData
 from app.models.users import User
 
 FINANCE_TYPE_LABELS = {
@@ -43,6 +44,10 @@ class FinanceStats:
     office_owes_me: Decimal
     i_owe_office: Decimal
     balance: Decimal
+    customer_received: Decimal
+    paid_to_office: Decimal
+    installer_expenses: Decimal
+    available_installer_cash: Decimal
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,11 @@ class FinancePageData:
     transaction_types: list[FinanceTransactionType]
     type_labels: dict[FinanceTransactionType, str]
     manual_types: list[FinanceTransactionType]
+    expenses_data: ExpensesPageData | None = None
+    income_items: list[FinanceTransaction] | None = None
+    settlement_items: list[FinanceTransaction] | None = None
+    cash_flow_items: list[FinanceTransaction] | None = None
+    expense_summary: dict | None = None
     error: str | None = None
     success: str | None = None
 
@@ -247,6 +257,9 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
 
     balance = office_owes_me - i_owe_office
 
+    customer_received = income_total
+    available_installer_cash = customer_received - paid_to_office - installer_expenses
+
     return FinanceStats(
         today_received=today_received,
         month_received=month_received,
@@ -257,6 +270,10 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         office_owes_me=office_owes_me,
         i_owe_office=i_owe_office,
         balance=balance,
+        customer_received=customer_received,
+        paid_to_office=paid_to_office,
+        installer_expenses=installer_expenses,
+        available_installer_cash=available_installer_cash,
     )
 
 
@@ -299,6 +316,64 @@ def get_journal_page(db: Session, filters: dict, page: int, per_page: int = 15) 
     return FinanceJournalPage(items=items, page=page, per_page=per_page, total=total, pages=max(ceil(total / per_page), 1))
 
 
+def finance_items_query(filters: dict, transaction_types: list[FinanceTransactionType] | None = None):
+    query = select(FinanceTransaction).options(
+        joinedload(FinanceTransaction.user),
+        joinedload(FinanceTransaction.connection).joinedload(Connection.client),
+        joinedload(FinanceTransaction.expense),
+        joinedload(FinanceTransaction.extra_work),
+    )
+    if transaction_types is not None:
+        query = query.where(FinanceTransaction.transaction_type.in_(transaction_types))
+    if filters.get("date_from"):
+        query = query.where(FinanceTransaction.created_at >= datetime.combine(filters["date_from"], time.min))
+    if filters.get("date_to"):
+        query = query.where(FinanceTransaction.created_at <= datetime.combine(filters["date_to"], time.max))
+    if filters.get("search"):
+        pattern = f"%{filters['search']}%"
+        query = query.outerjoin(FinanceTransaction.user).where(
+            or_(
+                FinanceTransaction.comment.ilike(pattern),
+                User.username.ilike(pattern),
+                User.full_name.ilike(pattern),
+            )
+        )
+    return query.order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc())
+
+
+def get_finance_items(db: Session, filters: dict, transaction_types: list[FinanceTransactionType] | None = None, limit: int = 100) -> list[FinanceTransaction]:
+    return list(db.scalars(finance_items_query(filters, transaction_types).limit(limit)))
+
+
+def finance_client_label(transaction: FinanceTransaction) -> str:
+    if transaction.connection is not None and transaction.connection.client is not None:
+        client = transaction.connection.client
+        return client.contract_number or client.login or client.phone or "—"
+    return "—"
+
+
+def money_direction(transaction: FinanceTransaction) -> str:
+    return "Приход" if transaction.amount > 0 else "Расход"
+
+
+def get_expense_summary(db: Session, filters: dict) -> dict:
+    start, end = period_from_filters(filters)
+    total_query = select(func.coalesce(func.sum(Expense.amount), 0))
+    installer_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.INSTALLER)
+    office_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.OFFICE)
+    count_query = select(func.count(Expense.id))
+    top_query = select(Expense.category, func.coalesce(func.sum(Expense.amount), 0).label("total")).group_by(Expense.category).order_by(func.coalesce(func.sum(Expense.amount), 0).desc())
+    total = Decimal(db.scalar(apply_period(total_query, start, end, Expense.created_at)) or 0)
+    installer = Decimal(db.scalar(apply_period(installer_query, start, end, Expense.created_at)) or 0)
+    office = Decimal(db.scalar(apply_period(office_query, start, end, Expense.created_at)) or 0)
+    operations = db.scalar(apply_period(count_query, start, end, Expense.created_at)) or 0
+    top_row = db.execute(apply_period(top_query, start, end, Expense.created_at).limit(1)).first()
+    top = {"label": "—", "amount": Decimal("0")}
+    if top_row is not None:
+        top = {"label": top_row[0].value, "amount": Decimal(top_row[1] or 0)}
+    return {"total": total, "installer": installer, "office": office, "operations": operations, "top": top}
+
+
 def get_finance_page_data(
     db: Session,
     *,
@@ -316,6 +391,10 @@ def get_finance_page_data(
         transaction_types=list(FinanceTransactionType),
         type_labels=FINANCE_TYPE_LABELS,
         manual_types=MANUAL_TYPES,
+        income_items=get_finance_items(db, filters, [FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
+        settlement_items=get_finance_items(db, filters, [FinanceTransactionType.PAYMENT_FROM_OFFICE, FinanceTransactionType.PAYMENT_TO_OFFICE]),
+        cash_flow_items=get_finance_items(db, filters),
+        expense_summary=get_expense_summary(db, filters),
         error=error,
         success=success,
     )

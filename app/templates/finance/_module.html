@@ -1,153 +1,100 @@
 ﻿<div id="finance-module">
-  {% if data.error %}
-    <div class="alert alert-danger d-flex align-items-center gap-2" role="alert"><i class="bi bi-exclamation-triangle"></i><div>{{ data.error }}</div></div>
-  {% endif %}
-  {% if data.success %}
-    <div class="alert alert-success d-flex align-items-center gap-2" role="alert"><i class="bi bi-check-circle"></i><div>{{ data.success }}</div></div>
-  {% endif %}
+  {% if data.error %}<div class="alert alert-danger d-flex align-items-center gap-2"><i class="bi bi-exclamation-triangle"></i><div>{{ data.error }}</div></div>{% endif %}
+  {% if data.success %}<div class="alert alert-success d-flex align-items-center gap-2"><i class="bi bi-check-circle"></i><div>{{ data.success }}</div></div>{% endif %}
 
-  <div class="row align-items-center g-3 mb-4">
-    <div class="col-lg">
-      <h1 class="h4 mb-1">Финансы</h1>
-      <p class="text-secondary mb-0">Финансовые операции, взаиморасчеты с офисом и журнал начислений.</p>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <div>
+      <h1 class="h4 mb-1">Финансовый центр</h1>
+      <p class="text-secondary mb-0">Доходы, расходы, взаиморасчеты и движение денег в одном разделе.</p>
     </div>
-    <div class="col-lg-auto">
-      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#financeOperationModal">
-        <i class="bi bi-plus-lg"></i>
-        Ручная операция
-      </button>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-primary" type="button"><i class="bi bi-download me-2"></i>Экспорт</button>
+      <button class="btn btn-outline-primary" type="button" data-bs-toggle="modal" data-bs-target="#expenseModal"><i class="bi bi-receipt me-2"></i>Добавить расход</button>
+      <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#financeOperationModal"><i class="bi bi-plus-lg me-2"></i>Ручная операция</button>
     </div>
-  </div>
-
-  <div class="row g-3 mb-4">
-    {% for label, value, icon, color in [
-      ('Сегодня получено', data.stats.today_received, 'bi-calendar-day', 'primary'),
-      ('За месяц получено', data.stats.month_received, 'bi-calendar3', 'success'),
-      ('Монтажнику начислено', data.stats.installer_accrued, 'bi-person-check', 'info'),
-      ('Офису начислено', data.stats.office_accrued, 'bi-building', 'secondary'),
-      ('Расходы', data.stats.expenses_total, 'bi-receipt', 'danger'),
-      ('Прибыль', data.stats.profit, 'bi-graph-up-arrow', 'success'),
-      ('Офис должен мне', data.stats.office_owes_me, 'bi-arrow-down-circle', 'warning'),
-      ('Я должен офису', data.stats.i_owe_office, 'bi-arrow-up-circle', 'danger')
-    ] %}
-      <div class="col-md-6 col-xl-4">
-        <div class="card h-100">
-          <div class="card-body d-flex justify-content-between align-items-start gap-3">
-            <div>
-              <div class="text-secondary small">{{ label }}</div>
-              <div class="h3 mb-0">{{ value }}</div>
-            </div>
-            <span class="badge text-bg-{{ color }}"><i class="bi {{ icon }}"></i></span>
-          </div>
-        </div>
-      </div>
-    {% endfor %}
   </div>
 
   <section class="card mb-4">
-    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-      <h2 class="h5 mb-0">Взаиморасчеты</h2>
-      <span class="badge {% if data.stats.balance >= 0 %}text-bg-warning{% else %}text-bg-success{% endif %}">Баланс: {{ data.stats.balance }}</span>
-    </div>
     <div class="card-body">
-      <div class="row g-3">
-        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен офис</div><div class="h4 mb-0">{{ data.stats.office_owes_me }}</div></div></div></div>
-        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Сколько должен монтажник</div><div class="h4 mb-0">{{ data.stats.i_owe_office }}</div></div></div></div>
-        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Прибыль</div><div class="h4 mb-0">{{ data.stats.profit }}</div></div></div></div>
-        <div class="col-md-3"><div class="card h-100 border"><div class="card-body"><div class="text-secondary small">Итоговый баланс</div><div class="h4 mb-0">{{ data.stats.balance }}</div></div></div></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-3">
-      <h2 class="h5 mb-0">Журнал финансов</h2>
-      <span class="badge text-bg-light text-dark border">Всего: {{ data.journal.total }}</span>
-    </div>
-
-    <div class="card-body border-bottom">
-      <form class="row g-2" method="get" action="/finance" hx-get="/finance" hx-target="#finance-module" hx-swap="outerHTML">
-        <div class="col-md-2"><input class="form-control" type="date" name="date_from" value="{{ data.filters.date_from or '' }}"></div>
-        <div class="col-md-2"><input class="form-control" type="date" name="date_to" value="{{ data.filters.date_to or '' }}"></div>
-        <div class="col-md-2">
-          <select class="form-select" name="transaction_type">
-            <option value="">Все типы</option>
-            {% for type in data.transaction_types %}<option value="{{ type.value }}" {% if data.filters.transaction_type == type.value %}selected{% endif %}>{{ data.type_labels[type] }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-md-2">
-          <select class="form-select" name="user_id">
-            <option value="">Все пользователи</option>
-            {% for item_user in data.users %}<option value="{{ item_user.id }}" {% if data.filters.user_id == item_user.id %}selected{% endif %}>{{ item_user.full_name }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="col-md-3">
-          <div class="input-group">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input class="form-control" name="search" value="{{ data.filters.search or '' }}" placeholder="Комментарий или пользователь">
-          </div>
-        </div>
-        <div class="col-md-1 d-grid"><button class="btn btn-outline-primary" type="submit"><i class="bi bi-search"></i></button></div>
+      <form class="row g-2 align-items-end" method="get" action="/finance" hx-get="/finance" hx-target="#finance-module" hx-swap="outerHTML" id="finance-period-form">
+        <div class="col-lg-3 col-md-6"><label class="form-label">Период</label><select class="form-select" name="period" id="finance-period-select">{% for key, label in period_labels.items() %}<option value="{{ key }}" {% if data.filters.period == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-lg-2 col-md-6 finance-custom-period"><label class="form-label">С</label><input class="form-control" type="date" name="date_from" value="{{ data.filters.date_from.isoformat() if data.filters.date_from else '' }}"></div>
+        <div class="col-lg-2 col-md-6 finance-custom-period"><label class="form-label">По</label><input class="form-control" type="date" name="date_to" value="{{ data.filters.date_to.isoformat() if data.filters.date_to else '' }}"></div>
+        <div class="col-lg-4 col-md-6"><label class="form-label">Поиск</label><div class="input-group"><span class="input-group-text"><i class="bi bi-search"></i></span><input class="form-control" name="search" value="{{ data.filters.search or '' }}" placeholder="Комментарий или пользователь"></div></div>
+        <div class="col-lg-1 col-md-12 d-grid"><button class="btn btn-primary"><i class="bi bi-funnel"></i></button></div>
       </form>
     </div>
-
-    <div class="table-responsive">
-      <table class="table table-striped table-hover align-middle mb-0">
-        <thead><tr><th>Дата</th><th>Тип</th><th>Источник</th><th class="text-end">Сумма</th><th>Комментарий</th><th>Пользователь</th></tr></thead>
-        <tbody>
-          {% for item in data.journal.items %}
-            <tr>
-              <td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
-              <td><span class="badge text-bg-light text-dark border">{{ data.type_labels[item.transaction_type] }}</span></td>
-              <td>{{ finance_source_label(item) }}</td>
-              <td class="text-end fw-semibold {% if item.amount < 0 %}text-danger{% else %}text-success{% endif %}">{{ item.amount }}</td>
-              <td>{{ item.comment or '' }}</td>
-              <td>{{ item.user.full_name if item.user else '—' }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="6" class="text-center text-secondary py-4">Финансовые операции не найдены</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    {% if data.journal.pages > 1 %}
-      <div class="card-footer bg-white">
-        <nav aria-label="Пагинация финансов"><ul class="pagination pagination-sm mb-0">
-          {% for page_number in range(1, data.journal.pages + 1) %}
-            <li class="page-item {% if page_number == data.journal.page %}active{% endif %}"><a class="page-link" href="/finance?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-get="/finance?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-target="#finance-module" hx-swap="outerHTML">{{ page_number }}</a></li>
-          {% endfor %}
-        </ul></nav>
-      </div>
-    {% endif %}
   </section>
 
-  <div class="modal fade" id="financeOperationModal" tabindex="-1" aria-labelledby="financeOperationModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content">
-        <form method="post" action="/finance/operations" hx-post="/finance/operations" hx-target="#finance-module" hx-swap="outerHTML">
-          <div class="modal-header">
-            <h2 class="modal-title h5" id="financeOperationModalLabel">Ручная финансовая операция</h2>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
-          </div>
-          <div class="modal-body">
-            <div class="row g-3">
-              <div class="col-12">
-                <label class="form-label">Тип операции</label>
-                <select class="form-select" name="transaction_type" required>
-                  {% for type in data.manual_types %}<option value="{{ type.value }}">{{ data.type_labels[type] }}</option>{% endfor %}
-                </select>
-              </div>
-              <div class="col-12">
-                <label class="form-label">Сумма</label>
-                <div class="input-group"><input class="form-control" name="amount" inputmode="decimal" required><span class="input-group-text">₽</span></div>
-              </div>
-              <div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="3"></textarea></div>
-            </div>
-          </div>
-          <div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button><button class="btn btn-primary" type="submit">Создать</button></div>
-        </form>
+  <ul class="nav nav-tabs mb-4" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#finance-overview" type="button">Обзор</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#finance-income" type="button">Доходы</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#finance-expenses" type="button">Расходы</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#finance-settlements" type="button">Взаиморасчеты</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#finance-flow" type="button">Движение денег</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#finance-history" type="button">История операций</button></li>
+  </ul>
+
+  <div class="tab-content">
+    <section class="tab-pane fade show active" id="finance-overview">
+      <div class="row g-3 mb-4">
+        {% for label, value, icon, color in [
+          ('Получено от клиентов', data.stats.customer_received, 'bi-wallet2', 'primary'),
+          ('Доход монтажника', data.stats.installer_accrued, 'bi-person-check', 'primary'),
+          ('Доход офиса', data.stats.office_accrued, 'bi-building', 'primary'),
+          ('Общие расходы', data.stats.expenses_total, 'bi-receipt', 'danger'),
+          ('Чистая прибыль', data.stats.profit, 'bi-graph-up-arrow', 'success'),
+          ('Офис должен мне', data.stats.office_owes_me, 'bi-arrow-down-circle', 'warning'),
+          ('Я должен офису', data.stats.i_owe_office, 'bi-arrow-up-circle', 'warning'),
+          ('Доступный остаток монтажника', data.stats.available_installer_cash, 'bi-safe2', 'success')
+        ] %}
+          <div class="col-md-6 col-xl-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body d-flex justify-content-between align-items-start gap-3"><div><div class="text-secondary small">{{ label }}</div><div class="h3 mb-1 text-{{ color }}">{{ value }}</div><div class="small text-secondary">За выбранный период</div></div><span class="badge text-bg-{{ color }}"><i class="bi {{ icon }}"></i></span></div></div></div>
+        {% endfor %}
       </div>
-    </div>
+    </section>
+
+    <section class="tab-pane fade" id="finance-income">
+      <div class="card border-0 shadow-sm"><div class="card-header bg-white"><h2 class="h5 mb-0">Доходы</h2></div><div class="table-responsive"><table class="table table-striped table-hover align-middle mb-0"><thead><tr><th>Дата</th><th>Источник</th><th>Клиент</th><th class="text-end">Сумма</th><th>Описание</th></tr></thead><tbody>{% for item in data.income_items %}<tr><td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td>{{ finance_source_label(item) }}</td><td>{{ finance_client_label(item) }}</td><td class="text-end fw-semibold text-success">{{ item.amount }}</td><td>{{ item.comment or data.type_labels[item.transaction_type] }}</td></tr>{% else %}<tr><td colspan="5" class="text-center text-secondary py-4">Доходы не найдены</td></tr>{% endfor %}</tbody></table></div></div>
+    </section>
+
+    <section class="tab-pane fade" id="finance-expenses">
+      <div class="row g-3 mb-4">
+        <div class="col-md-6 col-xl"><div class="card"><div class="card-body"><div class="text-secondary small">Общая сумма</div><div class="h3 text-danger mb-0">{{ data.expense_summary.total }}</div></div></div></div>
+        <div class="col-md-6 col-xl"><div class="card"><div class="card-body"><div class="text-secondary small">Расходы монтажника</div><div class="h3 mb-0">{{ data.expense_summary.installer }}</div></div></div></div>
+        <div class="col-md-6 col-xl"><div class="card"><div class="card-body"><div class="text-secondary small">Расходы офиса</div><div class="h3 mb-0">{{ data.expense_summary.office }}</div></div></div></div>
+        <div class="col-md-6 col-xl"><div class="card"><div class="card-body"><div class="text-secondary small">Операций</div><div class="h3 mb-0">{{ data.expense_summary.operations }}</div></div></div></div>
+        <div class="col-md-6 col-xl"><div class="card"><div class="card-body"><div class="text-secondary small">Крупная статья</div><div class="h5 mb-0">{{ data.expense_summary.top.label }}</div><div class="small text-secondary">{{ data.expense_summary.top.amount }}</div></div></div></div>
+      </div>
+      <div class="card border-0 shadow-sm"><div class="card-header bg-white d-flex justify-content-between"><h2 class="h5 mb-0">Журнал расходов</h2><span class="badge text-bg-light text-dark border">Всего: {{ data.expenses_data.expenses.total if data.expenses_data else 0 }}</span></div><div class="table-responsive"><table class="table table-striped table-hover align-middle mb-0"><thead><tr><th>Дата</th><th>Категория</th><th>Описание</th><th class="text-end">Сумма</th><th>Кто оплатил</th><th>Комментарий</th></tr></thead><tbody>{% if data.expenses_data %}{% for row in data.expenses_data.expenses.items %}<tr><td>{{ row.expense.created_at.strftime('%d.%m.%Y') }}</td><td><span class="badge text-bg-secondary">{{ row.category_label }}</span></td><td class="fw-semibold">{{ row.description }}</td><td class="text-end fw-semibold">{{ row.expense.amount }}</td><td>{{ row.expense.paid_by.value }}</td><td>{{ row.comment or '—' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-secondary py-4">Расходы не найдены</td></tr>{% endfor %}{% endif %}</tbody></table></div></div>
+    </section>
+
+    <section class="tab-pane fade" id="finance-settlements">
+      <div class="row g-3 mb-4">{% for label, value in [('Офис должен мне', data.stats.office_owes_me), ('Я должен офису', data.stats.i_owe_office)] %}<div class="col-md-6"><div class="card h-100 border-0 shadow-sm"><div class="card-body"><div class="text-secondary small mb-2">{{ label }}</div>{% if value == 0 %}<div class="h4 text-success"><i class="bi bi-check-circle me-2"></i>Расчеты закрыты</div>{% else %}<div class="display-6 fw-semibold text-warning">{{ value }}</div><span class="badge text-bg-warning">Не выплачено</span>{% endif %}</div></div></div>{% endfor %}</div>
+      <div class="card border-0 shadow-sm"><div class="card-header bg-white"><h2 class="h5 mb-0">История выплат и передач</h2></div><div class="list-group list-group-flush">{% for item in data.settlement_items %}<div class="list-group-item d-flex justify-content-between align-items-start gap-3"><div><div class="fw-semibold">{{ data.type_labels[item.transaction_type] }}</div><div class="small text-secondary">{{ item.created_at.strftime('%d.%m.%Y %H:%M') }} · {{ item.comment or '—' }}</div></div><div class="fw-semibold {% if item.amount < 0 %}text-danger{% else %}text-success{% endif %}">{{ item.amount }}</div></div>{% else %}<div class="list-group-item text-center text-secondary py-4">Операций взаиморасчетов нет</div>{% endfor %}</div></div>
+    </section>
+
+    <section class="tab-pane fade" id="finance-flow">
+      <div class="card border-0 shadow-sm"><div class="card-header bg-white"><h2 class="h5 mb-0">Движение денег</h2></div><div class="list-group list-group-flush">{% for item in data.cash_flow_items %}<div class="list-group-item py-3"><div class="d-flex justify-content-between align-items-start gap-3"><div class="d-flex gap-3"><span class="badge {% if item.amount < 0 %}text-bg-danger{% else %}text-bg-success{% endif %} rounded-pill p-2"><i class="bi {% if item.amount < 0 %}bi-arrow-up-right{% else %}bi-arrow-down-left{% endif %}"></i></span><div><div class="fw-semibold">{{ data.type_labels[item.transaction_type] }}</div><div class="small text-secondary">{{ item.comment or finance_source_label(item) }}</div><div class="small text-secondary">{{ item.created_at.strftime('%d.%m.%Y %H:%M') }} · {{ money_direction(item) }}</div></div></div><div class="fw-semibold {% if item.amount < 0 %}text-danger{% else %}text-success{% endif %}">{{ item.amount }}</div></div></div>{% else %}<div class="list-group-item text-center text-secondary py-4">Движений денег нет</div>{% endfor %}</div></div>
+    </section>
+
+    <section class="tab-pane fade" id="finance-history">
+      <div class="card border-0 shadow-sm"><div class="card-header bg-white d-flex justify-content-between"><h2 class="h5 mb-0">История операций</h2><span class="badge text-bg-light text-dark border">Всего: {{ data.journal.total }}</span></div><div class="table-responsive"><table class="table table-striped table-hover align-middle mb-0"><thead><tr><th>Дата</th><th>Тип</th><th>Источник</th><th class="text-end">Сумма</th><th>Комментарий</th><th>Пользователь</th></tr></thead><tbody>{% for item in data.journal.items %}<tr><td>{{ item.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td><span class="badge text-bg-light text-dark border">{{ data.type_labels[item.transaction_type] }}</span></td><td>{{ finance_source_label(item) }}</td><td class="text-end fw-semibold {% if item.amount < 0 %}text-danger{% else %}text-success{% endif %}">{{ item.amount }}</td><td>{{ item.comment or '' }}</td><td>{{ item.user.full_name if item.user else '—' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-secondary py-4">Финансовые операции не найдены</td></tr>{% endfor %}</tbody></table></div>{% if data.journal.pages > 1 %}<div class="card-footer bg-white"><nav><ul class="pagination pagination-sm mb-0">{% for page_number in range(1, data.journal.pages + 1) %}<li class="page-item {% if page_number == data.journal.page %}active{% endif %}"><a class="page-link" href="/finance?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-get="/finance?{{ data.filter_query }}{% if data.filter_query %}&{% endif %}page={{ page_number }}" hx-target="#finance-module" hx-swap="outerHTML">{{ page_number }}</a></li>{% endfor %}</ul></nav></div>{% endif %}</div>
+    </section>
   </div>
+
+  <div class="modal fade" id="expenseModal" tabindex="-1"><div class="modal-dialog modal-lg modal-dialog-centered"><div class="modal-content"><form method="post" action="/finance/expenses" hx-post="/finance/expenses" hx-target="#finance-module" hx-swap="outerHTML"><div class="modal-header"><h2 class="modal-title h5">Добавить расход</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-md-4"><label class="form-label">Дата</label><input class="form-control" type="date" name="expense_date" required></div><div class="col-md-4"><label class="form-label">Категория</label><select class="form-select" name="category" required><option value="" selected disabled>Выберите категорию</option>{% if data.expenses_data %}{% for key, label in data.expenses_data.categories %}<option value="{{ key }}">{{ label }}</option>{% endfor %}{% endif %}</select></div><div class="col-md-4"><label class="form-label">Сумма</label><div class="input-group"><input class="form-control" name="amount" inputmode="decimal" required><span class="input-group-text">₽</span></div></div><div class="col-md-8"><label class="form-label">Описание</label><input class="form-control" name="description" required></div><div class="col-md-4"><label class="form-label">Кто оплатил</label><select class="form-select" name="paid_by" required><option value="INSTALLER">Монтажник</option><option value="OFFICE">Офис</option></select></div><div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="3"></textarea></div></div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button><button class="btn btn-primary">Сохранить</button></div></form></div></div></div>
+
+  <div class="modal fade" id="financeOperationModal" tabindex="-1"><div class="modal-dialog modal-dialog-centered"><div class="modal-content"><form method="post" action="/finance/operations" hx-post="/finance/operations" hx-target="#finance-module" hx-swap="outerHTML"><div class="modal-header"><h2 class="modal-title h5">Ручная финансовая операция</h2><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div class="row g-3"><div class="col-12"><label class="form-label">Тип операции</label><select class="form-select" name="transaction_type" required>{% for type in data.manual_types %}<option value="{{ type.value }}">{{ data.type_labels[type] }}</option>{% endfor %}</select></div><div class="col-12"><label class="form-label">Сумма</label><div class="input-group"><input class="form-control" name="amount" inputmode="decimal" required><span class="input-group-text">₽</span></div></div><div class="col-12"><label class="form-label">Комментарий</label><textarea class="form-control" name="comment" rows="3"></textarea></div></div></div><div class="modal-footer"><button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button><button class="btn btn-primary">Создать</button></div></form></div></div></div>
 </div>
+
+<script>
+(function() {
+  var select = document.getElementById('finance-period-select');
+  var fields = document.querySelectorAll('.finance-custom-period');
+  function sync() { fields.forEach(function(item) { item.classList.toggle('d-none', select.value !== 'custom'); }); }
+  if (select) {
+    select.addEventListener('change', function() { sync(); if (select.value !== 'custom') { document.getElementById('finance-period-form').submit(); } });
+    sync();
+  }
+})();
+</script>

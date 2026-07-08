@@ -34,7 +34,6 @@ NAV_ITEMS = [
     {"label": "Клиенты", "endpoint": "/clients", "icon": "bi-people"},
     {"label": "Склад", "endpoint": "/materials", "icon": "bi-box-seam"},
     {"label": "Финансы", "endpoint": "/finance", "icon": "bi-cash-coin"},
-    {"label": "Расходы", "endpoint": "/expenses", "icon": "bi-receipt"},
     {"label": "Допработы", "endpoint": "/extra-works", "icon": "bi-tools"},
     {"label": "Отчеты", "endpoint": "/reports", "icon": "bi-bar-chart"},
     {"label": "Настройки", "endpoint": "/settings", "icon": "bi-gear"},
