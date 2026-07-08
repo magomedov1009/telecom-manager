@@ -5,9 +5,7 @@ from urllib.parse import urlencode
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models.clients import Client, Connection, ConnectionMaterial
-from app.models.enums import Provider
-from app.services.connections import PROVIDER_LABELS
+from app.models.clients import Client, Connection, ConnectionMaterial, Provider
 from app.services.inventory import format_quantity
 
 
@@ -36,7 +34,6 @@ class ClientsPageData:
     filters: dict
     filter_query: str
     providers: list[Provider]
-    provider_labels: dict[Provider, str]
 
 
 @dataclass(frozen=True)
@@ -49,7 +46,6 @@ class ClientDetailData:
     status: str
     connection_date: object | None
     note: str
-    provider_labels: dict[Provider, str]
 
 
 def normalize_filters(search: str | None, provider: str | None) -> dict:
@@ -78,10 +74,7 @@ def build_clients_query(filters: dict):
             )
         )
     if filters.get("provider"):
-        try:
-            query = query.where(Client.provider == Provider(filters["provider"]))
-        except ValueError:
-            pass
+        query = query.where(Client.provider_id == int(filters["provider"]))
     return query.order_by(Client.id.desc())
 
 
@@ -90,9 +83,7 @@ def get_latest_connection(client: Client) -> Connection | None:
 
 
 def get_client_identifier(client: Client) -> str:
-    if client.provider == Provider.ELLKO:
-        return client.contract_number
-    return client.phone or client.contract_number
+    return client.contract_number or client.login or client.phone or "—"
 
 
 def make_client_item(client: Client) -> ClientListItem:
@@ -126,8 +117,7 @@ def get_clients_page_data(db: Session, filters: dict, page: int) -> ClientsPageD
         clients=get_clients_page(db, filters, page),
         filters=filters,
         filter_query=build_filter_query(filters),
-        providers=list(Provider),
-        provider_labels=PROVIDER_LABELS,
+        providers=list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
     )
 
 
@@ -160,5 +150,4 @@ def get_client_detail_data(client: Client) -> ClientDetailData:
         status="Активен" if latest_connection else "Без подключений",
         connection_date=latest_connection.connection_date if latest_connection else None,
         note=client.comment or "—",
-        provider_labels=PROVIDER_LABELS,
     )

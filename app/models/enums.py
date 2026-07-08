@@ -22,11 +22,6 @@ class MaterialUnit(StrEnum):
     METER = "meter"
 
 
-class Provider(StrEnum):
-    ELLKO = "ELLKO"
-    OPTIMASET = "OPTIMASET"
-
-
 class InventoryTransactionType(StrEnum):
     RECEIPT = "RECEIPT"
     CONNECTION = "CONNECTION"

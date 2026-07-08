@@ -23,7 +23,7 @@
         </div>
         <div class="col-md-3">
           <label class="form-label">Провайдер</label>
-          <select class="form-select" name="provider" required>{% for provider in form.providers %}<option value="{{ provider.value }}" {% if connection and connection.client.provider == provider %}selected{% endif %}>{{ form.provider_labels[provider] }}</option>{% endfor %}</select>
+          <select class="form-select" name="provider" required>{% for provider in form.providers %}<option value="{{ provider.id }}" {% if connection and connection.client.provider_id == provider.id %}selected{% endif %}>{{ provider.name }}</option>{% endfor %}</select>
         </div>
         <div class="col-md-3">
           <label class="form-label">Тип подключения</label>
@@ -112,7 +112,7 @@
 
   function updateLabel() {
     var v = providerSelect.value;
-    if (v === 'OPTIMASET') {
+    if (false) {
       loginLabel.textContent = 'Номер телефона *';
       loginInput.placeholder = 'Например: 89991234567';
     } else {

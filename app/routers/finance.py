@@ -90,13 +90,14 @@ def finance_page(
     date_to: Annotated[date | None, Query()] = None,
     transaction_type: Annotated[str | None, Query()] = None,
     user_id: Annotated[int | None, Query()] = None,
+    provider_id: Annotated[int | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
     active_period, period_from, period_to = resolve_period(period, date_from, date_to)
-    filters = normalize_filters(period_from, period_to, transaction_type, user_id, search)
+    filters = normalize_filters(period_from, period_to, transaction_type, user_id, search, provider_id)
     data = get_finance_page_data(db, filters=filters, page=page)
     expense_filters = normalize_expense_filters(search, None, period_from, period_to)
     object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=page))
@@ -153,6 +154,7 @@ def create_finance_expense(
     description: Annotated[str, Form()],
     amount: Annotated[str, Form()],
     paid_by: Annotated[str, Form()],
+    provider_id: Annotated[int, Form()],
     comment: Annotated[str | None, Form()] = None,
 ) -> Response:
     if current_user is None:
@@ -170,6 +172,7 @@ def create_finance_expense(
             paid_by_user_id=current_user.id,
             paid_by=paid_by,
             comment=comment,
+            provider_id=provider_id,
         )
         success = "Расход добавлен"
     except ExpenseError as exc:

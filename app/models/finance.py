@@ -18,6 +18,11 @@ class Expense(BaseModel):
         index=True,
         nullable=False,
     )
+    provider_id: Mapped[int] = mapped_column(
+        ForeignKey("providers.id", ondelete="RESTRICT"),
+        index=True,
+        nullable=False,
+    )
     category: Mapped[ExpenseCategory] = mapped_column(
         Enum(ExpenseCategory, name="expense_category"),
         index=True,
@@ -35,6 +40,7 @@ class Expense(BaseModel):
         back_populates="expenses",
         foreign_keys=[user_id],
     )
+    provider: Mapped["Provider"] = relationship(back_populates="expenses")
     finance_transactions: Mapped[list["FinanceTransaction"]] = relationship(
         back_populates="expense",
         cascade="all, delete-orphan",
@@ -68,6 +74,10 @@ class FinanceTransaction(BaseModel):
         ForeignKey("users.id", ondelete="SET NULL"),
         index=True,
     )
+    provider_id: Mapped[int | None] = mapped_column(
+        ForeignKey("providers.id", ondelete="SET NULL"),
+        index=True,
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     transaction_type: Mapped[FinanceTransactionType] = mapped_column(
         Enum(FinanceTransactionType, name="finance_transaction_type"),
@@ -87,3 +97,4 @@ class FinanceTransaction(BaseModel):
         back_populates="finance_transactions",
         foreign_keys=[user_id],
     )
+    provider: Mapped["Provider | None"] = relationship(back_populates="finance_transactions")

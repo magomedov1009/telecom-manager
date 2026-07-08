@@ -33,6 +33,13 @@
         <label class="form-label">По</label>
         <input class="form-control" type="date" name="date_to" value="{{ period.date_to.isoformat() if period.date_to else '' }}">
       </div>
+      <div class="col-lg-3 col-md-6">
+        <label class="form-label">Провайдер</label>
+        <select class="form-select" name="provider_id">
+          <option value="">Все</option>
+          {% for provider in providers %}<option value="{{ provider.id }}" {% if selected_provider_id == provider.id %}selected{% endif %}>{{ provider.name }}</option>{% endfor %}
+        </select>
+      </div>
       <div class="col-lg-3 col-md-6 d-grid">
         <button class="btn btn-primary" type="submit"><i class="bi bi-funnel me-2"></i>Применить</button>
       </div>

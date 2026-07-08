@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.enums import ExpenseCategory, FinanceTransactionType, PaidBy
+from app.models.clients import Provider
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
 
@@ -199,6 +200,7 @@ def create_expense(
     paid_by_user_id: int,
     paid_by: str,
     comment: str | None,
+    provider_id: int | None = None,
 ) -> None:
     category_key, _, db_category = get_category_option(category)
     if not description.strip():
@@ -211,10 +213,14 @@ def create_expense(
     user = db.get(User, paid_by_user_id)
     if user is None or not user.is_active:
         raise ExpenseError("Выберите пользователя, который оплатил расход")
+    provider = db.get(Provider, provider_id) if provider_id else db.scalar(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.id))
+    if provider is None or not provider.is_active:
+        raise ExpenseError("Выберите активного провайдера")
 
     created_at = datetime.combine(expense_date, time.min)
     expense = Expense(
         user_id=user.id,
+        provider_id=provider.id,
         category=db_category,
         amount=parsed_amount,
         paid_by=paid_by_enum,
@@ -227,6 +233,7 @@ def create_expense(
         FinanceTransaction(
             expense_id=expense.id,
             user_id=user.id,
+            provider_id=provider.id,
             amount=-parsed_amount,
             transaction_type=FinanceTransactionType.EXPENSE,
             comment=description.strip(),

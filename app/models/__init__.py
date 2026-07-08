@@ -1,7 +1,7 @@
 """SQLAlchemy models."""
 
 from app.models.base import BaseModel
-from app.models.clients import Client, Connection, ConnectionMaterial, ExtraWork
+from app.models.clients import Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
 from app.models.enums import (
     ConnectionType,
     EventAction,
@@ -9,7 +9,6 @@ from app.models.enums import (
     FinanceTransactionType,
     InventoryTransactionType,
     MaterialUnit,
-    Provider,
     UserRole,
 )
 from app.models.events import EventLog
@@ -28,6 +27,8 @@ __all__ = [
     "Expense",
     "ExpenseCategory",
     "ExtraWork",
+    "ExtraWorkMaterial",
+    "ExtraWorkType",
     "FinanceTransaction",
     "FinanceTransactionType",
     "InventoryTransaction",

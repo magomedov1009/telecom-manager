@@ -29,7 +29,7 @@
       <div class="table-responsive">
         <table class="table table-striped table-hover align-middle mb-0">
           <thead><tr><th>Название</th><th>Категория</th><th>Ед.</th>{% for warehouse in data.warehouses %}<th class="text-end">{{ warehouse.name }}</th>{% endfor %}<th class="text-end">Итого</th></tr></thead>
-          <tbody>{% for row in rows %}<tr><td class="fw-semibold">{{ row.material.name }}</td><td>{{ row.material.category or '-' }}</td><td>{{ row.unit_label }}</td>{% for cell in row.warehouse_quantities %}<td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ format_quantity(cell.quantity) }}</td>{% endfor %}<td class="text-end fw-semibold">{{ format_quantity(row.total) }}</td></tr>{% else %}<tr><td colspan="{{ data.warehouses|length + 4 }}" class="text-center text-secondary py-4">{{ empty_text }}</td></tr>{% endfor %}</tbody>
+          <tbody>{% for row in rows %}<tr><td class="fw-semibold">{{ row.material.name }}</td><td>{{ row.material.category or '-' }}</td><td>{{ row.unit_label }}</td>{% for cell in row.warehouse_quantities %}<td class="text-end {% if cell.quantity < 0 %}text-danger{% endif %}">{{ format_quantity(cell.quantity) }}</td>{% endfor %}<td class="text-end fw-semibold"><div>{{ format_quantity(row.total) }}</div><div class="small text-secondary mt-1">{% for provider, quantity in row.provider_quantities %}<span class="badge text-bg-light text-dark border me-1">{{ provider.name }}: {{ format_quantity(quantity) }}</span>{% endfor %}</div></td></tr>{% else %}<tr><td colspan="{{ data.warehouses|length + 4 }}" class="text-center text-secondary py-4">{{ empty_text }}</td></tr>{% endfor %}</tbody>
         </table>
       </div>
     </section>

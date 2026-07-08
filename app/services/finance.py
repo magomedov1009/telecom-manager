@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.clients import Connection, ExtraWork
 from app.models.enums import FinanceTransactionType, PaidBy
+from app.models.clients import Provider
 from app.models.finance import Expense, FinanceTransaction
 from app.services.expenses import ExpensesPageData
 from app.models.users import User
@@ -69,11 +70,13 @@ class FinancePageData:
     transaction_types: list[FinanceTransactionType]
     type_labels: dict[FinanceTransactionType, str]
     manual_types: list[FinanceTransactionType]
+    providers: list[Provider]
     expenses_data: ExpensesPageData | None = None
     income_items: list[FinanceTransaction] | None = None
     settlement_items: list[FinanceTransaction] | None = None
     cash_flow_items: list[FinanceTransaction] | None = None
     expense_summary: dict | None = None
+    income_summary: dict | None = None
     error: str | None = None
     success: str | None = None
 
@@ -95,6 +98,7 @@ def normalize_filters(
     transaction_type: str | None,
     user_id: int | None,
     search: str | None,
+    provider_id: int | None = None,
 ) -> dict:
     return {
         "date_from": date_from,
@@ -102,12 +106,13 @@ def normalize_filters(
         "transaction_type": transaction_type or None,
         "user_id": user_id,
         "search": search.strip() if search else None,
+        "provider_id": provider_id,
     }
 
 
 def build_filter_query(filters: dict) -> str:
     params = {}
-    for key in ("date_from", "date_to", "transaction_type", "user_id", "search"):
+    for key in ("date_from", "date_to", "transaction_type", "user_id", "search", "provider_id"):
         value = filters.get(key)
         if value:
             params[key] = value.isoformat() if hasattr(value, "isoformat") else value
@@ -200,6 +205,7 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     today_end = datetime.combine(now.date(), time.max)
     month_start = datetime(now.year, now.month, 1)
     period_start, period_end = period_from_filters(filters)
+    provider_id = filters.get("provider_id") if filters else None
 
     today_received = Decimal(db.scalar(get_money_received_query(today_start, today_end)) or 0)
     month_received = Decimal(db.scalar(get_money_received_query(month_start, None)) or 0)
@@ -209,6 +215,8 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         FinanceTransaction.accrual_to == PaidBy.INSTALLER,
         FinanceTransaction.amount > 0,
     )
+    if provider_id:
+        installer_accrued_query = installer_accrued_query.where(FinanceTransaction.provider_id == int(provider_id))
     installer_accrued = Decimal(db.scalar(apply_period(installer_accrued_query, period_start, period_end)) or 0)
 
     office_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
@@ -216,25 +224,38 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         FinanceTransaction.accrual_to == PaidBy.OFFICE,
         FinanceTransaction.amount > 0,
     )
+    if provider_id:
+        office_accrued_query = office_accrued_query.where(FinanceTransaction.provider_id == int(provider_id))
     office_accrued = Decimal(db.scalar(apply_period(office_accrued_query, period_start, period_end)) or 0)
 
-    expenses_total = Decimal(db.scalar(get_expense_query(period_start, period_end)) or 0)
-    income_total = Decimal(db.scalar(get_income_query(period_start, period_end)) or 0)
+    expenses_total_query = get_expense_query(period_start, period_end)
+    income_total_query = get_income_query(period_start, period_end)
+    if provider_id:
+        expenses_total_query = expenses_total_query.where(FinanceTransaction.provider_id == int(provider_id))
+        income_total_query = income_total_query.where(FinanceTransaction.provider_id == int(provider_id))
+    expenses_total = Decimal(db.scalar(expenses_total_query) or 0)
+    income_total = Decimal(db.scalar(income_total_query) or 0)
     profit = income_total - expenses_total
 
     installer_expenses_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(
         Expense.paid_by == PaidBy.INSTALLER,
     )
+    if provider_id:
+        installer_expenses_query = installer_expenses_query.where(Expense.provider_id == int(provider_id))
     installer_expenses = Decimal(db.scalar(apply_period(installer_expenses_query, period_start, period_end, Expense.created_at)) or 0)
 
     paid_from_office_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE,
     )
+    if provider_id:
+        paid_from_office_query = paid_from_office_query.where(FinanceTransaction.provider_id == int(provider_id))
     paid_from_office = Decimal(db.scalar(apply_period(paid_from_office_query, period_start, period_end)) or 0)
 
     paid_to_office_query = select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
     )
+    if provider_id:
+        paid_to_office_query = paid_to_office_query.where(FinanceTransaction.provider_id == int(provider_id))
     paid_to_office = Decimal(db.scalar(apply_period(paid_to_office_query, period_start, period_end)) or 0)
 
     office_money_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
@@ -242,11 +263,15 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         FinanceTransaction.accrual_to == PaidBy.OFFICE,
         FinanceTransaction.amount > 0,
     )
+    if provider_id:
+        office_money_query = office_money_query.where(FinanceTransaction.provider_id == int(provider_id))
     office_money = Decimal(db.scalar(apply_period(office_money_query, period_start, period_end)) or 0)
 
     adjustments_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
     )
+    if provider_id:
+        adjustments_query = adjustments_query.where(FinanceTransaction.provider_id == int(provider_id))
     adjustments = Decimal(db.scalar(apply_period(adjustments_query, period_start, period_end)) or 0)
 
     office_owes_me_raw = installer_accrued + installer_expenses - paid_from_office + adjustments
@@ -296,6 +321,8 @@ def build_journal_query(filters: dict) -> Select[tuple[FinanceTransaction]]:
             pass
     if filters.get("user_id"):
         query = query.where(FinanceTransaction.user_id == int(filters["user_id"]))
+    if filters.get("provider_id"):
+        query = query.where(FinanceTransaction.provider_id == int(filters["provider_id"]))
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
         query = query.outerjoin(FinanceTransaction.user).where(
@@ -374,6 +401,19 @@ def get_expense_summary(db: Session, filters: dict) -> dict:
     return {"total": total, "installer": installer, "office": office, "operations": operations, "top": top}
 
 
+def get_income_summary(db: Session, filters: dict) -> dict:
+    start, end = period_from_filters(filters)
+    provider_id = filters.get("provider_id") if filters else None
+    connection_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION, FinanceTransaction.amount > 0)
+    extra_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.EXTRA_WORK, FinanceTransaction.amount > 0)
+    if provider_id:
+        connection_query = connection_query.where(FinanceTransaction.provider_id == int(provider_id))
+        extra_query = extra_query.where(FinanceTransaction.provider_id == int(provider_id))
+    connection_income = Decimal(db.scalar(apply_period(connection_query, start, end)) or 0)
+    extra_income = Decimal(db.scalar(apply_period(extra_query, start, end)) or 0)
+    return {"connections": connection_income, "extra_works": extra_income, "total": connection_income + extra_income}
+
+
 def get_finance_page_data(
     db: Session,
     *,
@@ -391,10 +431,12 @@ def get_finance_page_data(
         transaction_types=list(FinanceTransactionType),
         type_labels=FINANCE_TYPE_LABELS,
         manual_types=MANUAL_TYPES,
+        providers=list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
         income_items=get_finance_items(db, filters, [FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
         settlement_items=get_finance_items(db, filters, [FinanceTransactionType.PAYMENT_FROM_OFFICE, FinanceTransactionType.PAYMENT_TO_OFFICE]),
         cash_flow_items=get_finance_items(db, filters),
         expense_summary=get_expense_summary(db, filters),
+        income_summary=get_income_summary(db, filters),
         error=error,
         success=success,
     )

@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user_optional
-from app.routers import clients, connections, expenses, finance, materials, pages
+from app.routers import additional_work_types, additional_works, clients, connections, expenses, finance, materials, pages, providers
 
 
 def create_app() -> FastAPI:
@@ -20,11 +20,14 @@ def create_app() -> FastAPI:
         debug=settings.app_debug,
     )
     application.mount("/static", StaticFiles(directory="app/static"), name="static")
+    application.include_router(additional_work_types.router)
+    application.include_router(additional_works.router)
     application.include_router(clients.router)
     application.include_router(connections.router)
     application.include_router(expenses.router)
     application.include_router(finance.router)
     application.include_router(materials.router)
+    application.include_router(providers.router)
     application.include_router(pages.router)
 
     templates = Jinja2Templates(directory="app/templates")

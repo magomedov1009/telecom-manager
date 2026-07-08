@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.clients import Provider
 from app.models.enums import InventoryItemType, InventoryTransactionType, MaterialUnit
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
@@ -69,6 +70,7 @@ class MaterialsPageData:
     operation_labels: dict[InventoryTransactionType, str]
     item_type_labels: dict[InventoryItemType, str]
     unit_options: list[str]
+    providers: list[Provider]
     error: str | None = None
     success: str | None = None
     filter_query: str = ""
@@ -96,7 +98,7 @@ def get_stock_quantity(db: Session, warehouse_id: int, material_id: int) -> Deci
     return Decimal(quantity or 0)
 
 
-def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[Material]) -> list[dict]:
+def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[Material], providers: list[Provider]) -> list[dict]:
     totals = db.execute(
         select(
             InventoryTransaction.warehouse_id,
@@ -105,6 +107,16 @@ def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[M
         ).group_by(InventoryTransaction.warehouse_id, InventoryTransaction.material_id)
     ).all()
     quantity_map = {(warehouse_id, material_id): Decimal(quantity) for warehouse_id, material_id, quantity in totals}
+    provider_totals = db.execute(
+        select(
+            InventoryTransaction.provider_id,
+            InventoryTransaction.material_id,
+            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+        )
+        .where(InventoryTransaction.provider_id.is_not(None))
+        .group_by(InventoryTransaction.provider_id, InventoryTransaction.material_id)
+    ).all()
+    provider_quantity_map = {(provider_id, material_id): Decimal(quantity) for provider_id, material_id, quantity in provider_totals}
 
     rows = []
     for material in materials:
@@ -120,6 +132,7 @@ def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[M
                 "unit_label": get_unit_label(material),
                 "warehouse_quantities": warehouse_quantities,
                 "total": total_quantity,
+                "provider_quantities": [(provider, provider_quantity_map.get((provider.id, material.id), Decimal("0"))) for provider in providers],
             }
         )
     return rows
@@ -266,10 +279,11 @@ def normalize_filters(search: str | None, warehouse_id: int | None, material_id:
 
 def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str | None = None, success: str | None = None, filter_query: str = "") -> MaterialsPageData:
     warehouses = get_active_warehouses(db)
+    providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
     all_items = get_active_materials(db)
     material_items = [item for item in all_items if item.item_type == InventoryItemType.MATERIAL]
     equipment_items = [item for item in all_items if item.item_type == InventoryItemType.EQUIPMENT]
-    stock_rows = build_stock_rows(db, warehouses, all_items)
+    stock_rows = build_stock_rows(db, warehouses, all_items, providers)
     return MaterialsPageData(
         warehouses=warehouses,
         materials=material_items,
@@ -283,6 +297,7 @@ def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str
         operation_labels=OPERATION_LABELS,
         item_type_labels=ITEM_TYPE_LABELS,
         unit_options=DEFAULT_UNIT_OPTIONS,
+        providers=providers,
         error=error,
         success=success,
         filter_query=filter_query,

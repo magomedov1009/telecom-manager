@@ -25,7 +25,7 @@
         <select class="form-select" name="provider">
           <option value="">Все провайдеры</option>
           {% for provider in data.providers %}
-            <option value="{{ provider.value }}" {% if data.filters.provider == provider.value %}selected{% endif %}>{{ data.provider_labels[provider] }}</option>
+            <option value="{{ provider.id }}" {% if data.filters.provider == provider.id|string %}selected{% endif %}>{{ provider.name }}</option>
           {% endfor %}
         </select>
       </div>
@@ -59,7 +59,7 @@
         {% for item in data.clients.items %}
           <tr>
             <td class="text-secondary">#{{ item.client.id }}</td>
-            <td><span class="badge text-bg-secondary">{{ data.provider_labels[item.client.provider] }}</span></td>
+            <td><span class="badge text-bg-secondary">{{ item.client.provider.name }}</span></td>
             <td><div class="fw-semibold">{{ item.identifier }}</div><div class="small text-secondary">{{ item.client.login }}</div></td>
             <td>{{ item.full_name }}</td>
             <td>{{ item.client.address }}</td>

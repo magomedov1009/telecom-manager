@@ -7,8 +7,8 @@ from urllib.parse import urlencode
 from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models.clients import Client, Connection, ConnectionMaterial
-from app.models.enums import ConnectionType, FinanceTransactionType, InventoryItemType, InventoryTransactionType, MaterialUnit, PaidBy, Provider, UserRole
+from app.models.clients import Client, Connection, ConnectionMaterial, Provider
+from app.models.enums import ConnectionType, FinanceTransactionType, InventoryItemType, InventoryTransactionType, MaterialUnit, PaidBy, UserRole
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
@@ -23,10 +23,6 @@ CONNECTION_TYPE_LABELS = {
     ConnectionType.CUSTOM: "Нестандартное подключение",
 }
 
-PROVIDER_LABELS = {
-    Provider.ELLKO: "ELLKO",
-    Provider.OPTIMASET: "OPTIMASET",
-}
 
 MATERIAL_UNIT_LABELS = {
     MaterialUnit.PIECE: "шт.",
@@ -54,7 +50,6 @@ class ConnectionsPageData:
     materials: list[Material]
     providers: list[Provider]
     connection_types: list[ConnectionType]
-    provider_labels: dict[Provider, str]
     connection_type_labels: dict[ConnectionType, str]
     unit_labels: dict[MaterialUnit, str]
     filters: dict
@@ -69,7 +64,6 @@ class ConnectionFormData:
     materials: list[Material]
     providers: list[Provider]
     connection_types: list[ConnectionType]
-    provider_labels: dict[Provider, str]
     connection_type_labels: dict[ConnectionType, str]
     unit_labels: dict[MaterialUnit, str]
     connection: Connection | None = None
@@ -106,20 +100,20 @@ def calculate_finance(price: Decimal, installer_amount: str | None, office_amoun
     installer = price - office
     return installer, office
 
-def get_reference_data(db: Session) -> tuple[list[Warehouse], list[Material]]:
+def get_reference_data(db: Session) -> tuple[list[Warehouse], list[Material], list[Provider]]:
     warehouses = list(db.scalars(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name)))
     materials = list(db.scalars(select(Material).where(Material.active.is_(True)).order_by(Material.name)))
-    return warehouses, materials
+    providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
+    return warehouses, materials, providers
 
 
 def get_form_data(db: Session, connection: Connection | None = None, error: str | None = None) -> ConnectionFormData:
-    warehouses, materials = get_reference_data(db)
+    warehouses, materials, providers = get_reference_data(db)
     return ConnectionFormData(
         warehouses=warehouses,
         materials=materials,
-        providers=list(Provider),
+        providers=providers,
         connection_types=list(ConnectionType),
-        provider_labels=PROVIDER_LABELS,
         connection_type_labels=CONNECTION_TYPE_LABELS,
         unit_labels=MATERIAL_UNIT_LABELS,
         connection=connection,
@@ -174,10 +168,7 @@ def build_connections_query(filters: dict) -> Select[tuple[Connection]]:
             )
         )
     if filters.get("provider"):
-        try:
-            query = query.where(Client.provider == Provider(filters["provider"]))
-        except ValueError:
-            pass
+        query = query.where(Client.provider_id == int(filters["provider"]))
     if filters.get("connection_type"):
         try:
             query = query.where(Connection.connection_type == ConnectionType(filters["connection_type"]))
@@ -209,14 +200,13 @@ def get_connections_page_data(
     error: str | None = None,
     success: str | None = None,
 ) -> ConnectionsPageData:
-    warehouses, materials = get_reference_data(db)
+    warehouses, materials, providers = get_reference_data(db)
     return ConnectionsPageData(
         connections=get_connections_page(db, filters, page),
         warehouses=warehouses,
         materials=materials,
-        providers=list(Provider),
+        providers=providers,
         connection_types=list(ConnectionType),
-        provider_labels=PROVIDER_LABELS,
         connection_type_labels=CONNECTION_TYPE_LABELS,
         unit_labels=MATERIAL_UNIT_LABELS,
         filters=filters,
@@ -242,27 +232,17 @@ def get_connection(db: Session, connection_id: int) -> Connection | None:
 
 
 def normalize_client_identity(
-    provider: Provider,
     contract_number: str | None,
     login: str | None,
     phone: str | None,
 ) -> tuple[str, str, str | None]:
     normalized_contract = contract_number.strip() if contract_number else ""
     normalized_login = login.strip() if login else ""
-
-    if provider == Provider.ELLKO:
-        if not normalized_login:
-            raise ConnectionError("Для Эллко обязателен номер договора")
-        return normalized_login, normalized_login, normalized_contract or None
-
-    if provider == Provider.OPTIMASET:
-        if not normalized_login:
-            raise ConnectionError("Для Оптимасеть обязателен номер телефона")
-        phone_value = normalized_login
-        phone_contract = phone_value[1:] if phone_value.startswith("8") and len(phone_value) > 1 else phone_value
-        return normalized_contract or phone_contract, phone_contract, phone_value
-
-    raise ConnectionError("Неизвестный провайдер")
+    normalized_phone = phone.strip() if phone else ""
+    identifier = normalized_contract or normalized_login or normalized_phone
+    if not identifier:
+        raise ConnectionError("Укажите номер договора, логин или телефон клиента")
+    return normalized_contract or identifier, normalized_login or identifier, normalized_phone or None
 
 
 def find_or_create_client(
@@ -277,14 +257,14 @@ def find_or_create_client(
 ) -> Client:
     client = db.scalar(select(Client).where(or_(Client.contract_number == contract_number, Client.login == login)))
     if client is None:
-        client = Client(provider=provider, contract_number=contract_number, login=login, address=address, phone=phone, comment=comment)
+        client = Client(provider_id=provider.id, contract_number=contract_number, login=login, address=address, phone=phone, comment=comment)
         db.add(client)
         db.flush()
         return client
 
     if client.contract_number != contract_number and client.login != login:
         raise ConnectionError("Номер договора или логин уже используются другим клиентом")
-    client.provider = provider
+    client.provider_id = provider.id
     client.contract_number = contract_number
     client.login = login
     client.address = address
@@ -319,6 +299,7 @@ def add_connection_materials_and_transactions(
                 user_id=user.id,
                 operation_type=InventoryTransactionType.CONNECTION,
                 quantity=-quantity,
+                provider_id=connection.client.provider_id,
                 comment=comment,
             )
         )
@@ -366,6 +347,7 @@ def replace_finance_transaction(
                 user_id=user.id,
                 transaction_type=FinanceTransactionType.CONNECTION,
                 accrual_to=PaidBy.INSTALLER,
+                provider_id=connection.client.provider_id,
                 comment="Начисление монтажнику",
             )
         )
@@ -377,6 +359,7 @@ def replace_finance_transaction(
                 user_id=user.id,
                 transaction_type=FinanceTransactionType.CONNECTION,
                 accrual_to=PaidBy.OFFICE,
+                provider_id=connection.client.provider_id,
                 comment="Начисление офису",
             )
         )
@@ -402,8 +385,10 @@ def create_connection(
     material_ids: list[int],
     material_quantities: list[str],
 ) -> Connection:
-    provider_enum = Provider(provider)
-    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(provider_enum, contract_number, login, phone)
+    provider_model = db.get(Provider, int(provider))
+    if provider_model is None or not provider_model.is_active:
+        raise ConnectionError("Выберите активного провайдера")
+    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(contract_number, login, phone)
     connection_type_enum = ConnectionType(connection_type)
     parsed_price = parse_decimal(price, "Цена подключения")
     parsed_installer_amount, parsed_office_amount = calculate_finance(parsed_price, installer_amount, office_amount)
@@ -416,7 +401,7 @@ def create_connection(
 
     client = find_or_create_client(
         db,
-        provider=provider_enum,
+        provider=provider_model,
         contract_number=normalized_contract_number,
         login=normalized_login,
         address=address.strip(),
@@ -464,8 +449,10 @@ def update_connection(
     material_ids: list[int],
     material_quantities: list[str],
 ) -> Connection:
-    provider_enum = Provider(provider)
-    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(provider_enum, contract_number, login, phone)
+    provider_model = db.get(Provider, int(provider))
+    if provider_model is None or not provider_model.is_active:
+        raise ConnectionError("Выберите активного провайдера")
+    normalized_contract_number, normalized_login, normalized_phone = normalize_client_identity(contract_number, login, phone)
     connection_type_enum = ConnectionType(connection_type)
     parsed_price = parse_decimal(price, "Цена подключения")
     parsed_installer_amount, parsed_office_amount = calculate_finance(parsed_price, installer_amount, office_amount)
@@ -479,7 +466,7 @@ def update_connection(
     validate_materials(db, warehouse_id, material_rows)
 
     client = connection.client
-    client.provider = provider_enum
+    client.provider_id = provider_model.id
     client.contract_number = normalized_contract_number
     client.login = normalized_login
     client.address = address.strip()

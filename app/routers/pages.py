@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.security import SESSION_COOKIE_NAME, create_session_token, verify_password
 from app.db.session import get_db
 from app.dependencies.auth import get_current_user_optional
-from app.models.clients import Client, Connection, ExtraWork
+from app.models.clients import Client, Connection, ExtraWork, Provider
 from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material
@@ -34,7 +34,7 @@ NAV_ITEMS = [
     {"label": "Клиенты", "endpoint": "/clients", "icon": "bi-people"},
     {"label": "Склад", "endpoint": "/materials", "icon": "bi-box-seam"},
     {"label": "Финансы", "endpoint": "/finance", "icon": "bi-cash-coin"},
-    {"label": "Допработы", "endpoint": "/extra-works", "icon": "bi-tools"},
+    {"label": "Допработы", "endpoint": "/additional-works", "icon": "bi-tools"},
     {"label": "Отчеты", "endpoint": "/reports", "icon": "bi-bar-chart"},
     {"label": "Настройки", "endpoint": "/settings", "icon": "bi-gear"},
 ]
@@ -184,7 +184,7 @@ def scalar_decimal(db: Session, query) -> Decimal:
     return Decimal(db.scalar(query) or 0)
 
 
-def build_dashboard_data(db: Session, period_data: dict) -> dict:
+def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None = None) -> dict:
     connection_period = period_filter(
         select(Connection),
         Connection.connection_date,
@@ -194,43 +194,48 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "end": period_data["date_to"],
         },
     )
+    if provider_id:
+        connection_period = connection_period.join(Connection.client).where(Client.provider_id == provider_id)
     connection_ids_subquery = connection_period.with_only_columns(Connection.id).subquery()
 
     connections = {
         "total": db.scalar(select(func.count()).select_from(connection_ids_subquery)) or 0,
-        "new_clients": db.scalar(select(func.count()).select_from(period_filter(select(Client), Client.created_at, period_data).subquery())) or 0,
+        "new_clients": db.scalar(select(func.count()).select_from((period_filter(select(Client), Client.created_at, period_data).where(Client.provider_id == provider_id) if provider_id else period_filter(select(Client), Client.created_at, period_data)).subquery())) or 0,
         "reconnects": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.RECONNECT)) or 0,
         "onu_replacements": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.ONU_REPLACE)) or 0,
     }
     connections["equipment_replacements"] = connections["onu_replacements"]
 
-    finance_filters = {"date_from": period_data["date_from"], "date_to": period_data["date_to"]}
+    finance_filters = {"date_from": period_data["date_from"], "date_to": period_data["date_to"], "provider_id": provider_id}
     finance_stats = get_finance_stats(db, finance_filters)
-    customer_received = scalar_decimal(
-        db,
-        period_filter(
-            select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-                FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
-                FinanceTransaction.amount > 0,
-            ),
-            FinanceTransaction.created_at,
-            period_data,
+    customer_received_query = period_filter(
+        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+            FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
+            FinanceTransaction.amount > 0,
         ),
+        FinanceTransaction.created_at,
+        period_data,
     )
+    if provider_id:
+        customer_received_query = customer_received_query.where(FinanceTransaction.provider_id == provider_id)
+    customer_received = scalar_decimal(db, customer_received_query)
 
     def stock_summary(item_type: InventoryItemType) -> list[dict]:
         rows = []
         items = list(db.scalars(select(Material).where(Material.active.is_(True), Material.item_type == item_type).order_by(Material.name)))
         for item in items:
-            balance = scalar_decimal(db, select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == item.id))
-            spent = scalar_decimal(
-                db,
-                period_filter(
+            balance_query = select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == item.id)
+            if provider_id:
+                balance_query = balance_query.where(InventoryTransaction.provider_id == provider_id)
+            balance = scalar_decimal(db, balance_query)
+            spent_query = period_filter(
                     select(func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0)).where(InventoryTransaction.material_id == item.id, InventoryTransaction.quantity < 0),
                     InventoryTransaction.created_at,
                     period_data,
-                ),
-            )
+                )
+            if provider_id:
+                spent_query = spent_query.where(InventoryTransaction.provider_id == provider_id)
+            spent = scalar_decimal(db, spent_query)
             rows.append({"label": item.name, "balance": balance, "spent": spent, "unit": item.unit_name or item.unit.value})
         return rows
 
@@ -239,27 +244,42 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
 
     expenses_total = scalar_decimal(
         db,
-        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.created_at, period_data),
+        (period_filter(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.created_at, period_data).where(Expense.provider_id == provider_id) if provider_id else period_filter(select(func.coalesce(func.sum(Expense.amount), 0)), Expense.created_at, period_data)),
     )
     installer_expenses = scalar_decimal(
         db,
-        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.INSTALLER), Expense.created_at, period_data),
+        (period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.INSTALLER), Expense.created_at, period_data).where(Expense.provider_id == provider_id) if provider_id else period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.INSTALLER), Expense.created_at, period_data)),
     )
     office_expenses = scalar_decimal(
         db,
-        period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.OFFICE), Expense.created_at, period_data),
+        (period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.OFFICE), Expense.created_at, period_data).where(Expense.provider_id == provider_id) if provider_id else period_filter(select(func.coalesce(func.sum(Expense.amount), 0)).where(Expense.paid_by == PaidBy.OFFICE), Expense.created_at, period_data)),
     )
-    top_expense_row = db.execute(
-        period_filter(
-            select(Expense.category, func.coalesce(func.sum(Expense.amount), 0).label("total")).group_by(Expense.category).order_by(func.coalesce(func.sum(Expense.amount), 0).desc()),
-            Expense.created_at,
-            period_data,
-        ).limit(1)
-    ).first()
+    top_expense_query = period_filter(
+        select(Expense.category, func.coalesce(func.sum(Expense.amount), 0).label("total")).group_by(Expense.category).order_by(func.coalesce(func.sum(Expense.amount), 0).desc()),
+        Expense.created_at,
+        period_data,
+    )
+    if provider_id:
+        top_expense_query = top_expense_query.where(Expense.provider_id == provider_id)
+    top_expense_row = db.execute(top_expense_query.limit(1)).first()
     top_expense = {"label": "—", "amount": Decimal("0")}
     if top_expense_row is not None:
         top_expense = {"label": EXPENSE_CATEGORY_LABELS.get(top_expense_row[0], top_expense_row[0].value), "amount": Decimal(top_expense_row[1] or 0)}
-    expense_operations = db.scalar(select(func.count()).select_from(period_filter(select(Expense), Expense.created_at, period_data).subquery())) or 0
+    expense_count_query = period_filter(select(Expense), Expense.created_at, period_data)
+    if provider_id:
+        expense_count_query = expense_count_query.where(Expense.provider_id == provider_id)
+    expense_operations = db.scalar(select(func.count()).select_from(expense_count_query.subquery())) or 0
+
+    extra_query = period_filter(select(ExtraWork), ExtraWork.work_date, {**period_data, "start": period_data["date_from"], "end": period_data["date_to"]})
+    if provider_id:
+        extra_query = extra_query.where(ExtraWork.provider_id == provider_id)
+    extra_subquery = extra_query.subquery()
+    extra_works = {
+        "count": db.scalar(select(func.count()).select_from(extra_subquery)) or 0,
+        "total": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.amount), 0))),
+        "installer": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.installer_amount), 0))),
+        "office": scalar_decimal(db, select(func.coalesce(func.sum(extra_subquery.c.office_amount), 0))),
+    }
 
     finance_events = [
         {
@@ -270,7 +290,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "icon": "bi-cash-coin",
             "tone": "primary",
         }
-        for item in db.scalars(select(FinanceTransaction).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(10))
+        for item in db.scalars((select(FinanceTransaction).where(FinanceTransaction.provider_id == provider_id) if provider_id else select(FinanceTransaction)).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(10))
     ]
     inventory_events = [
         {
@@ -281,7 +301,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "icon": "bi-box-seam",
             "tone": "secondary",
         }
-        for item in db.scalars(select(InventoryTransaction).order_by(InventoryTransaction.created_at.desc(), InventoryTransaction.id.desc()).limit(10))
+        for item in db.scalars((select(InventoryTransaction).where(InventoryTransaction.provider_id == provider_id) if provider_id else select(InventoryTransaction)).order_by(InventoryTransaction.created_at.desc(), InventoryTransaction.id.desc()).limit(10))
     ]
     events = sorted(finance_events + inventory_events, key=lambda item: item["date"], reverse=True)[:10]
 
@@ -291,6 +311,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
         "customer_received": customer_received,
         "materials": materials,
         "equipment": equipment,
+        "extra_works": extra_works,
         "expenses": {
             "total": expenses_total,
             "installer": installer_expenses,
@@ -334,16 +355,18 @@ def dashboard(
     period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
+    provider_id: Annotated[int | None, Query()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
 
     period_data = resolve_dashboard_period(period, date_from, date_to)
-    dashboard_data = build_dashboard_data(db, period_data)
+    providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
+    dashboard_data = build_dashboard_data(db, period_data, provider_id)
     return render(
         request,
         "pages/dashboard.html",
-        {"user": current_user, "period": period_data, "dashboard": dashboard_data, "period_labels": PERIOD_LABELS},
+        {"user": current_user, "period": period_data, "dashboard": dashboard_data, "period_labels": PERIOD_LABELS, "providers": providers, "selected_provider_id": provider_id},
     )
 
 
@@ -362,7 +385,7 @@ def section_page(
         "materials": "Склад",
         "finance": "Финансы",
         "expenses": "Расходы",
-        "extra-works": "Допработы",
+        "additional-works": "Допработы",
         "reports": "Отчеты",
         "settings": "Настройки",
     }

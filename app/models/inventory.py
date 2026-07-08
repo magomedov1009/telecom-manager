@@ -70,6 +70,10 @@ class InventoryTransaction(BaseModel):
         index=True,
         nullable=False,
     )
+    provider_id: Mapped[int | None] = mapped_column(
+        ForeignKey("providers.id", ondelete="SET NULL"),
+        index=True,
+    )
     operation_type: Mapped[InventoryTransactionType] = mapped_column(
         Enum(InventoryTransactionType, name="inventory_transaction_type"),
         index=True,
@@ -85,3 +89,4 @@ class InventoryTransaction(BaseModel):
         back_populates="inventory_transactions",
         foreign_keys=[user_id],
     )
+    provider: Mapped["Provider | None"] = relationship(back_populates="inventory_transactions")

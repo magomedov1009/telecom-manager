@@ -25,7 +25,7 @@
         <div class="text-secondary small text-uppercase fw-semibold mb-2">Подключение #{{ connection.id }}</div>
         <h1 class="h2 mb-2">{{ connection.client.contract_number }}</h1>
         <div class="d-flex flex-wrap gap-2">
-          <span class="badge text-bg-secondary">{{ connection.client.provider.value }}</span>
+          <span class="badge text-bg-secondary">{{ connection.client.provider.name }}</span>
           <span class="badge text-bg-primary">{{ connection.connection_date.strftime('%d.%m.%Y') }}</span>
           <span class="badge text-bg-light text-dark border">{{ connection.connection_type.value }}</span>
         </div>
@@ -46,7 +46,7 @@
           <div class="col-md-6">
             <h3 class="h6 text-secondary text-uppercase mb-3">Клиент</h3>
             <div class="d-grid gap-3">
-              <div><div class="text-secondary small">Провайдер</div><div class="fw-semibold">{{ connection.client.provider.value }}</div></div>
+              <div><div class="text-secondary small">Провайдер</div><div class="fw-semibold">{{ connection.client.provider.name }}</div></div>
               <div><div class="text-secondary small">Идентификатор</div><div class="fw-semibold">{{ connection.client.contract_number }}</div></div>
               <div><div class="text-secondary small">Логин</div><div class="fw-semibold">{{ connection.client.login }}</div></div>
               <div><div class="text-secondary small">Адрес</div><div class="fw-semibold">{{ connection.client.address }}</div></div>

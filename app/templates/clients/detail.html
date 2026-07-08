@@ -16,7 +16,7 @@
         <div class="text-secondary small text-uppercase fw-semibold mb-2">Карточка клиента</div>
         <h1 class="h2 mb-2">{{ data.full_name }}</h1>
         <div class="d-flex flex-wrap gap-2">
-          <span class="badge text-bg-secondary">{{ data.provider_labels[data.client.provider] }}</span>
+          <span class="badge text-bg-secondary">{{ data.client.provider.name }}</span>
           <span class="badge {% if data.connection_date %}text-bg-success{% else %}text-bg-light text-dark border{% endif %}">{{ data.status }}</span>
         </div>
       </div>
