@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
 {% block title %}Dashboard | {{ app_name }}{% endblock %}
 {% block page_heading %}Dashboard{% endblock %}
@@ -6,17 +6,19 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
   <div>
-    <div class="text-secondary small">&#1054;&#1090;&#1095;&#1077;&#1090;&#1085;&#1099;&#1081; &#1087;&#1077;&#1088;&#1080;&#1086;&#1076;</div>
-    <h1 class="h3 mb-0">{{ period.label }}: {{ period.date_from.strftime('%d.%m.%Y') }} - {{ period.date_to.strftime('%d.%m.%Y') }}</h1>
+    <div class="text-secondary small">Главный отчет руководителя</div>
+    <h1 class="h3 mb-0">
+      {{ period.label }}{% if period.date_from and period.date_to %}: {{ period.date_from.strftime('%d.%m.%Y') }} - {{ period.date_to.strftime('%d.%m.%Y') }}{% endif %}
+    </h1>
   </div>
-  <button class="btn btn-outline-primary" type="button"><i class="bi bi-download me-2"></i>&#1069;&#1082;&#1089;&#1087;&#1086;&#1088;&#1090;</button>
+  <button class="btn btn-outline-primary" type="button"><i class="bi bi-download me-2"></i>Экспорт</button>
 </div>
 
 <section class="card mb-4">
   <div class="card-body">
     <form class="row g-2 align-items-end" method="get" action="/dashboard" id="dashboard-period-form">
       <div class="col-lg-3 col-md-6">
-        <label class="form-label">&#1055;&#1077;&#1088;&#1080;&#1086;&#1076;</label>
+        <label class="form-label">Период</label>
         <select class="form-select" name="period" id="dashboard-period-select">
           {% for key, label in period_labels.items() %}
             <option value="{{ key }}" {% if period.period == key %}selected{% endif %}>{{ label }}</option>
@@ -24,102 +26,170 @@
         </select>
       </div>
       <div class="col-lg-3 col-md-6 dashboard-custom-period">
-        <label class="form-label">&#1057;</label>
-        <input class="form-control" type="date" name="date_from" value="{{ period.date_from.isoformat() }}">
+        <label class="form-label">С</label>
+        <input class="form-control" type="date" name="date_from" value="{{ period.date_from.isoformat() if period.date_from else '' }}">
       </div>
       <div class="col-lg-3 col-md-6 dashboard-custom-period">
-        <label class="form-label">&#1055;&#1086;</label>
-        <input class="form-control" type="date" name="date_to" value="{{ period.date_to.isoformat() }}">
+        <label class="form-label">По</label>
+        <input class="form-control" type="date" name="date_to" value="{{ period.date_to.isoformat() if period.date_to else '' }}">
       </div>
       <div class="col-lg-3 col-md-6 d-grid">
-        <button class="btn btn-primary" type="submit"><i class="bi bi-funnel me-2"></i>&#1055;&#1088;&#1080;&#1084;&#1077;&#1085;&#1080;&#1090;&#1100;</button>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-funnel me-2"></i>Применить</button>
       </div>
     </form>
   </div>
 </section>
 
-<section class="mb-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 class="h4 mb-0">&#1055;&#1086;&#1076;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1080;&#1103;</h2>
-    <span class="badge text-bg-light text-dark border">{{ period.label }}</span>
-  </div>
-  <div class="row g-3">
-    {% for label, value, icon, color in [
-      ('&#1050;&#1086;&#1083;&#1080;&#1095;&#1077;&#1089;&#1090;&#1074;&#1086; &#1087;&#1086;&#1076;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1080;&#1081;', dashboard.connections.total, 'bi-router', 'primary'),
-      ('&#1053;&#1086;&#1074;&#1099;&#1093; &#1082;&#1083;&#1080;&#1077;&#1085;&#1090;&#1086;&#1074;', dashboard.connections.new_clients, 'bi-person-plus', 'success'),
-      ('&#1055;&#1086;&#1074;&#1090;&#1086;&#1088;&#1085;&#1099;&#1093; &#1087;&#1086;&#1076;&#1082;&#1083;&#1102;&#1095;&#1077;&#1085;&#1080;&#1081;', dashboard.connections.reconnects, 'bi-arrow-repeat', 'warning'),
-      ('&#1047;&#1072;&#1084;&#1077;&#1085; ONU', dashboard.connections.onu_replacements, 'bi-hdd-network', 'info')
-    ] %}
-      <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-body d-flex justify-content-between gap-3"><div><div class="text-secondary small">{{ label|safe }}</div><div class="h2 mb-0">{{ value }}</div></div><span class="badge text-bg-{{ color }} align-self-start"><i class="bi {{ icon }}"></i></span></div></div></div>
-    {% endfor %}
-  </div>
+<section class="row g-3 mb-4">
+  {% for item in [
+    {'label':'Подключений','value':dashboard.connections.total,'hint':'За выбранный период','icon':'bi-router','color':'secondary'},
+    {'label':'Новых клиентов','value':dashboard.connections.new_clients,'hint':'Клиентских карточек','icon':'bi-person-plus','color':'secondary'},
+    {'label':'Повторных подключений','value':dashboard.connections.reconnects,'hint':'Повторные работы','icon':'bi-arrow-repeat','color':'secondary'},
+    {'label':'Замен оборудования','value':dashboard.connections.equipment_replacements,'hint':'Замены ONU','icon':'bi-hdd-network','color':'secondary'},
+    {'label':'Получено от клиентов','value':dashboard.customer_received,'hint':'Доход за период','icon':'bi-wallet2','color':'primary'},
+    {'label':'Доход монтажника','value':dashboard.finance.installer_accrued,'hint':'Начислено монтажнику','icon':'bi-person-check','color':'primary'},
+    {'label':'Доход офиса','value':dashboard.finance.office_accrued,'hint':'Начислено офису','icon':'bi-building','color':'primary'},
+    {'label':'Расходы','value':dashboard.finance.expenses_total,'hint':'Все расходы','icon':'bi-receipt','color':'danger'},
+    {'label':'Чистая прибыль','value':dashboard.finance.profit,'hint':'Доходы минус расходы','icon':'bi-graph-up-arrow','color':'success'}
+  ] %}
+    <div class="col-sm-6 col-xl-4 col-xxl-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start gap-3">
+            <div>
+              <div class="text-secondary small">{{ item.label }}</div>
+              <div class="h3 mb-1 text-{{ item.color }}">{{ item.value }}</div>
+              <div class="small text-secondary">{{ item.hint }}</div>
+            </div>
+            <span class="badge text-bg-{{ item.color }} rounded-pill"><i class="bi {{ item.icon }}"></i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
 </section>
 
-<section class="mb-4">
-  <h2 class="h4 mb-3">&#1060;&#1080;&#1085;&#1072;&#1085;&#1089;&#1099;</h2>
-  <div class="row g-3">
-    {% for label, value, icon, color in [
-      ('&#1055;&#1086;&#1083;&#1091;&#1095;&#1077;&#1085;&#1086; &#1086;&#1090; &#1082;&#1083;&#1080;&#1077;&#1085;&#1090;&#1086;&#1074;', dashboard.customer_received, 'bi-wallet2', 'primary'),
-      ('&#1044;&#1086;&#1093;&#1086;&#1076; &#1084;&#1086;&#1085;&#1090;&#1072;&#1078;&#1085;&#1080;&#1082;&#1072;', dashboard.finance.installer_accrued, 'bi-person-check', 'success'),
-      ('&#1044;&#1086;&#1093;&#1086;&#1076; &#1086;&#1092;&#1080;&#1089;&#1072;', dashboard.finance.office_accrued, 'bi-building', 'secondary'),
-      ('&#1056;&#1072;&#1089;&#1093;&#1086;&#1076;&#1099;', dashboard.finance.expenses_total, 'bi-receipt', 'danger'),
-      ('&#1063;&#1080;&#1089;&#1090;&#1072;&#1103; &#1087;&#1088;&#1080;&#1073;&#1099;&#1083;&#1100;', dashboard.finance.profit, 'bi-graph-up-arrow', 'info')
-    ] %}
-      <div class="col-md-6 col-xl"><div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between"><span class="text-secondary small">{{ label|safe }}</span><i class="bi {{ icon }} text-{{ color }}"></i></div><div class="h3 mt-2 mb-0">{{ value }}</div></div></div></div>
-    {% endfor %}
+<div class="row g-4 mb-4">
+  <div class="col-xl-8">
+    <section class="card h-100 border-0 shadow-sm">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0">Взаиморасчеты</h2>
+        <span class="badge text-bg-warning">Контроль долгов</span>
+      </div>
+      <div class="card-body">
+        <div class="row g-3">
+          {% for label, value in [('Офис должен мне', dashboard.finance.office_owes_me), ('Я должен офису', dashboard.finance.i_owe_office)] %}
+            <div class="col-md-6">
+              <div class="border rounded p-4 h-100 bg-light">
+                <div class="text-secondary small mb-2">{{ label }}</div>
+                {% if value == 0 %}
+                  <div class="h4 text-success mb-2"><i class="bi bi-check-circle me-2"></i>Расчеты закрыты</div>
+                  <span class="badge text-bg-success">Нет долга</span>
+                {% else %}
+                  <div class="display-6 fw-semibold text-warning mb-2">{{ value }}</div>
+                  <span class="badge text-bg-warning">Не выплачено</span>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
   </div>
-</section>
+  <div class="col-xl-4">
+    <section class="card h-100 border-0 shadow-sm">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Требует внимания</h2></div>
+      <div class="card-body">
+        {% if dashboard.attention %}
+          <div class="vstack gap-2">
+            {% for warning in dashboard.attention %}
+              <div class="alert alert-{{ warning.level }} mb-0 py-2"><i class="bi {{ warning.icon }} me-2"></i>{{ warning.label }}</div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="alert alert-success mb-0"><i class="bi bi-check-circle me-2"></i>Всё в порядке</div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+</div>
 
 <section class="mb-4">
-  <h2 class="h4 mb-3">&#1042;&#1079;&#1072;&#1080;&#1084;&#1086;&#1088;&#1072;&#1089;&#1095;&#1077;&#1090;&#1099;</h2>
+  <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h4 mb-0">Дополнительные KPI</h2><span class="badge text-bg-light text-dark border">Средние значения</span></div>
   <div class="row g-3">
-    {% for label, value, color in [
-      ('&#1054;&#1092;&#1080;&#1089; &#1076;&#1086;&#1083;&#1078;&#1077;&#1085; &#1084;&#1085;&#1077;', dashboard.finance.office_owes_me, 'warning'),
-      ('&#1071; &#1076;&#1086;&#1083;&#1078;&#1077;&#1085; &#1086;&#1092;&#1080;&#1089;&#1091;', dashboard.finance.i_owe_office, 'danger')
-    ] %}
-      <div class="col-md-6"><div class="card h-100"><div class="card-body d-flex justify-content-between align-items-center gap-3"><div><div class="text-secondary small">{{ label|safe }}</div><div class="h3 mb-0">{{ value }}</div></div>{% if value == 0 %}<span class="badge text-bg-success">&#1056;&#1072;&#1089;&#1095;&#1077;&#1090;&#1099; &#1079;&#1072;&#1082;&#1088;&#1099;&#1090;&#1099;</span>{% else %}<span class="badge text-bg-{{ color }}">&#1045;&#1089;&#1090;&#1100; &#1073;&#1072;&#1083;&#1072;&#1085;&#1089;</span>{% endif %}</div></div></div>
+    {% for label, value, icon in [('Средний чек', dashboard.kpi.average_check, 'bi-cash-stack'), ('Средняя прибыль с подключения', dashboard.kpi.average_profit, 'bi-graph-up'), ('Средний расход на подключение', dashboard.kpi.average_expense, 'bi-receipt-cutoff'), ('Средний расход материалов', dashboard.kpi.average_material_spent, 'bi-box')] %}
+      <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between"><span class="text-secondary small">{{ label }}</span><i class="bi {{ icon }} text-secondary"></i></div><div class="h3 mt-2 mb-0">{% if value is none %}—{% else %}{{ format_quantity(value) }}{% endif %}</div></div></div></div>
     {% endfor %}
   </div>
 </section>
 
 <div class="row g-4 mb-4">
-  <div class="col-xl-4">
-    <section class="card h-100">
-      <div class="card-header"><h2 class="card-title mb-0">&#1052;&#1072;&#1090;&#1077;&#1088;&#1080;&#1072;&#1083;&#1099;</h2></div>
-      <div class="table-responsive"><table class="table table-striped table-hover align-middle mb-0"><thead><tr><th>&#1055;&#1086;&#1079;&#1080;&#1094;&#1080;&#1103;</th><th class="text-end">&#1054;&#1089;&#1090;&#1072;&#1090;&#1086;&#1082;</th><th class="text-end">&#1056;&#1072;&#1089;&#1093;&#1086;&#1076;</th></tr></thead><tbody>{% for item in dashboard.materials %}<tr><td class="fw-semibold">{{ item.label }}</td><td class="text-end">{{ format_quantity(item.balance) }}</td><td class="text-end text-danger">{{ format_quantity(item.spent) }}</td></tr>{% else %}<tr><td colspan="3" class="text-center text-secondary py-3">&#1053;&#1077;&#1090; &#1084;&#1072;&#1090;&#1077;&#1088;&#1080;&#1072;&#1083;&#1086;&#1074;</td></tr>{% endfor %}</tbody></table></div>
-    </section>
-  </div>
-  <div class="col-xl-4">
-    <section class="card h-100">
-      <div class="card-header"><h2 class="card-title mb-0">&#1054;&#1073;&#1086;&#1088;&#1091;&#1076;&#1086;&#1074;&#1072;&#1085;&#1080;&#1077;</h2></div>
-      <div class="table-responsive"><table class="table table-striped table-hover align-middle mb-0"><thead><tr><th>&#1055;&#1086;&#1079;&#1080;&#1094;&#1080;&#1103;</th><th class="text-end">&#1054;&#1089;&#1090;&#1072;&#1090;&#1086;&#1082;</th><th class="text-end">&#1056;&#1072;&#1089;&#1093;&#1086;&#1076;</th></tr></thead><tbody>{% for item in dashboard.equipment %}<tr><td class="fw-semibold">{{ item.label }}</td><td class="text-end">{{ format_quantity(item.balance) }}</td><td class="text-end text-danger">{{ format_quantity(item.spent) }}</td></tr>{% else %}<tr><td colspan="3" class="text-center text-secondary py-3">&#1053;&#1077;&#1090; &#1086;&#1073;&#1086;&#1088;&#1091;&#1076;&#1086;&#1074;&#1072;&#1085;&#1080;&#1103;</td></tr>{% endfor %}</tbody></table></div>
-    </section>
-  </div>
-  <div class="col-xl-4">
-    <section class="card h-100">
-      <div class="card-header"><h2 class="card-title mb-0">&#1056;&#1072;&#1089;&#1093;&#1086;&#1076;&#1099;</h2></div>
+  <div class="col-xl-6">
+    <section class="card h-100 border-0 shadow-sm">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Материалы</h2></div>
       <div class="card-body">
         <div class="row g-3">
-          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">&#1042;&#1089;&#1077;&#1075;&#1086;</div><div class="h4 mb-0">{{ dashboard.expenses.total }}</div></div></div>
-          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">&#1052;&#1086;&#1085;&#1090;&#1072;&#1078;&#1085;&#1080;&#1082;</div><div class="h4 mb-0">{{ dashboard.expenses.installer }}</div></div></div>
-          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">&#1054;&#1092;&#1080;&#1089;</div><div class="h4 mb-0">{{ dashboard.expenses.office }}</div></div></div>
-          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">&#1050;&#1088;&#1091;&#1087;&#1085;&#1072;&#1103; &#1089;&#1090;&#1072;&#1090;&#1100;&#1103;</div><div class="h4 mb-0">{{ dashboard.expenses.top.amount }}</div><div class="small text-secondary">{{ dashboard.expenses.top.label }}</div></div></div>
+          {% for item in dashboard.materials %}
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><div class="fw-semibold mb-3">{{ item.label }}</div><div class="d-flex justify-content-between small text-secondary"><span>Остаток</span><span>Израсходовано</span></div><div class="d-flex justify-content-between align-items-end"><span class="h4 mb-0">{{ format_quantity(item.balance) }}</span><span class="h5 mb-0 text-danger">{{ format_quantity(item.spent) }}</span></div><div class="progress mt-3" style="height: 6px;"><div class="progress-bar bg-primary" style="width: 100%"></div></div></div></div>
+          {% else %}
+            <div class="col-12"><div class="alert alert-light border mb-0">Материалы не найдены</div></div>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="col-xl-6">
+    <section class="card h-100 border-0 shadow-sm">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Оборудование</h2></div>
+      <div class="card-body">
+        <div class="row g-3">
+          {% for item in dashboard.equipment %}
+            <div class="col-md-6"><div class="border rounded p-3 h-100"><div class="fw-semibold mb-3">{{ item.label }}</div><div class="d-flex justify-content-between small text-secondary"><span>Остаток</span><span>Израсходовано</span></div><div class="d-flex justify-content-between align-items-end"><span class="h4 mb-0">{{ format_quantity(item.balance) }}</span><span class="h5 mb-0 text-danger">{{ format_quantity(item.spent) }}</span></div><div class="progress mt-3" style="height: 6px;"><div class="progress-bar bg-secondary" style="width: 100%"></div></div></div></div>
+          {% else %}
+            <div class="col-12"><div class="alert alert-light border mb-0">Оборудование не найдено</div></div>
+          {% endfor %}
         </div>
       </div>
     </section>
   </div>
 </div>
 
-<section class="card">
-  <div class="card-header d-flex justify-content-between align-items-center"><h2 class="card-title mb-0">&#1055;&#1086;&#1089;&#1083;&#1077;&#1076;&#1085;&#1080;&#1077; &#1086;&#1087;&#1077;&#1088;&#1072;&#1094;&#1080;&#1080;</h2><span class="badge text-bg-light text-dark border">10</span></div>
-  <div class="list-group list-group-flush">
-    {% for event in dashboard.events %}
-      <div class="list-group-item d-flex justify-content-between align-items-center gap-3"><div class="d-flex align-items-center gap-3"><span class="avatar avatar-sm bg-primary-lt text-primary"><i class="bi {{ event.icon }}"></i></span><div><div class="fw-semibold">{{ event.type }}</div><div class="small text-secondary">{{ event.title }}</div></div></div><div class="text-end"><div class="fw-semibold">{{ event.amount }}</div><div class="small text-secondary">{{ event.date.strftime('%d.%m.%Y %H:%M') }}</div></div></div>
-    {% else %}
-      <div class="list-group-item text-center text-secondary py-4">&#1054;&#1087;&#1077;&#1088;&#1072;&#1094;&#1080;&#1081; &#1085;&#1077;&#1090;</div>
-    {% endfor %}
+<div class="row g-4">
+  <div class="col-xl-5">
+    <section class="card h-100 border-0 shadow-sm">
+      <div class="card-header bg-white"><h2 class="h5 mb-0">Расходы</h2></div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">Общие расходы</div><div class="h4 mb-0 text-danger">{{ dashboard.expenses.total }}</div></div></div>
+          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">Монтажник</div><div class="h4 mb-0">{{ dashboard.expenses.installer }}</div></div></div>
+          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">Офис</div><div class="h4 mb-0">{{ dashboard.expenses.office }}</div></div></div>
+          <div class="col-6"><div class="border rounded p-3"><div class="text-secondary small">Операций</div><div class="h4 mb-0">{{ dashboard.expenses.operations }}</div></div></div>
+          <div class="col-12"><div class="alert alert-light border mb-0"><div class="text-secondary small">Самая крупная статья расходов</div><div class="fw-semibold">{{ dashboard.expenses.top.label }} — {{ dashboard.expenses.top.amount }}</div></div></div>
+        </div>
+      </div>
+    </section>
   </div>
-</section>
+  <div class="col-xl-7">
+    <section class="card border-0 shadow-sm">
+      <div class="card-header bg-white d-flex justify-content-between align-items-center"><h2 class="h5 mb-0">Последние операции</h2><span class="badge text-bg-light text-dark border">10</span></div>
+      <div class="list-group list-group-flush">
+        {% for event in dashboard.events %}
+          <div class="list-group-item py-3">
+            <div class="d-flex justify-content-between align-items-start gap-3">
+              <div class="d-flex align-items-start gap-3">
+                <span class="badge text-bg-{{ event.tone }} rounded-pill p-2"><i class="bi {{ event.icon }}"></i></span>
+                <div><div class="fw-semibold">{{ event.type }}</div><div class="small text-secondary">{{ event.title }}</div><div class="small text-secondary">{{ event.date.strftime('%d.%m.%Y %H:%M') }}</div></div>
+              </div>
+              <div class="fw-semibold text-nowrap">{{ event.amount }}</div>
+            </div>
+          </div>
+        {% else %}
+          <div class="list-group-item text-center text-secondary py-4">Операций нет</div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+</div>
 
 <script>
 (function() {

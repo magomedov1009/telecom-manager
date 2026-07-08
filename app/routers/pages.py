@@ -105,6 +105,7 @@ def logout() -> RedirectResponse:
 
 
 PERIOD_LABELS = {
+    "all": "За всё время",
     "today": "\u0421\u0435\u0433\u043e\u0434\u043d\u044f",
     "yesterday": "\u0412\u0447\u0435\u0440\u0430",
     "week": "\u042d\u0442\u0430 \u043d\u0435\u0434\u0435\u043b\u044f",
@@ -143,7 +144,10 @@ INVENTORY_EVENT_LABELS = {
 
 def resolve_dashboard_period(period: str, date_from: date | None, date_to: date | None) -> dict:
     today = date.today()
-    if period == "yesterday":
+    if period == "all":
+        start_date = None
+        end_date = None
+    elif period == "yesterday":
         start_date = end_date = today - timedelta(days=1)
     elif period == "week":
         start_date = today - timedelta(days=today.weekday())
@@ -157,20 +161,24 @@ def resolve_dashboard_period(period: str, date_from: date | None, date_to: date 
     else:
         period = "today"
         start_date = end_date = today
-    if end_date < start_date:
+    if start_date is not None and end_date is not None and end_date < start_date:
         start_date, end_date = end_date, start_date
     return {
         "period": period,
         "label": PERIOD_LABELS[period],
         "date_from": start_date,
         "date_to": end_date,
-        "start": datetime.combine(start_date, time.min),
-        "end": datetime.combine(end_date, time.max),
+        "start": datetime.combine(start_date, time.min) if start_date is not None else None,
+        "end": datetime.combine(end_date, time.max) if end_date is not None else None,
     }
 
 
 def period_filter(query, column, period_data: dict):
-    return query.where(column >= period_data["start"], column <= period_data["end"])
+    if period_data.get("start") is not None:
+        query = query.where(column >= period_data["start"])
+    if period_data.get("end") is not None:
+        query = query.where(column <= period_data["end"])
+    return query
 
 
 def scalar_decimal(db: Session, query) -> Decimal:
@@ -178,11 +186,15 @@ def scalar_decimal(db: Session, query) -> Decimal:
 
 
 def build_dashboard_data(db: Session, period_data: dict) -> dict:
-    connection_period = period_filter(select(Connection), Connection.connection_date, {
-        **period_data,
-        "start": period_data["date_from"],
-        "end": period_data["date_to"],
-    })
+    connection_period = period_filter(
+        select(Connection),
+        Connection.connection_date,
+        {
+            **period_data,
+            "start": period_data["date_from"],
+            "end": period_data["date_to"],
+        },
+    )
     connection_ids_subquery = connection_period.with_only_columns(Connection.id).subquery()
 
     connections = {
@@ -191,6 +203,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
         "reconnects": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.RECONNECT)) or 0,
         "onu_replacements": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.ONU_REPLACE)) or 0,
     }
+    connections["equipment_replacements"] = connections["onu_replacements"]
 
     finance_filters = {"date_from": period_data["date_from"], "date_to": period_data["date_to"]}
     finance_stats = get_finance_stats(db, finance_filters)
@@ -219,7 +232,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
                     period_data,
                 ),
             )
-            rows.append({"label": item.name, "balance": balance, "spent": spent})
+            rows.append({"label": item.name, "balance": balance, "spent": spent, "unit": item.unit_name or item.unit.value})
         return rows
 
     materials = stock_summary(InventoryItemType.MATERIAL)
@@ -244,9 +257,10 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             period_data,
         ).limit(1)
     ).first()
-    top_expense = {"label": "?", "amount": Decimal("0")}
+    top_expense = {"label": "—", "amount": Decimal("0")}
     if top_expense_row is not None:
         top_expense = {"label": EXPENSE_CATEGORY_LABELS.get(top_expense_row[0], top_expense_row[0].value), "amount": Decimal(top_expense_row[1] or 0)}
+    expense_operations = db.scalar(select(func.count()).select_from(period_filter(select(Expense), Expense.created_at, period_data).subquery())) or 0
 
     finance_events = [
         {
@@ -255,6 +269,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "title": item.comment or FINANCE_EVENT_LABELS.get(item.transaction_type, item.transaction_type.value),
             "amount": item.amount,
             "icon": "bi-cash-coin",
+            "tone": "primary",
         }
         for item in db.scalars(select(FinanceTransaction).order_by(FinanceTransaction.created_at.desc(), FinanceTransaction.id.desc()).limit(10))
     ]
@@ -265,6 +280,7 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "title": item.material.name if item.material else "Склад",
             "amount": format_quantity(item.quantity),
             "icon": "bi-box-seam",
+            "tone": "secondary",
         }
         for item in db.scalars(select(InventoryTransaction).order_by(InventoryTransaction.created_at.desc(), InventoryTransaction.id.desc()).limit(10))
     ]
@@ -281,9 +297,34 @@ def build_dashboard_data(db: Session, period_data: dict) -> dict:
             "installer": installer_expenses,
             "office": office_expenses,
             "top": top_expense,
+            "operations": expense_operations,
         },
+        "kpi": {
+            "average_check": customer_received / connections["total"] if connections["total"] else None,
+            "average_profit": finance_stats.profit / connections["total"] if connections["total"] else None,
+            "average_expense": expenses_total / connections["total"] if connections["total"] else None,
+            "average_material_spent": sum((item["spent"] for item in materials), Decimal("0")) / connections["total"] if connections["total"] else None,
+        },
+        "attention": build_dashboard_attention(finance_stats, materials, equipment),
         "events": events,
     }
+
+
+def build_dashboard_attention(finance_stats, materials: list[dict], equipment: list[dict]) -> list[dict]:
+    warnings = []
+    for item in materials:
+        if item["balance"] <= 10:
+            warnings.append({"label": f"Заканчивается материал: {item['label']}", "level": "warning", "icon": "bi-exclamation-triangle"})
+    for item in equipment:
+        if item["balance"] <= 2:
+            warnings.append({"label": f"Заканчивается оборудование: {item['label']}", "level": "warning", "icon": "bi-hdd-network"})
+    if finance_stats.office_owes_me >= Decimal("10000"):
+        warnings.append({"label": "Большой долг офиса", "level": "warning", "icon": "bi-building-exclamation"})
+    if finance_stats.i_owe_office >= Decimal("10000"):
+        warnings.append({"label": "Большой долг монтажника", "level": "warning", "icon": "bi-person-exclamation"})
+    if finance_stats.profit < 0:
+        warnings.append({"label": "Отрицательная прибыль", "level": "danger", "icon": "bi-graph-down-arrow"})
+    return warnings
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -291,7 +332,7 @@ def dashboard(
     request: Request,
     db: DbSession,
     current_user: CurrentUser,
-    period: Annotated[str, Query()] = "today",
+    period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
 ) -> Response:
