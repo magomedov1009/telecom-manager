@@ -137,11 +137,12 @@ def create_manual_transaction(
     db.commit()
 
 
-def apply_period(query, start: datetime | None = None, end: datetime | None = None):
+def apply_period(query, start: datetime | None = None, end: datetime | None = None, column=None):
+    date_column = column or FinanceTransaction.created_at
     if start is not None:
-        query = query.where(FinanceTransaction.created_at >= start)
+        query = query.where(date_column >= start)
     if end is not None:
-        query = query.where(FinanceTransaction.created_at <= end)
+        query = query.where(date_column <= end)
     return query
 
 
@@ -193,59 +194,52 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     today_received = Decimal(db.scalar(get_money_received_query(today_start, today_end)) or 0)
     month_received = Decimal(db.scalar(get_money_received_query(month_start, None)) or 0)
 
-    installer_accrued = Decimal(db.scalar(
-        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
-            FinanceTransaction.accrual_to == PaidBy.INSTALLER,
-            FinanceTransaction.amount > 0,
-        )
-    ) or 0)
+    installer_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+        FinanceTransaction.accrual_to == PaidBy.INSTALLER,
+        FinanceTransaction.amount > 0,
+    )
+    installer_accrued = Decimal(db.scalar(apply_period(installer_accrued_query, period_start, period_end)) or 0)
 
-    office_accrued = Decimal(db.scalar(
-        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
-            FinanceTransaction.accrual_to == PaidBy.OFFICE,
-            FinanceTransaction.amount > 0,
-        )
-    ) or 0)
+    office_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+        FinanceTransaction.accrual_to == PaidBy.OFFICE,
+        FinanceTransaction.amount > 0,
+    )
+    office_accrued = Decimal(db.scalar(apply_period(office_accrued_query, period_start, period_end)) or 0)
 
     expenses_total = Decimal(db.scalar(get_expense_query(period_start, period_end)) or 0)
     income_total = Decimal(db.scalar(get_income_query(period_start, period_end)) or 0)
     profit = income_total - expenses_total
 
-    installer_expenses = Decimal(db.scalar(
-        select(func.coalesce(func.sum(Expense.amount), 0)).where(
-            Expense.paid_by == PaidBy.INSTALLER,
-        )
-    ) or 0)
+    installer_expenses_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(
+        Expense.paid_by == PaidBy.INSTALLER,
+    )
+    installer_expenses = Decimal(db.scalar(apply_period(installer_expenses_query, period_start, period_end, Expense.created_at)) or 0)
 
-    paid_from_office = Decimal(db.scalar(
-        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE,
-        )
-    ) or 0)
+    paid_from_office_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE,
+    )
+    paid_from_office = Decimal(db.scalar(apply_period(paid_from_office_query, period_start, period_end)) or 0)
 
-    paid_to_office = Decimal(db.scalar(
-        select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
-            FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
-        )
-    ) or 0)
+    paid_to_office_query = select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
+    )
+    paid_to_office = Decimal(db.scalar(apply_period(paid_to_office_query, period_start, period_end)) or 0)
 
-    client_money = Decimal(db.scalar(
-        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type.in_([
-                FinanceTransactionType.CONNECTION,
-                FinanceTransactionType.EXTRA_WORK,
-            ]),
-            FinanceTransaction.amount > 0,
-        )
-    ) or 0)
+    client_money_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type.in_([
+            FinanceTransactionType.CONNECTION,
+            FinanceTransactionType.EXTRA_WORK,
+        ]),
+        FinanceTransaction.amount > 0,
+    )
+    client_money = Decimal(db.scalar(apply_period(client_money_query, period_start, period_end)) or 0)
 
-    adjustments = Decimal(db.scalar(
-        select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-            FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
-        )
-    ) or 0)
+    adjustments_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
+    )
+    adjustments = Decimal(db.scalar(apply_period(adjustments_query, period_start, period_end)) or 0)
 
     office_owes_me_raw = installer_accrued + installer_expenses - paid_from_office + adjustments
     office_owes_me = office_owes_me_raw if office_owes_me_raw > 0 else Decimal("0")
