@@ -100,16 +100,11 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
 
 
 def calculate_finance(price: Decimal, installer_amount: str | None, office_amount: str | None) -> tuple[Decimal, Decimal]:
-    if price == Decimal("1000"):
-        return Decimal("1000"), Decimal("0")
-    if price == Decimal("3000"):
-        return Decimal("1000"), Decimal("2000")
-    installer = parse_decimal(installer_amount or "0", "Доля монтажника")
-    office = parse_decimal(office_amount or "0", "Доля офиса")
-    if installer + office != price:
-        raise ConnectionError("Для произвольной суммы доля монтажника и офиса должны равняться цене подключения")
+    office = parse_decimal(office_amount or "0", "???? ????????")
+    if office > price:
+        raise ConnectionError("???? ?? ????? ???????? ??????, ??? ???????? ?? ???????")
+    installer = price - office
     return installer, office
-
 
 def get_reference_data(db: Session) -> tuple[list[Warehouse], list[Material]]:
     warehouses = list(db.scalars(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name)))

@@ -227,14 +227,12 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     )
     paid_to_office = Decimal(db.scalar(apply_period(paid_to_office_query, period_start, period_end)) or 0)
 
-    client_money_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
-        FinanceTransaction.transaction_type.in_([
-            FinanceTransactionType.CONNECTION,
-            FinanceTransactionType.EXTRA_WORK,
-        ]),
+    office_money_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+        FinanceTransaction.accrual_to == PaidBy.OFFICE,
         FinanceTransaction.amount > 0,
     )
-    client_money = Decimal(db.scalar(apply_period(client_money_query, period_start, period_end)) or 0)
+    office_money = Decimal(db.scalar(apply_period(office_money_query, period_start, period_end)) or 0)
 
     adjustments_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
@@ -244,7 +242,7 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
     office_owes_me_raw = installer_accrued + installer_expenses - paid_from_office + adjustments
     office_owes_me = office_owes_me_raw if office_owes_me_raw > 0 else Decimal("0")
 
-    i_owe_office_raw = client_money - paid_to_office
+    i_owe_office_raw = office_money - paid_to_office
     i_owe_office = i_owe_office_raw if i_owe_office_raw > 0 else Decimal("0")
 
     balance = office_owes_me - i_owe_office

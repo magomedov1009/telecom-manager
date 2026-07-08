@@ -86,12 +86,12 @@
       </h2>
       <div id="financeSection" class="accordion-collapse collapse" data-bs-parent="#connectionFormAccordion">
         <div class="accordion-body">
-          <div class="row g-3">
-            <div class="col-md-4"><label class="form-label">Цена подключения</label><div class="input-group"><input class="form-control" name="price" value="{{ connection.price if connection else '1000' }}" required><span class="input-group-text">₽</span></div></div>
-            <div class="col-md-4"><label class="form-label">Монтажник</label><div class="input-group"><input class="form-control" name="installer_amount" value="{{ connection.installer_amount if connection else '1000' }}"><span class="input-group-text">₽</span></div></div>
-            <div class="col-md-4"><label class="form-label">Офис</label><div class="input-group"><input class="form-control" name="office_amount" value="{{ connection.office_amount if connection else '0' }}"><span class="input-group-text">₽</span></div></div>
+          <div class="row g-3" id="connection-finance-block">
+            <div class="col-md-4"><label class="form-label">Получено от клиента</label><div class="input-group"><input class="form-control" id="connection-price" name="price" value="{{ connection.price if connection else '1000' }}" inputmode="decimal" required><span class="input-group-text">?</span></div></div>
+            <div class="col-md-4"><label class="form-label">Офис получает</label><div class="input-group"><input class="form-control" id="connection-office-amount" name="office_amount" value="{{ connection.office_amount if connection else '0' }}" inputmode="decimal"><span class="input-group-text">?</span></div></div>
+            <div class="col-md-4"><label class="form-label">Монтажнику остается</label><div class="input-group"><input class="form-control bg-light" id="connection-installer-amount" name="installer_amount" value="{{ connection.installer_amount if connection else '1000' }}" readonly><span class="input-group-text">?</span></div></div>
           </div>
-          <div class="alert alert-info mt-3 mb-0" role="alert">При 1000: монтажник 1000, офис 0. При 3000: монтажник 1000, офис 2000. Для другой суммы заполните доли вручную.</div>
+          <div class="alert alert-info mt-3 mb-0" role="alert">При первом вводе 1000 офис получает 0, при 3000 офис получает 2000. После ручного изменения поля офиса значение сохраняется.</div>
         </div>
       </div>
     </div>
@@ -123,6 +123,51 @@
 
   updateLabel();
   providerSelect.addEventListener('change', updateLabel);
+})();
+
+(function() {
+  var priceInput = document.getElementById('connection-price');
+  var officeInput = document.getElementById('connection-office-amount');
+  var installerInput = document.getElementById('connection-installer-amount');
+  var officeChangedManually = {{ 'true' if connection else 'false' }};
+
+  function parseMoney(value) {
+    var normalized = String(value || '0').replace(',', '.').trim();
+    var parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  function formatMoney(value) {
+    if (!Number.isFinite(value)) {
+      return '0';
+    }
+    return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function applyDefaults() {
+    if (officeChangedManually) {
+      return;
+    }
+    var price = parseMoney(priceInput.value);
+    if (price === 1000) {
+      officeInput.value = '0';
+    } else if (price === 3000) {
+      officeInput.value = '2000';
+    }
+  }
+
+  function updateInstallerAmount() {
+    applyDefaults();
+    var installer = parseMoney(priceInput.value) - parseMoney(officeInput.value);
+    installerInput.value = formatMoney(installer < 0 ? 0 : installer);
+  }
+
+  officeInput.addEventListener('input', function() {
+    officeChangedManually = true;
+    updateInstallerAmount();
+  });
+  priceInput.addEventListener('input', updateInstallerAmount);
+  updateInstallerAmount();
 })();
 </script>
 {% endblock %}
