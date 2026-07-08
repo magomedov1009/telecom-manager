@@ -39,13 +39,13 @@ def page(request: Request, db: DbSession, current_user: CurrentUser, search: Ann
 
 
 @router.post("", response_class=HTMLResponse)
-def create_action(request: Request, db: DbSession, current_user: CurrentUser, provider_id: Annotated[int, Form()], client_id: Annotated[int, Form()], work_date: Annotated[date, Form()], title: Annotated[str, Form()], amount: Annotated[str, Form()], office_amount: Annotated[str, Form()], work_type_id: Annotated[int | None, Form()] = None, extra_expenses: Annotated[str | None, Form()] = None, warehouse_id: Annotated[int | None, Form()] = None, material_id: Annotated[list[int], Form()] = [], material_quantity: Annotated[list[str], Form()] = [], comment: Annotated[str | None, Form()] = None) -> Response:
+def create_action(request: Request, db: DbSession, current_user: CurrentUser, provider_id: Annotated[int, Form()], work_date: Annotated[date, Form()], work_type_id: Annotated[int, Form()], amount: Annotated[str, Form()], office_amount: Annotated[str, Form()], use_materials: Annotated[str, Form()] = "", material_id: Annotated[list[int], Form()] = [], material_quantity: Annotated[list[str], Form()] = [], comment: Annotated[str | None, Form()] = None) -> Response:
     if current_user is None:
         return redirect_to_login()
     error = None
     success = None
     try:
-        create_additional_work(db, user=current_user, provider_id=provider_id, client_id=client_id, work_date=work_date, work_type_id=work_type_id, title=title, amount=amount, office_amount=office_amount, extra_expenses=extra_expenses, warehouse_id=warehouse_id, material_ids=material_id, material_quantities=material_quantity, comment=comment)
+        create_additional_work(db, user=current_user, provider_id=provider_id, work_date=work_date, work_type_id=work_type_id, amount=amount, office_amount=office_amount, use_materials=(use_materials == "on"), material_ids=material_id, material_quantities=material_quantity, comment=comment)
         success = "Дополнительная работа создана"
     except AdditionalWorkError as exc:
         db.rollback()

@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models.clients import Client, ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
+from app.models.clients import ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
 from app.models.enums import FinanceTransactionType, InventoryTransactionType, PaidBy
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
@@ -32,9 +32,7 @@ class AdditionalWorksPage:
 class AdditionalWorksData:
     works: AdditionalWorksPage
     providers: list[Provider]
-    clients: list[Client]
     work_types: list[ExtraWorkType]
-    warehouses: list[Warehouse]
     materials: list[Material]
     filters: dict
     filter_query: str
@@ -66,7 +64,7 @@ def build_filter_query(filters: dict) -> str:
 
 
 def build_query(filters: dict):
-    query = select(ExtraWork).options(joinedload(ExtraWork.provider), joinedload(ExtraWork.client), joinedload(ExtraWork.work_type), joinedload(ExtraWork.installer), selectinload(ExtraWork.materials).joinedload(ExtraWorkMaterial.material))
+    query = select(ExtraWork).options(joinedload(ExtraWork.provider), joinedload(ExtraWork.work_type), joinedload(ExtraWork.installer), selectinload(ExtraWork.materials).joinedload(ExtraWorkMaterial.material))
     if filters.get("provider_id"):
         query = query.where(ExtraWork.provider_id == int(filters["provider_id"]))
     if filters.get("date_from"):
@@ -75,7 +73,7 @@ def build_query(filters: dict):
         query = query.where(ExtraWork.work_date <= filters["date_to"])
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
-        query = query.join(ExtraWork.client).where(or_(ExtraWork.title.ilike(pattern), ExtraWork.comment.ilike(pattern), Client.contract_number.ilike(pattern), Client.login.ilike(pattern), Client.address.ilike(pattern)))
+        query = query.outerjoin(ExtraWork.work_type).where(or_(ExtraWorkType.name.ilike(pattern), ExtraWork.comment.ilike(pattern)))
     return query.order_by(ExtraWork.work_date.desc(), ExtraWork.id.desc())
 
 
@@ -91,9 +89,7 @@ def get_data(db: Session, filters: dict, page: int, error: str | None = None, su
     return AdditionalWorksData(
         works=get_page(db, filters, page),
         providers=list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
-        clients=list(db.scalars(select(Client).order_by(Client.contract_number))),
         work_types=list(db.scalars(select(ExtraWorkType).where(ExtraWorkType.is_active.is_(True)).order_by(ExtraWorkType.name))),
-        warehouses=list(db.scalars(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name))),
         materials=list(db.scalars(select(Material).where(Material.active.is_(True)).order_by(Material.item_type, Material.name))),
         filters=filters,
         filter_query=build_filter_query(filters),
@@ -111,30 +107,38 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
     return rows
 
 
-def create_additional_work(db: Session, *, user: User, provider_id: int, client_id: int, work_date: date, work_type_id: int | None, title: str, amount: str, office_amount: str, extra_expenses: str | None, warehouse_id: int | None, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
+def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, office_amount: str, use_materials: bool, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
     provider = db.get(Provider, provider_id)
-    client = db.get(Client, client_id)
     if provider is None or not provider.is_active:
         raise AdditionalWorkError("Выберите активного провайдера")
-    if client is None or client.provider_id != provider.id:
-        raise AdditionalWorkError("Клиент не найден у выбранного провайдера")
-    clean_title = title.strip()
-    if not clean_title:
-        raise AdditionalWorkError("Укажите тип или название работы")
-    total = parse_decimal(amount, "Стоимость")
+    work_type = db.get(ExtraWorkType, work_type_id)
+    if work_type is None or not work_type.is_active:
+        raise AdditionalWorkError("Выберите вид дополнительной работы")
+    total = parse_decimal(amount, "Получено от провайдера")
     office = parse_decimal(office_amount, "Офис получает")
     if office > total:
         raise AdditionalWorkError("Офис не может получить больше стоимости работы")
     installer = total - office
-    expenses = parse_decimal(extra_expenses, "Дополнительные расходы") if extra_expenses else Decimal("0")
-    rows = parse_material_rows(material_ids, material_quantities)
-    warehouse = db.get(Warehouse, warehouse_id) if warehouse_id else None
-    if rows and (warehouse is None or not warehouse.active):
-        raise AdditionalWorkError("Выберите склад для списания материалов")
-    for material_id, quantity in rows:
-        ensure_sufficient_stock(db, warehouse.id, material_id, quantity)
+    rows = parse_material_rows(material_ids, material_quantities) if use_materials else []
+    warehouse = None
+    if rows:
+        warehouse = db.scalar(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name).limit(1))
+        if warehouse is None:
+            raise AdditionalWorkError("Нет активного склада для списания материалов")
+        for material_id, quantity in rows:
+            ensure_sufficient_stock(db, warehouse.id, material_id, quantity)
 
-    work = ExtraWork(provider_id=provider.id, client_id=client.id, work_type_id=work_type_id or None, installer_id=user.id, work_date=work_date, title=clean_title, amount=total, office_amount=office, installer_amount=installer, extra_expenses=expenses, status="completed", comment=comment.strip() if comment else None)
+    work = ExtraWork(
+        provider_id=provider.id,
+        work_type_id=work_type.id,
+        installer_id=user.id,
+        work_date=work_date,
+        amount=total,
+        office_amount=office,
+        installer_amount=installer,
+        status="completed",
+        comment=comment.strip() if comment else None,
+    )
     db.add(work)
     db.flush()
     for material_id, quantity in rows:

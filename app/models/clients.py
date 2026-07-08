@@ -42,11 +42,6 @@ class Client(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    extra_works: Mapped[list["ExtraWork"]] = relationship(
-        back_populates="client",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
 
 
 class Connection(BaseModel):
@@ -102,7 +97,6 @@ class Connection(BaseModel):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    extra_works: Mapped[list["ExtraWork"]] = relationship(back_populates="connection")
 
 
 class ConnectionMaterial(BaseModel):
@@ -150,18 +144,10 @@ class ExtraWork(BaseModel):
         index=True,
         nullable=False,
     )
-    work_type_id: Mapped[int | None] = mapped_column(
-        ForeignKey("extra_work_types.id", ondelete="SET NULL"),
-        index=True,
-    )
-    client_id: Mapped[int] = mapped_column(
-        ForeignKey("clients.id", ondelete="CASCADE"),
+    work_type_id: Mapped[int] = mapped_column(
+        ForeignKey("extra_work_types.id", ondelete="RESTRICT"),
         index=True,
         nullable=False,
-    )
-    connection_id: Mapped[int | None] = mapped_column(
-        ForeignKey("connections.id", ondelete="SET NULL"),
-        index=True,
     )
     installer_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"),
@@ -169,18 +155,14 @@ class ExtraWork(BaseModel):
         nullable=False,
     )
     work_date: Mapped[date] = mapped_column(Date, index=True, nullable=False)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     office_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     installer_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
-    extra_expenses: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False, index=True)
     comment: Mapped[str | None] = mapped_column(Text)
 
     provider: Mapped["Provider"] = relationship(back_populates="extra_works")
-    work_type: Mapped["ExtraWorkType | None"] = relationship(back_populates="extra_works")
-    client: Mapped["Client"] = relationship(back_populates="extra_works")
-    connection: Mapped["Connection | None"] = relationship(back_populates="extra_works")
+    work_type: Mapped["ExtraWorkType"] = relationship(back_populates="extra_works")
     installer: Mapped["User"] = relationship(
         back_populates="extra_works",
         foreign_keys=[installer_id],
