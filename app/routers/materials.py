@@ -28,6 +28,18 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
+def parse_query_int(value: str | None) -> int | None:
+    if not value:
+        return None
+    return int(value)
+
+
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -57,18 +69,18 @@ def materials_page(
     db: DbSession,
     current_user: CurrentUser,
     search: Annotated[str | None, Query()] = None,
-    warehouse_id: Annotated[int | None, Query()] = None,
-    material_id: Annotated[int | None, Query()] = None,
+    warehouse_id: Annotated[str | None, Query()] = None,
+    material_id: Annotated[str | None, Query()] = None,
     operation_type: Annotated[str | None, Query()] = None,
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     item_type: Annotated[str | None, Query()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
 
-    filters = normalize_filters(search, warehouse_id, material_id, operation_type, date_from, date_to, item_type)
+    filters = normalize_filters(search, parse_query_int(warehouse_id), parse_query_int(material_id), operation_type, parse_query_date(date_from), parse_query_date(date_to), item_type)
     data = get_materials_page_data(db, filters=filters, page=page)
     template_name = "materials/_module.html" if request.headers.get("HX-Request") else "materials/index.html"
     return render_materials(request, template_name, current_user, data)

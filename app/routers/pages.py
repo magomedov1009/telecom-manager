@@ -50,6 +50,12 @@ def render(request: Request, template_name: str, context: dict) -> HTMLResponse:
     return templates.TemplateResponse(request=request, name=template_name, context=base_context)
 
 
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -353,14 +359,14 @@ def dashboard(
     db: DbSession,
     current_user: CurrentUser,
     period: Annotated[str, Query()] = "all",
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
 
-    period_data = resolve_dashboard_period(period, date_from, date_to)
+    period_data = resolve_dashboard_period(period, parse_query_date(date_from), parse_query_date(date_to))
     selected_provider_id = int(provider_id) if provider_id else None
     providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
     dashboard_data = build_dashboard_data(db, period_data, selected_provider_id)

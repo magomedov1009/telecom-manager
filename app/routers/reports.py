@@ -23,6 +23,12 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -31,8 +37,8 @@ def build_data(db: Session, period: str, date_from: date | None, date_to: date |
     return get_reports_data(
         db,
         period_key=period,
-        date_from=date_from,
-        date_to=date_to,
+        date_from=parse_query_date(date_from),
+        date_to=parse_query_date(date_to),
         provider_id=int(provider_id) if provider_id else None,
         search=search,
         active_tab=tab,
@@ -49,8 +55,8 @@ def reports_page(
     db: DbSession,
     current_user: CurrentUser,
     period: Annotated[str, Query()] = "all",
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",
@@ -73,8 +79,8 @@ def export_xlsx(
     db: DbSession,
     current_user: CurrentUser,
     period: Annotated[str, Query()] = "all",
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",
@@ -97,8 +103,8 @@ def export_pdf(
     db: DbSession,
     current_user: CurrentUser,
     period: Annotated[str, Query()] = "all",
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",

@@ -20,6 +20,12 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -45,13 +51,13 @@ def expenses_page(
     current_user: CurrentUser,
     search: Annotated[str | None, Query()] = None,
     category: Annotated[str | None, Query()] = None,
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
-    filters = normalize_filters(search, category, date_from, date_to)
+    filters = normalize_filters(search, category, parse_query_date(date_from), parse_query_date(date_to))
     data = get_expenses_page_data(db, filters=filters, page=page)
     return render_expenses(request, current_user, data)
 

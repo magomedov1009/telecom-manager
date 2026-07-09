@@ -24,7 +24,7 @@
             <div class="collapse navbar-collapse" id="sidebar-menu">
               <ul class="navbar-nav pt-lg-3">
                 {% for item in nav_items %}
-                  <li class="nav-item {% if current_path == item.endpoint %}active{% endif %}">
+                  <li class="nav-item {% if current_path == item.endpoint or (item.endpoint != '/' and current_path.startswith(item.endpoint ~ '/')) %}active{% endif %}">
                     <a class="nav-link" href="{{ item.endpoint }}">
                       <span class="nav-link-icon d-md-none d-lg-inline-block"><i class="bi {{ item.icon }}"></i></span>
                       <span class="nav-link-title">{{ item.label }}</span>

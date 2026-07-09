@@ -22,6 +22,18 @@ DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
+def parse_query_int(value: str | None) -> int | None:
+    if not value:
+        return None
+    return int(value)
+
+
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -31,10 +43,10 @@ def render_page(request: Request, current_user: User, data) -> HTMLResponse:
 
 
 @router.get("", response_class=HTMLResponse)
-def page(request: Request, db: DbSession, current_user: CurrentUser, search: Annotated[str | None, Query()] = None, provider_id: Annotated[int | None, Query()] = None, date_from: Annotated[date | None, Query()] = None, date_to: Annotated[date | None, Query()] = None, page: Annotated[int, Query(ge=1)] = 1) -> Response:
+def page(request: Request, db: DbSession, current_user: CurrentUser, search: Annotated[str | None, Query()] = None, provider_id: Annotated[str | None, Query()] = None, date_from: Annotated[str | None, Query()] = None, date_to: Annotated[str | None, Query()] = None, page: Annotated[int, Query(ge=1)] = 1) -> Response:
     if current_user is None:
         return redirect_to_login()
-    filters = normalize_filters(search, provider_id, date_from, date_to)
+    filters = normalize_filters(search, parse_query_int(provider_id), parse_query_date(date_from), parse_query_date(date_to))
     return render_page(request, current_user, get_data(db, filters, page))
 
 

@@ -61,6 +61,18 @@ def resolve_period(period: str, date_from: date | None, date_to: date | None) ->
     return "today", today, today
 
 
+def parse_query_int(value: str | None) -> int | None:
+    if not value:
+        return None
+    return int(value)
+
+
+def parse_query_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
 def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -86,18 +98,18 @@ def finance_page(
     db: DbSession,
     current_user: CurrentUser,
     period: Annotated[str, Query()] = "all",
-    date_from: Annotated[date | None, Query()] = None,
-    date_to: Annotated[date | None, Query()] = None,
+    date_from: Annotated[str | None, Query()] = None,
+    date_to: Annotated[str | None, Query()] = None,
     transaction_type: Annotated[str | None, Query()] = None,
-    user_id: Annotated[int | None, Query()] = None,
-    provider_id: Annotated[int | None, Query()] = None,
+    user_id: Annotated[str | None, Query()] = None,
+    provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
-    active_period, period_from, period_to = resolve_period(period, date_from, date_to)
-    filters = normalize_filters(period_from, period_to, transaction_type, user_id, search, provider_id)
+    active_period, period_from, period_to = resolve_period(period, parse_query_date(date_from), parse_query_date(date_to))
+    filters = normalize_filters(period_from, period_to, transaction_type, parse_query_int(user_id), search, parse_query_int(provider_id))
     data = get_finance_page_data(db, filters=filters, page=page)
     expense_filters = normalize_expense_filters(search, None, period_from, period_to)
     object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=page))
