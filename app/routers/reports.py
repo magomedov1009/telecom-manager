@@ -27,13 +27,13 @@ def redirect_to_login() -> RedirectResponse:
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
-def build_data(db: Session, period: str, date_from: date | None, date_to: date | None, provider_id: int | None, search: str | None, tab: str, page: int, sort: str, direction: str, per_page: int = 15):
+def build_data(db: Session, period: str, date_from: date | None, date_to: date | None, provider_id: str | None, search: str | None, tab: str, page: int, sort: str, direction: str, per_page: int = 15):
     return get_reports_data(
         db,
         period_key=period,
         date_from=date_from,
         date_to=date_to,
-        provider_id=provider_id,
+        provider_id=int(provider_id) if provider_id else None,
         search=search,
         active_tab=tab,
         page=page,
@@ -51,7 +51,7 @@ def reports_page(
     period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
-    provider_id: Annotated[int | None, Query()] = None,
+    provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",
     page: Annotated[int, Query(ge=1)] = 1,
@@ -75,7 +75,7 @@ def export_xlsx(
     period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
-    provider_id: Annotated[int | None, Query()] = None,
+    provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",
     sort: Annotated[str, Query()] = "date",
@@ -99,7 +99,7 @@ def export_pdf(
     period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
-    provider_id: Annotated[int | None, Query()] = None,
+    provider_id: Annotated[str | None, Query()] = None,
     search: Annotated[str | None, Query()] = None,
     tab: Annotated[str, Query()] = "providers",
     sort: Annotated[str, Query()] = "date",

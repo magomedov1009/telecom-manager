@@ -355,18 +355,19 @@ def dashboard(
     period: Annotated[str, Query()] = "all",
     date_from: Annotated[date | None, Query()] = None,
     date_to: Annotated[date | None, Query()] = None,
-    provider_id: Annotated[int | None, Query()] = None,
+    provider_id: Annotated[str | None, Query()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
 
     period_data = resolve_dashboard_period(period, date_from, date_to)
+    selected_provider_id = int(provider_id) if provider_id else None
     providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
-    dashboard_data = build_dashboard_data(db, period_data, provider_id)
+    dashboard_data = build_dashboard_data(db, period_data, selected_provider_id)
     return render(
         request,
         "pages/dashboard.html",
-        {"user": current_user, "period": period_data, "dashboard": dashboard_data, "period_labels": PERIOD_LABELS, "providers": providers, "selected_provider_id": provider_id},
+        {"user": current_user, "period": period_data, "dashboard": dashboard_data, "period_labels": PERIOD_LABELS, "providers": providers, "selected_provider_id": selected_provider_id},
     )
 
 

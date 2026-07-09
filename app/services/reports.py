@@ -84,14 +84,6 @@ def resolve_period(period: str, date_from: date | None, date_to: date | None) ->
         period, start_date, end_date = "today", today, today
     if start_date and end_date and end_date < start_date:
         start_date, end_date = end_date, start_date
-    connections = filtered_connections(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    extra_works = filtered_extra_works(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    expenses = filtered_expenses(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    inv_page = inventory_page(inventory, clean_search, page, sort, direction, per_page)
-    page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page}
-    page_data = page_map.get(active_tab)
-    export_query = report_query(filters, active_tab, None, page_data.sort if page_data else None, page_data.direction if page_data else None)
     return {
         "period": period,
         "label": PERIOD_LABELS[period],
@@ -319,14 +311,6 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
     connections_query = apply_connection_search(connection_query(period, provider_id), clean_search)
     extra_query = apply_extra_work_search(extra_work_query(period, provider_id), clean_search)
     expense_q = apply_expense_search(expense_query(period, provider_id), clean_search)
-    connections = filtered_connections(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    extra_works = filtered_extra_works(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    expenses = filtered_expenses(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    inv_page = inventory_page(inventory, clean_search, page, sort, direction, per_page)
-    page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page}
-    page_data = page_map.get(active_tab)
-    export_query = report_query(filters, active_tab, None, page_data.sort if page_data else None, page_data.direction if page_data else None)
     return {
         "period": period,
         "period_labels": PERIOD_LABELS,

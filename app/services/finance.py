@@ -273,7 +273,16 @@ def get_finance_stats(db: Session, filters: dict | None = None) -> FinanceStats:
         adjustments_query = adjustments_query.where(FinanceTransaction.provider_id == int(provider_id))
     adjustments = Decimal(db.scalar(apply_period(adjustments_query, period_start, period_end)) or 0)
 
-    office_owes_me_raw = installer_accrued + installer_expenses - paid_from_office + adjustments
+    extra_work_installer_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.EXTRA_WORK,
+        FinanceTransaction.accrual_to == PaidBy.INSTALLER,
+        FinanceTransaction.amount > 0,
+    )
+    if provider_id:
+        extra_work_installer_accrued_query = extra_work_installer_accrued_query.where(FinanceTransaction.provider_id == int(provider_id))
+    extra_work_installer_accrued = Decimal(db.scalar(apply_period(extra_work_installer_accrued_query, period_start, period_end)) or 0)
+
+    office_owes_me_raw = extra_work_installer_accrued + installer_expenses - paid_from_office + adjustments
     office_owes_me = office_owes_me_raw if office_owes_me_raw > 0 else Decimal("0")
 
     i_owe_office_raw = office_money - paid_to_office
