@@ -30,13 +30,13 @@ CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 NAV_ITEMS = [
     {"label": "Dashboard", "endpoint": "/dashboard", "icon": "bi-speedometer2", "roles": ["admin", "manager", "installer"]},
-    {"label": "???????????", "endpoint": "/connections", "icon": "bi-router", "roles": ["admin", "manager", "installer"]},
-    {"label": "???????", "endpoint": "/clients", "icon": "bi-people", "roles": ["admin", "manager", "installer"]},
-    {"label": "?????", "endpoint": "/materials", "icon": "bi-box-seam", "roles": ["admin", "manager", "installer"]},
-    {"label": "???????", "endpoint": "/finance", "icon": "bi-cash-coin", "roles": ["admin", "manager"]},
-    {"label": "?????????", "endpoint": "/additional-works", "icon": "bi-tools", "roles": ["admin", "manager", "installer"]},
-    {"label": "??????", "endpoint": "/reports", "icon": "bi-bar-chart", "roles": ["admin", "manager"]},
-    {"label": "?????????", "endpoint": "/settings", "icon": "bi-gear", "roles": ["admin"]},
+    {"label": "Подключения", "endpoint": "/connections", "icon": "bi-router", "roles": ["admin", "manager", "installer"]},
+    {"label": "Клиенты", "endpoint": "/clients", "icon": "bi-people", "roles": ["admin", "manager", "installer"]},
+    {"label": "Материалы", "endpoint": "/materials", "icon": "bi-box-seam", "roles": ["admin", "manager", "installer"]},
+    {"label": "Финансы", "endpoint": "/finance", "icon": "bi-cash-coin", "roles": ["admin", "manager"]},
+    {"label": "Допработы", "endpoint": "/additional-works", "icon": "bi-tools", "roles": ["admin", "manager", "installer"]},
+    {"label": "Отчёты", "endpoint": "/reports", "icon": "bi-bar-chart", "roles": ["admin", "manager"]},
+    {"label": "Настройки", "endpoint": "/settings", "icon": "bi-gear", "roles": ["admin"]},
 ]
 
 
