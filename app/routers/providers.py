@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import require_admin_user, get_current_user_optional
 from app.models.clients import Provider
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
@@ -48,6 +48,8 @@ def load_providers(db: Session) -> list[Provider]:
 def providers_page(request: Request, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     request.state.providers = load_providers(db)
     return render_providers(request, current_user)
 
@@ -56,6 +58,8 @@ def providers_page(request: Request, db: DbSession, current_user: CurrentUser) -
 def create_provider(request: Request, db: DbSession, current_user: CurrentUser, name: Annotated[str, Form()], description: Annotated[str | None, Form()] = None) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     clean_name = name.strip()
     error = None
     success = None
@@ -75,6 +79,8 @@ def create_provider(request: Request, db: DbSession, current_user: CurrentUser, 
 def toggle_provider(request: Request, provider_id: int, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     provider = db.get(Provider, provider_id)
     if provider is not None:
         provider.is_active = not provider.is_active
@@ -87,6 +93,8 @@ def toggle_provider(request: Request, provider_id: int, db: DbSession, current_u
 def update_provider(request: Request, provider_id: int, db: DbSession, current_user: CurrentUser, name: Annotated[str, Form()], description: Annotated[str | None, Form()] = None) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     provider = db.get(Provider, provider_id)
     if provider is not None:
         provider.name = name.strip()

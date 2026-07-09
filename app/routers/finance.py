@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import can_open_finance, get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
 from app.services.expenses import ExpenseError, create_expense, get_expenses_page_data, normalize_filters as normalize_expense_filters
@@ -108,6 +108,8 @@ def finance_page(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_open_finance(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     active_period, period_from, period_to = resolve_period(period, parse_query_date(date_from), parse_query_date(date_to))
     filters = normalize_filters(period_from, period_to, transaction_type, parse_query_int(user_id), search, parse_query_int(provider_id))
     data = get_finance_page_data(db, filters=filters, page=page)
@@ -129,6 +131,8 @@ def create_finance_operation(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_open_finance(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     error = None
     success = None
@@ -171,6 +175,8 @@ def create_finance_expense(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_open_finance(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
 
     error = None
     success = None

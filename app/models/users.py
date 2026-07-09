@@ -21,6 +21,7 @@ class User(BaseModel):
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    comment: Mapped[str | None] = mapped_column(String(500))
 
     connections: Mapped[list["Connection"]] = relationship(
         back_populates="installer",

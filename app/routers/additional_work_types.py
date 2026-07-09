@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import require_admin_user, get_current_user_optional
 from app.models.clients import ExtraWorkType
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
@@ -36,6 +36,8 @@ def render_page(request: Request, current_user: User, types: list[ExtraWorkType]
 def page(request: Request, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     return render_page(request, current_user, load_types(db))
 
 
@@ -43,6 +45,8 @@ def page(request: Request, db: DbSession, current_user: CurrentUser) -> Response
 def create_type(request: Request, db: DbSession, current_user: CurrentUser, name: Annotated[str, Form()], description: Annotated[str | None, Form()] = None, default_price: Annotated[str | None, Form()] = None, default_office_amount: Annotated[str | None, Form()] = None, requires_materials: Annotated[bool, Form()] = False, requires_equipment: Annotated[bool, Form()] = False) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     clean_name = name.strip()
     error = None
     success = None
@@ -59,6 +63,8 @@ def create_type(request: Request, db: DbSession, current_user: CurrentUser, name
 def toggle_type(request: Request, type_id: int, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not require_admin_user(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     item = db.get(ExtraWorkType, type_id)
     if item is not None:
         item.is_active = not item.is_active

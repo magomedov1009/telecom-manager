@@ -1,4 +1,4 @@
-﻿from datetime import date, datetime, time, timedelta
+﻿from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Annotated
 
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import SESSION_COOKIE_NAME, create_session_token, verify_password
 from app.db.session import get_db
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import can_open_finance, can_open_reports, get_current_user_optional, require_admin_user
 from app.models.clients import Client, Connection, ExtraWork, Provider
 from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
@@ -29,7 +29,7 @@ CurrentUser = Annotated[User | None, Depends(get_current_user_optional)]
 
 
 NAV_ITEMS = [
-    {"label": "Dashboard", "endpoint": "/dashboard", "icon": "bi-speedometer2"},
+    {"label": "Dashboard", "endpoint": "/dashboard", "icon": "bi-speedometer2", "roles": ["admin", "manager", "installer"]},
     {"label": "Подключения", "endpoint": "/connections", "icon": "bi-router"},
     {"label": "Клиенты", "endpoint": "/clients", "icon": "bi-people"},
     {"label": "Склад", "endpoint": "/materials", "icon": "bi-box-seam"},
@@ -89,6 +89,8 @@ def login(
             {"error": "Неверный логин или пароль", "username": username},
         )
 
+    user.last_login_at = datetime.now(UTC)
+    db.commit()
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
@@ -396,6 +398,12 @@ def section_page(
         "reports": "Отчеты",
         "settings": "Настройки",
     }
+    if section == "settings" and not require_admin_user(current_user):
+        return render(request, "errors/404.html", {"user": current_user, "missing_path": request.url.path})
+    if section == "reports" and not can_open_reports(current_user):
+        return render(request, "errors/404.html", {"user": current_user, "missing_path": request.url.path})
+    if section == "finance" and not can_open_finance(current_user):
+        return render(request, "errors/404.html", {"user": current_user, "missing_path": request.url.path})
     title = section_titles.get(section)
     if title is None:
         return render(request, "errors/404.html", {"user": current_user, "missing_path": request.url.path})

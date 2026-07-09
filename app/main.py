@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user_optional
-from app.routers import additional_work_types, additional_works, clients, connections, expenses, finance, materials, pages, providers, reports
+from app.routers import additional_work_types, additional_works, clients, connections, expenses, finance, materials, pages, providers, reports, settings as settings_router
 
 
 def create_app() -> FastAPI:
@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
     application.include_router(materials.router)
     application.include_router(providers.router)
     application.include_router(reports.router)
+    application.include_router(settings_router.router)
     application.include_router(pages.router)
 
     templates = Jinja2Templates(directory="app/templates")

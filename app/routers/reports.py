@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import can_export_reports, can_open_reports, get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
 from app.services.inventory import format_quantity
@@ -66,6 +66,8 @@ def reports_page(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_open_reports(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     data = build_data(db, period, date_from, date_to, provider_id, search, tab, page, sort, direction)
     return templates.TemplateResponse(
         request=request,
@@ -89,6 +91,8 @@ def export_xlsx(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_export_reports(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     data = build_data(db, period, date_from, date_to, provider_id, search, tab, 1, sort, direction, per_page=100000)
     filename, headers, rows = rows_for_export(db, data, data["active_tab"])
     return Response(
@@ -113,6 +117,8 @@ def export_pdf(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
+    if not can_export_reports(current_user):
+        return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     data = build_data(db, period, date_from, date_to, provider_id, search, tab, 1, sort, direction, per_page=100000)
     filename, headers, rows = rows_for_export(db, data, data["active_tab"])
     return Response(

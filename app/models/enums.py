@@ -3,7 +3,7 @@
 
 class UserRole(StrEnum):
     ADMIN = "admin"
-    OFFICE = "office"
+    MANAGER = "manager"
     INSTALLER = "installer"
 
 
