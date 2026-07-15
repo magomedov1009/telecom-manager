@@ -1,4 +1,4 @@
-﻿"""add manager role and user comments
+"""add manager role and user comments
 
 Revision ID: 202607060009
 Revises: 202607060008

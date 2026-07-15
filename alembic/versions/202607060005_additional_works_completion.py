@@ -1,4 +1,4 @@
-﻿"""additional works completion
+"""additional works completion
 
 Revision ID: 202607060005
 Revises: 202607060004

@@ -1,7 +1,7 @@
-﻿"""multiprovider architecture
+"""multiprovider architecture
 
 Revision ID: 202607060004
-Revises: 202607060003
+Revises: 202607060003a
 Create Date: 2026-07-08
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "202607060004"
-down_revision = "202607060003"
+down_revision = "202607060003a"
 branch_labels = None
 depends_on = None
 

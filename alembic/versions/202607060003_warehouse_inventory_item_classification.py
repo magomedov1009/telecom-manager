@@ -1,7 +1,7 @@
-﻿"""warehouse inventory item classification
+"""warehouse inventory item classification
 
-Revision ID: 202607060003
-Revises: 202607060002
+Revision ID: 202607060003a
+Revises: 202607060003
 Create Date: 2026-07-08
 """
 
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision = "202607060003"
-down_revision = "202607060002"
+revision = "202607060003a"
+down_revision = "202607060003"
 branch_labels = None
 depends_on = None
 

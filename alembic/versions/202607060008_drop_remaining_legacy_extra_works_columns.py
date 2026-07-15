@@ -1,4 +1,4 @@
-﻿"""drop remaining legacy extra works columns
+"""drop remaining legacy extra works columns
 
 Revision ID: 202607060008
 Revises: 202607060007
