@@ -1,4 +1,4 @@
-﻿from typing import Annotated
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -137,7 +137,7 @@ def update_user(
         item.comment = comment.strip() if comment else None
         item.manager_id = normalize_manager_id(db, manager_id)
         db.commit()
-    return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS, "success": "Пользователь обновлен"})
+    return render_settings(request, "settings/users.html", current_user, users_context(db, success="Пользователь обновлен"))
 
 
 @router.post("/users/{user_id}/password", response_class=HTMLResponse)
@@ -148,7 +148,7 @@ def change_password(request: Request, user_id: int, db: DbSession, current_user:
     if item is not None and password:
         item.hashed_password = hash_password(password)
         db.commit()
-    return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS, "success": "Пароль обновлен"})
+    return render_settings(request, "settings/users.html", current_user, users_context(db, success="Пароль обновлен"))
 
 
 @router.post("/users/{user_id}/toggle", response_class=HTMLResponse)
@@ -159,4 +159,4 @@ def toggle_user(request: Request, user_id: int, db: DbSession, current_user: Cur
     if item is not None and item.id != current_user.id:
         item.is_active = not item.is_active
         db.commit()
-    return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS, "success": "Статус пользователя обновлен"})
+    return render_settings(request, "settings/users.html", current_user, users_context(db, success="Статус пользователя обновлен"))
