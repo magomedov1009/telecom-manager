@@ -33,7 +33,7 @@ def upgrade() -> None:
             UPDATE expenses SET user_id = maga_user_id WHERE user_id = admin_user_id;
             UPDATE finance_transactions SET user_id = maga_user_id WHERE user_id = admin_user_id;
             UPDATE inventory_transactions SET user_id = maga_user_id WHERE user_id = admin_user_id;
-            UPDATE event_logs SET user_id = maga_user_id WHERE user_id = admin_user_id;
+            UPDATE event_logs SET actor_id = maga_user_id WHERE actor_id = admin_user_id;
         END $$;
         """
     )
