@@ -8,7 +8,7 @@ from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.clients import Provider
-from app.models.enums import InventoryItemType, InventoryTransactionType, MaterialUnit
+from app.models.enums import InventoryItemType, InventoryTransactionType, MaterialUnit, UserRole
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
 from app.services.access import AccessScope, apply_user_scope, get_access_scope
@@ -72,6 +72,7 @@ class MaterialsPageData:
     item_type_labels: dict[InventoryItemType, str]
     unit_options: list[str]
     providers: list[Provider]
+    users: list[User]
     error: str | None = None
     success: str | None = None
     filter_query: str = ""
@@ -302,6 +303,7 @@ def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str
         item_type_labels=ITEM_TYPE_LABELS,
         unit_options=DEFAULT_UNIT_OPTIONS,
         providers=providers,
+        users=list(db.scalars(select(User).where(User.is_active.is_(True), User.role == UserRole.INSTALLER).order_by(User.full_name, User.username))),
         error=error,
         success=success,
         filter_query=filter_query,

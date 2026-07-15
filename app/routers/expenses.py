@@ -12,6 +12,7 @@ from app.dependencies.auth import get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
 from app.services.expenses import ExpenseError, create_expense, get_expenses_page_data, normalize_filters
+from app.services.users import resolve_actor_user
 
 router = APIRouter(prefix="/expenses", tags=["expenses"])
 templates = Jinja2Templates(directory="app/templates")
@@ -73,6 +74,7 @@ def create_expense_action(
     amount: Annotated[str, Form()],
     paid_by: Annotated[str, Form()],
     comment: Annotated[str | None, Form()] = None,
+    actor_user_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
@@ -86,7 +88,7 @@ def create_expense_action(
             category=category,
             description=description,
             amount=amount,
-            paid_by_user_id=current_user.id,
+            paid_by_user_id=resolve_actor_user(db, current_user, actor_user_id).id,
             paid_by=paid_by,
             comment=comment,
         )

@@ -13,6 +13,7 @@ from app.models.users import User
 from app.routers.pages import NAV_ITEMS
 from app.services.additional_works import AdditionalWorkError, create_additional_work, get_data, normalize_filters
 from app.services.inventory import format_quantity
+from app.services.users import resolve_actor_user
 
 router = APIRouter(prefix="/additional-works", tags=["additional-works"])
 templates = Jinja2Templates(directory="app/templates")
@@ -51,13 +52,13 @@ def page(request: Request, db: DbSession, current_user: CurrentUser, search: Ann
 
 
 @router.post("", response_class=HTMLResponse)
-def create_action(request: Request, db: DbSession, current_user: CurrentUser, provider_id: Annotated[int, Form()], work_date: Annotated[date, Form()], work_type_id: Annotated[int, Form()], amount: Annotated[str, Form()], use_materials: Annotated[str, Form()] = "", material_id: Annotated[list[int], Form()] = [], material_quantity: Annotated[list[str], Form()] = [], comment: Annotated[str | None, Form()] = None) -> Response:
+def create_action(request: Request, db: DbSession, current_user: CurrentUser, provider_id: Annotated[int, Form()], work_date: Annotated[date, Form()], work_type_id: Annotated[int, Form()], amount: Annotated[str, Form()], warehouse_id: Annotated[int | None, Form()] = None, use_materials: Annotated[str, Form()] = "", material_id: Annotated[list[int], Form()] = [], material_quantity: Annotated[list[str], Form()] = [], comment: Annotated[str | None, Form()] = None, actor_user_id: Annotated[int | None, Form()] = None) -> Response:
     if current_user is None:
         return redirect_to_login()
     error = None
     success = None
     try:
-        create_additional_work(db, user=current_user, provider_id=provider_id, work_date=work_date, work_type_id=work_type_id, amount=amount, use_materials=(use_materials == "on"), material_ids=material_id, material_quantities=material_quantity, comment=comment)
+        create_additional_work(db, user=resolve_actor_user(db, current_user, actor_user_id), provider_id=provider_id, work_date=work_date, work_type_id=work_type_id, amount=amount, warehouse_id=warehouse_id, use_materials=(use_materials == "on"), material_ids=material_id, material_quantities=material_quantity, comment=comment)
         success = "Дополнительная работа создана"
     except AdditionalWorkError as exc:
         db.rollback()

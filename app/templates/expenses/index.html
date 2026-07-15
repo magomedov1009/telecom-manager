@@ -157,6 +157,12 @@
                 <option value="OFFICE">Офис</option>
               </select>
             </div>
+            {% if user.role.value == 'admin' %}
+            <div class="col-md-4">
+              <label class="form-label">&#1048;&#1089;&#1087;&#1086;&#1083;&#1085;&#1080;&#1090;&#1077;&#1083;&#1100;</label>
+              <select class="form-select" name="actor_user_id"><option value="">{{ user.full_name }}</option>{% for item in data.users %}<option value="{{ item.id }}">{{ item.full_name }}</option>{% endfor %}</select>
+            </div>
+            {% endif %}
             <div class="col-12">
               <label class="form-label" for="expense-comment">Комментарий</label>
               <textarea class="form-control" id="expense-comment" name="comment" rows="3" placeholder="Дополнительные детали"></textarea>

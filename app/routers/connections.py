@@ -12,6 +12,7 @@ from app.dependencies.auth import get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
 from app.services.inventory import format_quantity
+from app.services.users import get_assignable_users, resolve_actor_user
 from app.services.connections import (
     ConnectionError,
     create_connection,
@@ -83,7 +84,7 @@ def connections_page(
 def new_connection_page(request: Request, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None:
         return redirect_to_login()
-    return render(request, "connections/form.html", current_user, {"form": get_form_data(db), "mode": "create"})
+    return render(request, "connections/form.html", current_user, {"form": get_form_data(db), "mode": "create", "assignable_users": get_assignable_users(db)})
 
 
 @router.post("", response_class=HTMLResponse)
@@ -106,13 +107,14 @@ def create_connection_action(
     connection_comment: Annotated[str | None, Form()] = None,
     material_id: Annotated[list[int], Form()] = [],
     material_quantity: Annotated[list[str], Form()] = [],
+    actor_user_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
     try:
         connection = create_connection(
             db,
-            user=current_user,
+            user=resolve_actor_user(db, current_user, actor_user_id),
             connection_date=connection_date,
             provider=provider,
             contract_number=contract_number,
@@ -131,7 +133,7 @@ def create_connection_action(
         )
     except (ConnectionError, ValueError) as exc:
         db.rollback()
-        return render(request, "connections/form.html", current_user, {"form": get_form_data(db, error=str(exc)), "mode": "create"})
+        return render(request, "connections/form.html", current_user, {"form": get_form_data(db, error=str(exc)), "mode": "create", "assignable_users": get_assignable_users(db)})
     return RedirectResponse(url=f"/connections/{connection.id}", status_code=status.HTTP_303_SEE_OTHER)
 
 

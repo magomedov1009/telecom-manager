@@ -19,6 +19,7 @@ from app.services.inventory import (
     get_materials_page_data,
     normalize_filters,
 )
+from app.services.users import resolve_actor_user
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 templates = Jinja2Templates(directory="app/templates")
@@ -128,6 +129,7 @@ def create_material_operation(
     comment: Annotated[str | None, Form()] = None,
     destination_warehouse_id: Annotated[int | None, Form()] = None,
     adjustment_direction: Annotated[str, Form()] = "plus",
+    actor_user_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
@@ -138,7 +140,7 @@ def create_material_operation(
     try:
         create_operation(
             db,
-            user=current_user,
+            user=resolve_actor_user(db, current_user, actor_user_id),
             operation=operation,
             warehouse_id=warehouse_id,
             material_id=material_id,

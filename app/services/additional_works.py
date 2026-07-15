@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models.clients import ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
-from app.models.enums import FinanceTransactionType, InventoryTransactionType, PaidBy
+from app.models.enums import FinanceTransactionType, InventoryTransactionType, PaidBy, UserRole
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
@@ -36,6 +36,7 @@ class AdditionalWorksData:
     work_types: list[ExtraWorkType]
     warehouses: list[Warehouse]
     materials: list[Material]
+    users: list[User]
     filters: dict
     filter_query: str
     error: str | None = None
@@ -96,6 +97,7 @@ def get_data(db: Session, filters: dict, page: int, error: str | None = None, su
         work_types=list(db.scalars(select(ExtraWorkType).where(ExtraWorkType.is_active.is_(True)).order_by(ExtraWorkType.name))),
         warehouses=list(db.scalars(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name))),
         materials=list(db.scalars(select(Material).where(Material.active.is_(True)).order_by(Material.item_type, Material.name))),
+        users=list(db.scalars(select(User).where(User.is_active.is_(True), User.role == UserRole.INSTALLER).order_by(User.full_name, User.username))),
         filters=filters,
         filter_query=build_filter_query(filters),
         error=error,

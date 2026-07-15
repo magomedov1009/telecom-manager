@@ -95,9 +95,9 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
 
 
 def calculate_finance(price: Decimal, installer_amount: str | None, office_amount: str | None) -> tuple[Decimal, Decimal]:
-    office = parse_decimal(office_amount or "0", "???? ????????")
+    office = parse_decimal(office_amount or "0", "\u041e\u0444\u0438\u0441 \u043f\u043e\u043b\u0443\u0447\u0430\u0435\u0442")
     if office > price:
-        raise ConnectionError("???? ?? ????? ???????? ??????, ??? ???????? ?? ???????")
+        raise ConnectionError("\u041e\u0444\u0438\u0441 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0431\u043e\u043b\u044c\u0448\u0435, \u0447\u0435\u043c \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u043e \u043e\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430")
     installer = price - office
     return installer, office
 

@@ -33,6 +33,10 @@
           <label class="form-label">Склад</label>
           <select class="form-select" name="warehouse_id" required>{% for warehouse in form.warehouses %}<option value="{{ warehouse.id }}" {% if connection and connection.warehouse_id == warehouse.id %}selected{% endif %}>{{ warehouse.name }}</option>{% endfor %}</select>
         </div>
+        {% if mode == 'create' and user.role.value == 'admin' %}
+        <div class="col-md-3"><label class="form-label">&#1048;&#1089;&#1087;&#1086;&#1083;&#1085;&#1080;&#1090;&#1077;&#1083;&#1100;</label><select class="form-select" name="actor_user_id"><option value="">{{ user.full_name }}</option>{% for item in assignable_users %}<option value="{{ item.id }}">{{ item.full_name }}</option>{% endfor %}</select></div>
+        {% endif %}
+
 
         <div class="col-md-4">
           <label class="form-label" id="login-label">Логин клиента *</label>
