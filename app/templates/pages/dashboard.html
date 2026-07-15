@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 
 {% block title %}Dashboard | {{ app_name }}{% endblock %}
 {% block page_heading %}Dashboard{% endblock %}
@@ -126,7 +126,7 @@
   <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h4 mb-0">Дополнительные KPI</h2><span class="badge text-bg-light text-dark border">Средние значения</span></div>
   <div class="row g-3">
     {% for label, value, icon in [('Средний чек', dashboard.kpi.average_check, 'bi-cash-stack'), ('Средняя прибыль с подключения', dashboard.kpi.average_profit, 'bi-graph-up'), ('Средний расход на подключение', dashboard.kpi.average_expense, 'bi-receipt-cutoff'), ('Средний расход материалов', dashboard.kpi.average_material_spent, 'bi-box')] %}
-      <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between"><span class="text-secondary small">{{ label }}</span><i class="bi {{ icon }} text-secondary"></i></div><div class="h3 mt-2 mb-0">{% if value is none %}—{% else %}{{ format_quantity(value) }}{% endif %}</div></div></div></div>
+      <div class="col-md-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="d-flex justify-content-between"><span class="text-secondary small">{{ label }}</span><i class="bi {{ icon }} text-secondary"></i></div><div class="h3 mt-2 mb-0">{% if value is none %}—{% else %}{{ value|round(2) }}{% endif %}</div></div></div></div>
     {% endfor %}
   </div>
 </section>

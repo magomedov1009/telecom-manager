@@ -87,13 +87,13 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">Роль</label>
-              <select class="form-select" name="role">
+              <select class="form-select" name="role" data-role-select>
                 {% for role in roles %}<option value="{{ role.value }}">{{ role_labels.get(role, role.name) }}</option>{% endfor %}
               </select>
             </div>
             <div class="col-md-6">
               <label class="form-label">Ответственный менеджер</label>
-              <select class="form-select" name="manager_id">
+              <select class="form-select" name="manager_id" data-manager-select>
                 <option value="">Не назначен</option>
                 {% for manager in managers %}<option value="{{ manager.id }}">{{ manager.full_name }}</option>{% endfor %}
               </select>
@@ -138,13 +138,13 @@
             </div>
             <div class="col-md-6">
               <label class="form-label">Роль</label>
-              <select class="form-select" name="role">
+              <select class="form-select" name="role" data-role-select>
                 {% for role in roles %}<option value="{{ role.value }}" {% if item.role == role %}selected{% endif %}>{{ role_labels.get(role, role.name) }}</option>{% endfor %}
               </select>
             </div>
             <div class="col-md-6">
               <label class="form-label">Ответственный менеджер</label>
-              <select class="form-select" name="manager_id">
+              <select class="form-select" name="manager_id" data-manager-select>
                 <option value="">Не назначен</option>
                 {% for manager in managers %}<option value="{{ manager.id }}" {% if item.manager_id == manager.id %}selected{% endif %}>{{ manager.full_name }}</option>{% endfor %}
               </select>
@@ -193,4 +193,22 @@
   </div>
 </div>
 {% endfor %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('form').forEach(function (form) {
+    var role = form.querySelector('[data-role-select]');
+    var manager = form.querySelector('[data-manager-select]');
+    if (!role || !manager) { return; }
+    function syncManager() {
+      var enabled = role.value === 'installer';
+      manager.disabled = !enabled;
+      if (!enabled) { manager.value = ''; }
+      manager.closest('.col-md-6').classList.toggle('opacity-50', !enabled);
+    }
+    role.addEventListener('change', syncManager);
+    syncManager();
+  });
+});
+</script>
 {% endblock %}

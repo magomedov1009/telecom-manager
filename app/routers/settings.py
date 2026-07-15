@@ -63,8 +63,8 @@ def users_context(db: Session, **extra) -> dict:
     return context
 
 
-def normalize_manager_id(db: Session, manager_id: int | None) -> int | None:
-    if not manager_id:
+def normalize_manager_id(db: Session, manager_id: int | None, role: UserRole | None = None) -> int | None:
+    if role != UserRole.INSTALLER or not manager_id:
         return None
     manager = db.get(User, manager_id)
     if manager is None or manager.role != UserRole.MANAGER or not manager.is_active:
@@ -109,7 +109,7 @@ def create_user(
     elif db.scalar(select(User).where(User.username == clean_username)) is not None:
         error = "Пользователь с таким логином уже существует"
     else:
-        db.add(User(full_name=full_name.strip(), username=clean_username, hashed_password=hash_password(password), role=role, is_active=is_active, comment=comment.strip() if comment else None, manager_id=normalize_manager_id(db, manager_id)))
+        db.add(User(full_name=full_name.strip(), username=clean_username, hashed_password=hash_password(password), role=role, is_active=is_active, comment=comment.strip() if comment else None, manager_id=normalize_manager_id(db, manager_id, role)))
         db.commit()
         success = "Пользователь создан"
     return render_settings(request, "settings/users.html", current_user, users_context(db, error=error, success=success))
@@ -135,7 +135,7 @@ def update_user(
         item.role = role
         item.is_active = is_active
         item.comment = comment.strip() if comment else None
-        item.manager_id = normalize_manager_id(db, manager_id)
+        item.manager_id = normalize_manager_id(db, manager_id, role)
         db.commit()
     return render_settings(request, "settings/users.html", current_user, users_context(db, success="Пользователь обновлен"))
 
