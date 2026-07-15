@@ -12,6 +12,7 @@ from app.models.enums import ConnectionType, FinanceTransactionType, InventoryIt
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
 from app.services.inventory import ensure_sufficient_stock, get_stock_quantity
 
 CONNECTION_TYPE_LABELS = {
@@ -148,13 +149,15 @@ def build_filter_query(filters: dict) -> str:
     return urlencode(params)
 
 
-def build_connections_query(filters: dict) -> Select[tuple[Connection]]:
+def build_connections_query(filters: dict, scope: AccessScope | None = None) -> Select[tuple[Connection]]:
     query = select(Connection).options(
         joinedload(Connection.client),
         joinedload(Connection.warehouse),
         joinedload(Connection.installer),
         selectinload(Connection.connection_materials).joinedload(ConnectionMaterial.material),
     ).join(Connection.client)
+
+    query = apply_user_scope(query, Connection.installer_id, scope)
 
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
@@ -184,9 +187,10 @@ def build_connections_query(filters: dict) -> Select[tuple[Connection]]:
     return query.order_by(Connection.connection_date.desc(), Connection.id.desc())
 
 
-def get_connections_page(db: Session, filters: dict, page: int, per_page: int = 15) -> ConnectionListPage:
+def get_connections_page(db: Session, filters: dict, page: int, per_page: int = 15, user: User | None = None) -> ConnectionListPage:
     page = max(page, 1)
-    query = build_connections_query(filters)
+    scope = get_access_scope(db, user) if user is not None else None
+    query = build_connections_query(filters, scope)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = list(db.scalars(query.offset((page - 1) * per_page).limit(per_page)))
     return ConnectionListPage(items=items, page=page, per_page=per_page, total=total, pages=max(ceil(total / per_page), 1))
@@ -199,10 +203,11 @@ def get_connections_page_data(
     page: int,
     error: str | None = None,
     success: str | None = None,
+    current_user: User | None = None,
 ) -> ConnectionsPageData:
     warehouses, materials, providers = get_reference_data(db)
     return ConnectionsPageData(
-        connections=get_connections_page(db, filters, page),
+        connections=get_connections_page(db, filters, page, user=current_user),
         warehouses=warehouses,
         materials=materials,
         providers=providers,
@@ -216,10 +221,12 @@ def get_connections_page_data(
     )
 
 
-def get_connection(db: Session, connection_id: int) -> Connection | None:
+def get_connection(db: Session, connection_id: int, user: User | None = None) -> Connection | None:
+    query = select(Connection).where(Connection.id == connection_id)
+    if user is not None:
+        query = apply_user_scope(query, Connection.installer_id, get_access_scope(db, user))
     return db.scalar(
-        select(Connection)
-        .where(Connection.id == connection_id)
+        query
         .options(
             joinedload(Connection.client),
             joinedload(Connection.warehouse),

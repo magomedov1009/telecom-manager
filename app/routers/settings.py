@@ -53,6 +53,25 @@ def load_users(db: Session) -> list[User]:
     return list(db.scalars(select(User).order_by(User.created_at.desc(), User.id.desc())))
 
 
+def load_managers(db: Session) -> list[User]:
+    return list(db.scalars(select(User).where(User.role == UserRole.MANAGER, User.is_active.is_(True)).order_by(User.full_name)))
+
+
+def users_context(db: Session, **extra) -> dict:
+    context = {"users": load_users(db), "managers": load_managers(db), "roles": list(UserRole), "role_labels": ROLE_LABELS}
+    context.update(extra)
+    return context
+
+
+def normalize_manager_id(db: Session, manager_id: int | None) -> int | None:
+    if not manager_id:
+        return None
+    manager = db.get(User, manager_id)
+    if manager is None or manager.role != UserRole.MANAGER or not manager.is_active:
+        return None
+    return manager.id
+
+
 @router.get("", response_class=HTMLResponse)
 def settings_page(request: Request, current_user: CurrentUser) -> Response:
     if current_user is None or not require_admin_user(current_user):
@@ -64,7 +83,7 @@ def settings_page(request: Request, current_user: CurrentUser) -> Response:
 def users_page(request: Request, db: DbSession, current_user: CurrentUser) -> Response:
     if current_user is None or not require_admin_user(current_user):
         return forbidden(request, current_user)
-    return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS})
+    return render_settings(request, "settings/users.html", current_user, users_context(db))
 
 
 @router.post("/users", response_class=HTMLResponse)
@@ -78,6 +97,7 @@ def create_user(
     role: Annotated[UserRole, Form()],
     is_active: Annotated[bool, Form()] = True,
     comment: Annotated[str | None, Form()] = None,
+    manager_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None or not require_admin_user(current_user):
         return forbidden(request, current_user)
@@ -89,10 +109,10 @@ def create_user(
     elif db.scalar(select(User).where(User.username == clean_username)) is not None:
         error = "Пользователь с таким логином уже существует"
     else:
-        db.add(User(full_name=full_name.strip(), username=clean_username, hashed_password=hash_password(password), role=role, is_active=is_active, comment=comment.strip() if comment else None))
+        db.add(User(full_name=full_name.strip(), username=clean_username, hashed_password=hash_password(password), role=role, is_active=is_active, comment=comment.strip() if comment else None, manager_id=normalize_manager_id(db, manager_id)))
         db.commit()
         success = "Пользователь создан"
-    return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS, "error": error, "success": success})
+    return render_settings(request, "settings/users.html", current_user, users_context(db, error=error, success=success))
 
 
 @router.post("/users/{user_id}", response_class=HTMLResponse)
@@ -105,6 +125,7 @@ def update_user(
     role: Annotated[UserRole, Form()],
     is_active: Annotated[bool, Form()] = True,
     comment: Annotated[str | None, Form()] = None,
+    manager_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None or not require_admin_user(current_user):
         return forbidden(request, current_user)
@@ -114,6 +135,7 @@ def update_user(
         item.role = role
         item.is_active = is_active
         item.comment = comment.strip() if comment else None
+        item.manager_id = normalize_manager_id(db, manager_id)
         db.commit()
     return render_settings(request, "settings/users.html", current_user, {"users": load_users(db), "roles": list(UserRole), "role_labels": ROLE_LABELS, "success": "Пользователь обновлен"})
 

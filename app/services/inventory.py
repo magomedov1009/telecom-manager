@@ -11,6 +11,7 @@ from app.models.clients import Provider
 from app.models.enums import InventoryItemType, InventoryTransactionType, MaterialUnit
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
 
 OPERATION_LABELS = {
     InventoryTransactionType.RECEIPT: "Приход",
@@ -98,16 +99,16 @@ def get_stock_quantity(db: Session, warehouse_id: int, material_id: int) -> Deci
     return Decimal(quantity or 0)
 
 
-def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[Material], providers: list[Provider]) -> list[dict]:
-    totals = db.execute(
-        select(
-            InventoryTransaction.warehouse_id,
-            InventoryTransaction.material_id,
-            func.coalesce(func.sum(InventoryTransaction.quantity), 0),
-        ).group_by(InventoryTransaction.warehouse_id, InventoryTransaction.material_id)
-    ).all()
+def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[Material], providers: list[Provider], scope: AccessScope | None = None) -> list[dict]:
+    totals_query = select(
+        InventoryTransaction.warehouse_id,
+        InventoryTransaction.material_id,
+        func.coalesce(func.sum(InventoryTransaction.quantity), 0),
+    ).group_by(InventoryTransaction.warehouse_id, InventoryTransaction.material_id)
+    totals = db.execute(apply_user_scope(totals_query, InventoryTransaction.user_id, scope)).all()
     quantity_map = {(warehouse_id, material_id): Decimal(quantity) for warehouse_id, material_id, quantity in totals}
-    provider_totals = db.execute(
+
+    provider_totals_query = (
         select(
             InventoryTransaction.provider_id,
             InventoryTransaction.material_id,
@@ -115,7 +116,8 @@ def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[M
         )
         .where(InventoryTransaction.provider_id.is_not(None))
         .group_by(InventoryTransaction.provider_id, InventoryTransaction.material_id)
-    ).all()
+    )
+    provider_totals = db.execute(apply_user_scope(provider_totals_query, InventoryTransaction.user_id, scope)).all()
     provider_quantity_map = {(provider_id, material_id): Decimal(quantity) for provider_id, material_id, quantity in provider_totals}
 
     rows = []
@@ -136,7 +138,6 @@ def build_stock_rows(db: Session, warehouses: list[Warehouse], materials: list[M
             }
         )
     return rows
-
 
 def parse_decimal(value: str, *, integer_only: bool = False) -> Decimal:
     normalized = value.replace(",", ".").strip()
@@ -234,8 +235,9 @@ def add_transaction(db: Session, user: User, warehouse_id: int, material_id: int
     db.add(InventoryTransaction(warehouse_id=warehouse_id, material_id=material_id, user_id=user.id, operation_type=operation_type, quantity=quantity, comment=comment.strip() if comment else None))
 
 
-def build_history_query(filters: dict) -> Select[tuple[InventoryTransaction]]:
+def build_history_query(filters: dict, scope: AccessScope | None = None) -> Select[tuple[InventoryTransaction]]:
     query = select(InventoryTransaction).options(joinedload(InventoryTransaction.user), joinedload(InventoryTransaction.warehouse), joinedload(InventoryTransaction.material))
+    query = apply_user_scope(query, InventoryTransaction.user_id, scope)
     if filters.get("warehouse_id"):
         query = query.where(InventoryTransaction.warehouse_id == int(filters["warehouse_id"]))
     if filters.get("material_id"):
@@ -265,9 +267,10 @@ def build_history_query(filters: dict) -> Select[tuple[InventoryTransaction]]:
     return query.order_by(InventoryTransaction.created_at.desc(), InventoryTransaction.id.desc())
 
 
-def get_history(db: Session, filters: dict, page: int, per_page: int = 15) -> OperationHistoryPage:
+def get_history(db: Session, filters: dict, page: int, per_page: int = 15, user: User | None = None) -> OperationHistoryPage:
     page = max(page, 1)
-    query = build_history_query(filters)
+    scope = get_access_scope(db, user) if user is not None else None
+    query = build_history_query(filters, scope)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = list(db.scalars(query.offset((page - 1) * per_page).limit(per_page)))
     return OperationHistoryPage(items=items, page=page, per_page=per_page, total=total, pages=max(ceil(total / per_page), 1))
@@ -277,13 +280,14 @@ def normalize_filters(search: str | None, warehouse_id: int | None, material_id:
     return {"search": search.strip() if search else None, "warehouse_id": warehouse_id, "material_id": material_id, "operation_type": operation_type or None, "date_from": date_from, "date_to": date_to, "item_type": item_type or None}
 
 
-def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str | None = None, success: str | None = None, filter_query: str = "") -> MaterialsPageData:
+def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str | None = None, success: str | None = None, filter_query: str = "", current_user: User | None = None) -> MaterialsPageData:
     warehouses = get_active_warehouses(db)
     providers = list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)))
     all_items = get_active_materials(db)
     material_items = [item for item in all_items if item.item_type == InventoryItemType.MATERIAL]
     equipment_items = [item for item in all_items if item.item_type == InventoryItemType.EQUIPMENT]
-    stock_rows = build_stock_rows(db, warehouses, all_items, providers)
+    scope = get_access_scope(db, current_user) if current_user is not None else None
+    stock_rows = build_stock_rows(db, warehouses, all_items, providers, scope)
     return MaterialsPageData(
         warehouses=warehouses,
         materials=material_items,
@@ -291,7 +295,7 @@ def get_materials_page_data(db: Session, *, filters: dict, page: int, error: str
         stock_rows=stock_rows,
         material_stock_rows=[row for row in stock_rows if row["material"].item_type == InventoryItemType.MATERIAL],
         equipment_stock_rows=[row for row in stock_rows if row["material"].item_type == InventoryItemType.EQUIPMENT],
-        history=get_history(db, filters, page),
+        history=get_history(db, filters, page, user=current_user),
         filters=filters,
         operation_types=[InventoryTransactionType.RECEIPT, InventoryTransactionType.TRANSFER_OUT, InventoryTransactionType.TRANSFER_IN, InventoryTransactionType.RETURN, InventoryTransactionType.ISSUE_TO_THIRD_PARTY, InventoryTransactionType.WRITE_OFF, InventoryTransactionType.ADJUSTMENT],
         operation_labels=OPERATION_LABELS,

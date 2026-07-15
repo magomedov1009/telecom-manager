@@ -1,6 +1,6 @@
 ﻿from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -22,6 +22,10 @@ class User(BaseModel):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str | None] = mapped_column(String(500))
+    manager_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), index=True)
+
+    manager: Mapped["User | None"] = relationship(remote_side="User.id", foreign_keys=[manager_id], back_populates="team_members")
+    team_members: Mapped[list["User"]] = relationship(back_populates="manager", foreign_keys="User.manager_id")
 
     connections: Mapped[list["Connection"]] = relationship(
         back_populates="installer",

@@ -47,7 +47,7 @@ def page(request: Request, db: DbSession, current_user: CurrentUser, search: Ann
     if current_user is None:
         return redirect_to_login()
     filters = normalize_filters(search, parse_query_int(provider_id), parse_query_date(date_from), parse_query_date(date_to))
-    return render_page(request, current_user, get_data(db, filters, page))
+    return render_page(request, current_user, get_data(db, filters, page, current_user=current_user))
 
 
 @router.post("", response_class=HTMLResponse)
@@ -62,5 +62,5 @@ def create_action(request: Request, db: DbSession, current_user: CurrentUser, pr
     except AdditionalWorkError as exc:
         db.rollback()
         error = str(exc)
-    data = get_data(db, normalize_filters(None, None, None, None), 1, error=error, success=success)
+    data = get_data(db, normalize_filters(None, None, None, None), 1, error=error, success=success, current_user=current_user)
     return render_page(request, current_user, data)

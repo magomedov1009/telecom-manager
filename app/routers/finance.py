@@ -112,9 +112,9 @@ def finance_page(
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     active_period, period_from, period_to = resolve_period(period, parse_query_date(date_from), parse_query_date(date_to))
     filters = normalize_filters(period_from, period_to, transaction_type, parse_query_int(user_id), search, parse_query_int(provider_id))
-    data = get_finance_page_data(db, filters=filters, page=page)
+    data = get_finance_page_data(db, filters=filters, page=page, current_user=current_user)
     expense_filters = normalize_expense_filters(search, None, period_from, period_to)
-    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=page))
+    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=page, current_user=current_user))
     data.filters["period"] = active_period
     template = "finance/_module.html" if request.headers.get("HX-Request") else "finance/index.html"
     return render_finance(request, template, current_user, data)
@@ -153,9 +153,9 @@ def create_finance_operation(
         return RedirectResponse(url="/finance", status_code=status.HTTP_303_SEE_OTHER)
 
     filters = normalize_filters(None, None, None, None, None)
-    data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success)
+    data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     expense_filters = normalize_expense_filters(None, None, None, None)
-    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1))
+    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1, current_user=current_user))
     data.filters["period"] = "all"
     return render_finance(request, "finance/_module.html", current_user, data)
 
@@ -198,9 +198,9 @@ def create_finance_expense(
         error = str(exc)
 
     filters = normalize_filters(None, None, None, None, None)
-    data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success)
+    data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     expense_filters = normalize_expense_filters(None, None, None, None)
-    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1))
+    object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1, current_user=current_user))
     data.filters["period"] = "all"
     if not request.headers.get("HX-Request"):
         return RedirectResponse(url="/finance", status_code=status.HTTP_303_SEE_OTHER)

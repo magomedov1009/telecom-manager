@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.clients import Client, Connection, ExtraWork, ExtraWorkType, Provider
 from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
+from app.models.users import User
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
 from app.models.inventory import InventoryTransaction, Material
 from app.services.expenses import make_expense_row
 from app.services.finance import get_finance_stats
@@ -133,8 +135,9 @@ def order_query(query, sort_map: dict, sort: str, direction: str):
     return query.order_by(column.asc() if direction == "asc" else column.desc())
 
 
-def connection_query(period: dict, provider_id: int | None):
+def connection_query(period: dict, provider_id: int | None, scope: AccessScope | None = None):
     query = select(Connection).join(Connection.client).options(joinedload(Connection.client).joinedload(Client.provider))
+    query = apply_user_scope(query, Connection.installer_id, scope)
     query = apply_date_period(query, Connection.connection_date, period)
     if provider_id:
         query = query.where(Client.provider_id == provider_id)
@@ -148,8 +151,9 @@ def apply_connection_search(query, search: str | None):
     return query.where(or_(Client.contract_number.ilike(pattern), Client.login.ilike(pattern), Client.address.ilike(pattern), Client.phone.ilike(pattern), Client.comment.ilike(pattern), Connection.comment.ilike(pattern)))
 
 
-def extra_work_query(period: dict, provider_id: int | None):
+def extra_work_query(period: dict, provider_id: int | None, scope: AccessScope | None = None):
     query = select(ExtraWork).join(ExtraWork.work_type).options(joinedload(ExtraWork.provider), joinedload(ExtraWork.work_type))
+    query = apply_user_scope(query, ExtraWork.installer_id, scope)
     query = apply_date_period(query, ExtraWork.work_date, period)
     if provider_id:
         query = query.where(ExtraWork.provider_id == provider_id)
@@ -163,8 +167,9 @@ def apply_extra_work_search(query, search: str | None):
     return query.where(or_(ExtraWork.comment.ilike(pattern), ExtraWorkType.name.ilike(pattern), ExtraWorkType.description.ilike(pattern)))
 
 
-def expense_query(period: dict, provider_id: int | None):
+def expense_query(period: dict, provider_id: int | None, scope: AccessScope | None = None):
     query = select(Expense).options(joinedload(Expense.provider))
+    query = apply_user_scope(query, Expense.user_id, scope)
     query = apply_datetime_period(query, Expense.created_at, period)
     if provider_id:
         query = query.where(Expense.provider_id == provider_id)
@@ -177,8 +182,9 @@ def apply_expense_search(query, search: str | None):
     return query.where(Expense.comment.ilike(f"%{search}%"))
 
 
-def finance_query(period: dict, provider_id: int | None):
+def finance_query(period: dict, provider_id: int | None, scope: AccessScope | None = None):
     query = select(FinanceTransaction).options(joinedload(FinanceTransaction.provider), joinedload(FinanceTransaction.user))
+    query = apply_user_scope(query, FinanceTransaction.user_id, scope)
     query = apply_datetime_period(query, FinanceTransaction.created_at, period)
     if provider_id:
         query = query.where(FinanceTransaction.provider_id == provider_id)
@@ -191,11 +197,11 @@ def apply_finance_search(query, search: str | None):
     return query.where(FinanceTransaction.comment.ilike(f"%{search}%"))
 
 
-def income_summary(db: Session, period: dict, provider_id: int | None) -> dict:
+def income_summary(db: Session, period: dict, provider_id: int | None, scope: AccessScope | None = None) -> dict:
     connection_income = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION, FinanceTransaction.amount > 0)
     extra_income = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(FinanceTransaction.transaction_type == FinanceTransactionType.EXTRA_WORK, FinanceTransaction.amount > 0)
-    connection_income = apply_datetime_period(connection_income, FinanceTransaction.created_at, period)
-    extra_income = apply_datetime_period(extra_income, FinanceTransaction.created_at, period)
+    connection_income = apply_user_scope(apply_datetime_period(connection_income, FinanceTransaction.created_at, period), FinanceTransaction.user_id, scope)
+    extra_income = apply_user_scope(apply_datetime_period(extra_income, FinanceTransaction.created_at, period), FinanceTransaction.user_id, scope)
     if provider_id:
         connection_income = connection_income.where(FinanceTransaction.provider_id == provider_id)
         extra_income = extra_income.where(FinanceTransaction.provider_id == provider_id)
@@ -204,22 +210,25 @@ def income_summary(db: Session, period: dict, provider_id: int | None) -> dict:
     return {"connections": connections, "extra_works": extra_works, "total": connections + extra_works}
 
 
-def inventory_summary(db: Session, period: dict, provider_id: int | None) -> dict:
+def inventory_summary(db: Session, period: dict, provider_id: int | None, scope: AccessScope | None = None) -> dict:
     result = {InventoryItemType.MATERIAL: [], InventoryItemType.EQUIPMENT: []}
     for material in db.scalars(select(Material).where(Material.active.is_(True)).order_by(Material.item_type, Material.name)):
         balance = select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == material.id)
         receipt = apply_datetime_period(select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == material.id, InventoryTransaction.quantity > 0), InventoryTransaction.created_at, period)
         spent = apply_datetime_period(select(func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0)).where(InventoryTransaction.material_id == material.id, InventoryTransaction.quantity < 0), InventoryTransaction.created_at, period)
+        balance = apply_user_scope(balance, InventoryTransaction.user_id, scope)
+        receipt = apply_user_scope(receipt, InventoryTransaction.user_id, scope)
+        spent = apply_user_scope(spent, InventoryTransaction.user_id, scope)
         if provider_id:
             balance = balance.where(InventoryTransaction.provider_id == provider_id)
             receipt = receipt.where(InventoryTransaction.provider_id == provider_id)
             spent = spent.where(InventoryTransaction.provider_id == provider_id)
         result[material.item_type].append({"material": material, "unit": get_unit_label(material), "receipt": decimal_scalar(db, receipt), "expense": decimal_scalar(db, spent), "balance": decimal_scalar(db, balance)})
-    return {"materials": result[InventoryItemType.MATERIAL], "equipment": result[InventoryItemType.EQUIPMENT]}
+    return {"materials": result[InventoryItemType.MATERIAL], "equipment": result[InventoryItemType.EQUIPMENT], "all": result[InventoryItemType.MATERIAL] + result[InventoryItemType.EQUIPMENT]}
 
 
 def inventory_page(inventory: dict, search: str | None, page: int, sort: str, direction: str, per_page: int = 15) -> ReportPage:
-    rows = inventory["materials"] + inventory["equipment"]
+    rows = inventory["all"]
     if search:
         needle = search.lower()
         rows = [row for row in rows if needle in row["material"].name.lower() or (row["material"].category and needle in row["material"].category.lower())]
@@ -228,19 +237,19 @@ def inventory_page(inventory: dict, search: str | None, page: int, sort: str, di
     return paginate_rows(rows, page, sort_key, direction, per_page)
 
 
-def provider_cards(db: Session, period: dict, provider_id: int | None, search: str | None) -> list[dict]:
+def provider_cards(db: Session, period: dict, provider_id: int | None, search: str | None, scope: AccessScope | None = None) -> list[dict]:
     providers = select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)
     if provider_id:
         providers = providers.where(Provider.id == provider_id)
     cards = []
     for provider in db.scalars(providers):
-        finance = get_finance_stats(db, {"date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider.id})
-        income = income_summary(db, period, provider.id)
-        inventory = inventory_summary(db, period, provider.id)
+        finance = get_finance_stats(db, {"date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider.id}, scope.user if scope is not None else None)
+        income = income_summary(db, period, provider.id, scope)
+        inventory = inventory_summary(db, period, provider.id, scope)
         cards.append({
             "provider": provider,
-            "connections": db.scalar(select(func.count()).select_from(apply_connection_search(connection_query(period, provider.id), search).order_by(None).subquery())) or 0,
-            "extra_works": db.scalar(select(func.count()).select_from(apply_extra_work_search(extra_work_query(period, provider.id), search).order_by(None).subquery())) or 0,
+            "connections": db.scalar(select(func.count()).select_from(apply_connection_search(connection_query(period, provider.id, scope), search).order_by(None).subquery())) or 0,
+            "extra_works": db.scalar(select(func.count()).select_from(apply_extra_work_search(extra_work_query(period, provider.id, scope), search).order_by(None).subquery())) or 0,
             "connection_income": income["connections"],
             "extra_work_income": income["extra_works"],
             "total_income": income["total"],
@@ -255,24 +264,24 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
     return cards
 
 
-def filtered_connections(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15) -> ReportPage:
-    query = apply_connection_search(connection_query(period, provider_id), search)
+def filtered_connections(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15, scope: AccessScope | None = None) -> ReportPage:
+    query = apply_connection_search(connection_query(period, provider_id, scope), search)
     return paginate(db, order_query(query, {"date": Connection.connection_date, "provider": Client.provider_id, "amount": Connection.price, "type": Connection.connection_type}, sort, direction), page, per_page, sort, direction)
 
 
-def filtered_extra_works(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15) -> ReportPage:
-    query = apply_extra_work_search(extra_work_query(period, provider_id), search)
+def filtered_extra_works(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15, scope: AccessScope | None = None) -> ReportPage:
+    query = apply_extra_work_search(extra_work_query(period, provider_id, scope), search)
     return paginate(db, order_query(query, {"date": ExtraWork.work_date, "provider": ExtraWork.provider_id, "amount": ExtraWork.amount, "type": ExtraWork.work_type_id}, sort, direction), page, per_page, sort, direction)
 
 
-def filtered_expenses(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15) -> ReportPage:
-    query = apply_expense_search(expense_query(period, provider_id), search)
+def filtered_expenses(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15, scope: AccessScope | None = None) -> ReportPage:
+    query = apply_expense_search(expense_query(period, provider_id, scope), search)
     page_data = paginate(db, order_query(query, {"date": Expense.created_at, "provider": Expense.provider_id, "amount": Expense.amount, "category": Expense.category}, sort, direction), page, per_page, sort, direction)
     return ReportPage([make_expense_row(item) for item in page_data.items], page_data.page, page_data.per_page, page_data.total, page_data.pages, page_data.sort, page_data.direction)
 
 
-def filtered_finance(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15) -> ReportPage:
-    query = apply_finance_search(finance_query(period, provider_id), search)
+def filtered_finance(db: Session, period: dict, provider_id: int | None, search: str | None, page: int, sort: str, direction: str, per_page: int = 15, scope: AccessScope | None = None) -> ReportPage:
+    query = apply_finance_search(finance_query(period, provider_id, scope), search)
     return paginate(db, order_query(query, {"date": FinanceTransaction.created_at, "provider": FinanceTransaction.provider_id, "amount": FinanceTransaction.amount, "type": FinanceTransaction.transaction_type}, sort, direction), page, per_page, sort, direction)
 
 
@@ -298,23 +307,24 @@ def report_query(filters: dict, tab: str | None = None, page: int | None = None,
     return urlencode(params)
 
 
-def get_reports_data(db: Session, *, period_key: str, date_from: date | None, date_to: date | None, provider_id: int | None, search: str | None, active_tab: str, page: int, sort: str, direction: str, per_page: int = 15) -> dict:
+def get_reports_data(db: Session, *, period_key: str, date_from: date | None, date_to: date | None, provider_id: int | None, search: str | None, active_tab: str, page: int, sort: str, direction: str, per_page: int = 15, current_user: User | None = None) -> dict:
     period = resolve_period(period_key, date_from, date_to)
+    scope = get_access_scope(db, current_user) if current_user is not None else None
     active_tab = active_tab if active_tab in REPORT_TABS else "providers"
     direction = "asc" if direction == "asc" else "desc"
     clean_search = search.strip() if search else None
     filters = {"period": period["period"], "date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider_id, "search": clean_search}
-    inventory = inventory_summary(db, period, provider_id)
-    finance = get_finance_stats(db, {"date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider_id})
-    income = income_summary(db, period, provider_id)
+    inventory = inventory_summary(db, period, provider_id, scope)
+    finance = get_finance_stats(db, {"date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider_id}, current_user)
+    income = income_summary(db, period, provider_id, scope)
     selected_provider = db.get(Provider, provider_id) if provider_id else None
-    connections_query = apply_connection_search(connection_query(period, provider_id), clean_search)
-    extra_query = apply_extra_work_search(extra_work_query(period, provider_id), clean_search)
-    expense_q = apply_expense_search(expense_query(period, provider_id), clean_search)
-    connections = filtered_connections(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    extra_works = filtered_extra_works(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    expenses = filtered_expenses(db, period, provider_id, clean_search, page, sort, direction, per_page)
-    finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page)
+    connections_query = apply_connection_search(connection_query(period, provider_id, scope), clean_search)
+    extra_query = apply_extra_work_search(extra_work_query(period, provider_id, scope), clean_search)
+    expense_q = apply_expense_search(expense_query(period, provider_id, scope), clean_search)
+    connections = filtered_connections(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
+    extra_works = filtered_extra_works(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
+    expenses = filtered_expenses(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
+    finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
     inv_page = inventory_page(inventory, clean_search, page, sort, direction, per_page)
     page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page}
     page_data = page_map.get(active_tab)
@@ -326,7 +336,7 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
         "selected_provider": selected_provider.name if selected_provider else "\u0412\u0441\u0435 \u043f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440\u044b",
         "filters": filters,
         "active_tab": active_tab,
-        "provider_cards": provider_cards(db, period, provider_id, clean_search),
+        "provider_cards": provider_cards(db, period, provider_id, clean_search, scope),
         "connections": connections,
         "extra_works": extra_works,
         "expenses": expenses,

@@ -58,7 +58,7 @@ def expenses_page(
     if current_user is None:
         return redirect_to_login()
     filters = normalize_filters(search, category, parse_query_date(date_from), parse_query_date(date_to))
-    data = get_expenses_page_data(db, filters=filters, page=page)
+    data = get_expenses_page_data(db, filters=filters, page=page, current_user=current_user)
     return render_expenses(request, current_user, data)
 
 
@@ -96,5 +96,5 @@ def create_expense_action(
         error = str(exc)
 
     filters = normalize_filters(None, None, None, None)
-    data = get_expenses_page_data(db, filters=filters, page=1, error=error, success=success)
+    data = get_expenses_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     return render_expenses(request, current_user, data)

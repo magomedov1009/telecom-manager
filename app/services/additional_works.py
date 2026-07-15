@@ -12,7 +12,8 @@ from app.models.enums import FinanceTransactionType, InventoryTransactionType, P
 from app.models.finance import FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
-from app.services.inventory import ensure_sufficient_stock
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
+from app.services.inventory import format_quantity, get_stock_quantity
 
 
 class AdditionalWorkError(ValueError):
@@ -33,6 +34,7 @@ class AdditionalWorksData:
     works: AdditionalWorksPage
     providers: list[Provider]
     work_types: list[ExtraWorkType]
+    warehouses: list[Warehouse]
     materials: list[Material]
     filters: dict
     filter_query: str
@@ -63,8 +65,9 @@ def build_filter_query(filters: dict) -> str:
     return urlencode(params)
 
 
-def build_query(filters: dict):
+def build_query(filters: dict, scope: AccessScope | None = None):
     query = select(ExtraWork).options(joinedload(ExtraWork.provider), joinedload(ExtraWork.work_type), joinedload(ExtraWork.installer), selectinload(ExtraWork.materials).joinedload(ExtraWorkMaterial.material))
+    query = apply_user_scope(query, ExtraWork.installer_id, scope)
     if filters.get("provider_id"):
         query = query.where(ExtraWork.provider_id == int(filters["provider_id"]))
     if filters.get("date_from"):
@@ -77,19 +80,21 @@ def build_query(filters: dict):
     return query.order_by(ExtraWork.work_date.desc(), ExtraWork.id.desc())
 
 
-def get_page(db: Session, filters: dict, page: int, per_page: int = 15) -> AdditionalWorksPage:
+def get_page(db: Session, filters: dict, page: int, per_page: int = 15, user: User | None = None) -> AdditionalWorksPage:
     page = max(page, 1)
-    query = build_query(filters)
+    scope = get_access_scope(db, user) if user is not None else None
+    query = build_query(filters, scope)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = list(db.scalars(query.offset((page - 1) * per_page).limit(per_page)))
     return AdditionalWorksPage(items=items, page=page, per_page=per_page, total=total, pages=max(ceil(total / per_page), 1))
 
 
-def get_data(db: Session, filters: dict, page: int, error: str | None = None, success: str | None = None) -> AdditionalWorksData:
+def get_data(db: Session, filters: dict, page: int, error: str | None = None, success: str | None = None, current_user: User | None = None) -> AdditionalWorksData:
     return AdditionalWorksData(
-        works=get_page(db, filters, page),
+        works=get_page(db, filters, page, user=current_user),
         providers=list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
         work_types=list(db.scalars(select(ExtraWorkType).where(ExtraWorkType.is_active.is_(True)).order_by(ExtraWorkType.name))),
+        warehouses=list(db.scalars(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name))),
         materials=list(db.scalars(select(Material).where(Material.active.is_(True)).order_by(Material.item_type, Material.name))),
         filters=filters,
         filter_query=build_filter_query(filters),
@@ -107,7 +112,7 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
     return rows
 
 
-def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, use_materials: bool, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
+def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, use_materials: bool, warehouse_id: int | None, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
     provider = db.get(Provider, provider_id)
     if provider is None or not provider.is_active:
         raise AdditionalWorkError("Выберите активного провайдера")
@@ -120,9 +125,11 @@ def create_additional_work(db: Session, *, user: User, provider_id: int, work_da
     rows = parse_material_rows(material_ids, material_quantities) if use_materials else []
     warehouse = None
     if rows:
-        warehouse = db.scalar(select(Warehouse).where(Warehouse.active.is_(True)).order_by(Warehouse.name).limit(1))
-        if warehouse is None:
-            raise AdditionalWorkError("Нет активного склада для списания материалов")
+        if not warehouse_id:
+            raise AdditionalWorkError("Выберите склад для списания материалов")
+        warehouse = db.get(Warehouse, warehouse_id)
+        if warehouse is None or not warehouse.active:
+            raise AdditionalWorkError("Склад не найден или отключён")
         for material_id, quantity in rows:
             ensure_sufficient_stock(db, warehouse.id, material_id, quantity)
 

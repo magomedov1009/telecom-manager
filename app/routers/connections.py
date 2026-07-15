@@ -74,7 +74,7 @@ def connections_page(
     if current_user is None:
         return redirect_to_login()
     filters = normalize_filters(search, provider, connection_type, parse_query_int(warehouse_id), parse_query_date(date_from), parse_query_date(date_to))
-    data = get_connections_page_data(db, filters=filters, page=page)
+    data = get_connections_page_data(db, filters=filters, page=page, current_user=current_user)
     template = "connections/_module.html" if request.headers.get("HX-Request") else "connections/index.html"
     return render(request, template, current_user, {"data": data})
 
@@ -139,7 +139,7 @@ def create_connection_action(
 def connection_detail(request: Request, db: DbSession, current_user: CurrentUser, connection_id: int) -> Response:
     if current_user is None:
         return redirect_to_login()
-    connection = get_connection(db, connection_id)
+    connection = get_connection(db, connection_id, current_user)
     if connection is None:
         return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
     return render(request, "connections/detail.html", current_user, {"connection": connection})
@@ -149,7 +149,7 @@ def connection_detail(request: Request, db: DbSession, current_user: CurrentUser
 def edit_connection_page(request: Request, db: DbSession, current_user: CurrentUser, connection_id: int) -> Response:
     if current_user is None:
         return redirect_to_login()
-    connection = get_connection(db, connection_id)
+    connection = get_connection(db, connection_id, current_user)
     if connection is None:
         return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
     return render(request, "connections/form.html", current_user, {"form": get_form_data(db, connection=connection), "mode": "edit"})
@@ -179,7 +179,7 @@ def update_connection_action(
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
-    connection = get_connection(db, connection_id)
+    connection = get_connection(db, connection_id, current_user)
     if connection is None:
         return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
     try:
@@ -213,7 +213,7 @@ def update_connection_action(
 def delete_connection_action(request: Request, db: DbSession, current_user: CurrentUser, connection_id: int) -> Response:
     if current_user is None:
         return redirect_to_login()
-    connection = get_connection(db, connection_id)
+    connection = get_connection(db, connection_id, current_user)
     if connection is None:
         return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
     try:

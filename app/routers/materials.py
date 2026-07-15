@@ -81,7 +81,7 @@ def materials_page(
         return redirect_to_login()
 
     filters = normalize_filters(search, parse_query_int(warehouse_id), parse_query_int(material_id), operation_type, parse_query_date(date_from), parse_query_date(date_to), item_type)
-    data = get_materials_page_data(db, filters=filters, page=page)
+    data = get_materials_page_data(db, filters=filters, page=page, current_user=current_user)
     template_name = "materials/_module.html" if request.headers.get("HX-Request") else "materials/index.html"
     return render_materials(request, template_name, current_user, data)
 
@@ -112,7 +112,7 @@ def create_inventory_item_action(
         return RedirectResponse(url="/materials", status_code=status.HTTP_303_SEE_OTHER)
 
     filters = normalize_filters(None, None, None, None, None, None)
-    data = get_materials_page_data(db, filters=filters, page=1, error=error, success=success)
+    data = get_materials_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     return render_materials(request, "materials/_module.html", current_user, data)
 
 
@@ -156,5 +156,5 @@ def create_material_operation(
         return RedirectResponse(url="/materials", status_code=status.HTTP_303_SEE_OTHER)
 
     filters = normalize_filters(None, None, None, None, None, None)
-    data = get_materials_page_data(db, filters=filters, page=1, error=error, success=success)
+    data = get_materials_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     return render_materials(request, "materials/_module.html", current_user, data)

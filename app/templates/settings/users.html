@@ -2,6 +2,7 @@
 
 {% block title %}Пользователи | {{ app_name }}{% endblock %}
 {% block page_heading %}Пользователи{% endblock %}
+{% block page_description %}Пользователи, роли и закрепление монтажников за менеджерами.{% endblock %}
 
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
@@ -25,6 +26,7 @@
           <td class="fw-semibold">{{ item.full_name }}</td>
           <td>{{ item.username }}</td>
           <td><span class="badge text-bg-primary">{{ role_labels.get(item.role, item.role.name) }}</span></td>
+          <td>{{ item.manager.full_name if item.manager else '?' }}</td>
           <td>{% if item.is_active %}<span class="badge text-bg-success">Активен</span>{% else %}<span class="badge text-bg-secondary">Заблокирован</span>{% endif %}</td>
           <td>{{ item.created_at.strftime('%d.%m.%Y') if item.created_at else '—' }}</td>
           <td>{{ item.last_login_at.strftime('%d.%m.%Y %H:%M') if item.last_login_at else '—' }}</td>
@@ -40,7 +42,7 @@
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="8" class="text-center text-secondary py-4">Пользователи не найдены</td></tr>
+        <tr><td colspan="9" class="text-center text-secondary py-4">Пользователи не найдены</td></tr>
       {% endfor %}
       </tbody>
     </table>

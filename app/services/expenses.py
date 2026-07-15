@@ -12,6 +12,7 @@ from app.models.enums import ExpenseCategory, FinanceTransactionType, PaidBy
 from app.models.clients import Provider
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
 
 EXPENSE_CATEGORY_OPTIONS = [
     ("fuel", "Бензин", ExpenseCategory.FUEL),
@@ -134,8 +135,9 @@ def make_expense_row(expense: Expense) -> ExpenseRow:
     )
 
 
-def build_expenses_query(filters: dict):
+def build_expenses_query(filters: dict, scope: AccessScope | None = None):
     query = select(Expense).options(joinedload(Expense.user))
+    query = apply_user_scope(query, Expense.user_id, scope)
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
         query = query.join(Expense.user).where(
@@ -157,9 +159,10 @@ def build_expenses_query(filters: dict):
     return query.order_by(Expense.created_at.desc(), Expense.id.desc())
 
 
-def get_expenses_page(db: Session, filters: dict, page: int, per_page: int = 15) -> ExpenseListPage:
+def get_expenses_page(db: Session, filters: dict, page: int, per_page: int = 15, user: User | None = None) -> ExpenseListPage:
     page = max(page, 1)
-    query = build_expenses_query(filters)
+    scope = get_access_scope(db, user) if user is not None else None
+    query = build_expenses_query(filters, scope)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     items = list(db.scalars(query.offset((page - 1) * per_page).limit(per_page)))
     return ExpenseListPage(
@@ -178,13 +181,14 @@ def get_expenses_page_data(
     page: int,
     error: str | None = None,
     success: str | None = None,
+    current_user: User | None = None,
 ) -> ExpensesPageData:
     return ExpensesPageData(
-        expenses=get_expenses_page(db, filters, page),
+        expenses=get_expenses_page(db, filters, page, user=current_user),
         filters=filters,
         filter_query=build_filter_query(filters),
         categories=[(key, label) for key, label, _ in EXPENSE_CATEGORY_OPTIONS],
-        users=list(db.scalars(select(User).order_by(User.full_name))),
+        users=list(db.scalars(apply_user_scope(select(User).order_by(User.full_name), User.id, get_access_scope(db, current_user)) if current_user is not None else select(User).order_by(User.full_name))),
         error=error,
         success=success,
     )

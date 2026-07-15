@@ -1,6 +1,7 @@
 ﻿{% extends "base.html" %}
 {% block title %}Отчеты ? {{ app_name }}{% endblock %}
 {% block page_heading %}Отчеты{% endblock %}
+{% block page_description %}Сводная аналитика по провайдерам, работам, складу и финансам.{% endblock %}
 {% macro money(value) -%}{{ "%.2f"|format(value) }} ₽{%- endmacro %}
 {% macro sort_link(label, page_key, key, tab_key=None) -%}
   {% set target_tab = tab_key or page_key %}{% set next_direction = 'asc' if data[page_key].sort != key or data[page_key].direction == 'desc' else 'desc' %}

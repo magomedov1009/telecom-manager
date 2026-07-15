@@ -6,6 +6,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.clients import Client, Connection, ConnectionMaterial, Provider
+from app.models.users import User
+from app.services.access import AccessScope, apply_user_scope, get_access_scope
 from app.services.inventory import format_quantity
 
 
@@ -60,8 +62,9 @@ def build_filter_query(filters: dict) -> str:
     return urlencode(params)
 
 
-def build_clients_query(filters: dict):
-    query = select(Client).options(selectinload(Client.connections))
+def build_clients_query(filters: dict, scope: AccessScope | None = None):
+    query = select(Client).options(selectinload(Client.connections)).join(Client.connections)
+    query = apply_user_scope(query, Connection.installer_id, scope)
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
         query = query.where(
@@ -75,7 +78,7 @@ def build_clients_query(filters: dict):
         )
     if filters.get("provider"):
         query = query.where(Client.provider_id == int(filters["provider"]))
-    return query.order_by(Client.id.desc())
+    return query.distinct().order_by(Client.id.desc())
 
 
 def get_latest_connection(client: Client) -> Connection | None:
@@ -98,9 +101,10 @@ def make_client_item(client: Client) -> ClientListItem:
     )
 
 
-def get_clients_page(db: Session, filters: dict, page: int, per_page: int = 15) -> ClientListPage:
+def get_clients_page(db: Session, filters: dict, page: int, per_page: int = 15, user: User | None = None) -> ClientListPage:
     page = max(page, 1)
-    query = build_clients_query(filters)
+    scope = get_access_scope(db, user) if user is not None else None
+    query = build_clients_query(filters, scope)
     total = db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0
     clients = list(db.scalars(query.offset((page - 1) * per_page).limit(per_page)))
     return ClientListPage(
@@ -112,19 +116,22 @@ def get_clients_page(db: Session, filters: dict, page: int, per_page: int = 15) 
     )
 
 
-def get_clients_page_data(db: Session, filters: dict, page: int) -> ClientsPageData:
+def get_clients_page_data(db: Session, filters: dict, page: int, user: User | None = None) -> ClientsPageData:
     return ClientsPageData(
-        clients=get_clients_page(db, filters, page),
+        clients=get_clients_page(db, filters, page, user=user),
         filters=filters,
         filter_query=build_filter_query(filters),
         providers=list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
     )
 
 
-def get_client(db: Session, client_id: int) -> Client | None:
+def get_client(db: Session, client_id: int, user: User | None = None) -> Client | None:
+    query = select(Client).where(Client.id == client_id)
+    if user is not None:
+        query = query.join(Client.connections)
+        query = apply_user_scope(query, Connection.installer_id, get_access_scope(db, user))
     return db.scalar(
-        select(Client)
-        .where(Client.id == client_id)
+        query
         .options(
             selectinload(Client.connections)
             .selectinload(Connection.connection_materials)
