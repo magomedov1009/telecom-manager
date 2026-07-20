@@ -31,7 +31,7 @@ def can_open_reports(user: User | None) -> bool:
 
 
 def can_open_finance(user: User | None) -> bool:
-    return user is not None and user.role in {UserRole.ADMIN, UserRole.MANAGER}
+    return user is not None and user.role in {UserRole.ADMIN, UserRole.MANAGER, UserRole.INSTALLER}
 
 
 def can_export_reports(user: User | None) -> bool:
