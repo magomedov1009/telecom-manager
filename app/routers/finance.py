@@ -128,6 +128,7 @@ def create_finance_operation(
     transaction_type: Annotated[str, Form()],
     amount: Annotated[str, Form()],
     comment: Annotated[str | None, Form()] = None,
+    provider_id: Annotated[int | None, Form()] = None,
 ) -> Response:
     if current_user is None:
         return redirect_to_login()
@@ -143,6 +144,7 @@ def create_finance_operation(
             transaction_type=transaction_type,
             amount=amount,
             comment=comment,
+            provider_id=provider_id,
         )
         success = "Финансовая операция создана"
     except FinanceError as exc:

@@ -141,6 +141,7 @@ def create_manual_transaction(
     transaction_type: str,
     amount: str,
     comment: str | None,
+    provider_id: int | None = None,
 ) -> None:
     try:
         type_enum = FinanceTransactionType(transaction_type)
@@ -150,9 +151,15 @@ def create_manual_transaction(
         raise FinanceError("Этот тип операции нельзя создать вручную")
 
     parsed_amount = signed_amount_for_manual(type_enum, parse_amount(amount))
+    provider = None
+    if provider_id is not None:
+        provider = db.get(Provider, provider_id)
+        if provider is None or not provider.is_active:
+            raise FinanceError("Провайдер не найден или отключен")
     db.add(
         FinanceTransaction(
             user_id=user.id,
+            provider_id=provider.id if provider is not None else None,
             amount=parsed_amount,
             transaction_type=type_enum,
             comment=comment.strip() if comment else None,
