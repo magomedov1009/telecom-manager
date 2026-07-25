@@ -9,14 +9,14 @@ from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import Select, func, or_, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, aliased, joinedload
 
 from app.models.clients import Client, Connection, ExtraWork, ExtraWorkType, Provider
-from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, PaidBy
+from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
 from app.services.access import AccessScope, apply_user_scope, get_access_scope
-from app.models.inventory import InventoryTransaction, Material
+from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.services.expenses import make_expense_row
 from app.services.finance import get_finance_stats
 from app.services.inventory import get_unit_label
@@ -56,7 +56,7 @@ FINANCE_TYPE_LABELS = {
     FinanceTransactionType.PAYMENT_FROM_OFFICE: "\u0412\u044b\u043f\u043b\u0430\u0442\u0430 \u043e\u0444\u0438\u0441\u043e\u043c",
     FinanceTransactionType.ADJUSTMENT: "\u041a\u043e\u0440\u0440\u0435\u043a\u0442\u0438\u0440\u043e\u0432\u043a\u0430",
 }
-REPORT_TABS = ("providers", "connections", "extra_works", "expenses", "inventory", "finance")
+REPORT_TABS = ("providers", "connections", "extra_works", "expenses", "inventory", "material_settlements", "finance")
 
 
 @dataclass(frozen=True)
@@ -237,6 +237,135 @@ def inventory_page(inventory: dict, search: str | None, page: int, sort: str, di
     return paginate_rows(rows, page, sort_key, direction, per_page)
 
 
+def material_settlements(
+    db: Session,
+    period: dict,
+    provider_id: int | None,
+    search: str | None,
+    scope: AccessScope | None = None,
+) -> list[dict]:
+    """Return net material debts caused by cross-provider use and transfers."""
+    source_warehouse = aliased(Warehouse)
+    destination_warehouse = aliased(Warehouse)
+
+    connection_query = (
+        select(
+            InventoryTransaction.provider_id.label("debtor_id"),
+            source_warehouse.provider_id.label("creditor_id"),
+            InventoryTransaction.material_id,
+            func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0).label("quantity"),
+        )
+        .join(source_warehouse, source_warehouse.id == InventoryTransaction.warehouse_id)
+        .where(
+            InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+            InventoryTransaction.provider_id.is_not(None),
+            source_warehouse.provider_id.is_not(None),
+            InventoryTransaction.provider_id != source_warehouse.provider_id,
+        )
+        .group_by(
+            InventoryTransaction.provider_id,
+            source_warehouse.provider_id,
+            InventoryTransaction.material_id,
+        )
+    )
+    connection_query = apply_datetime_period(connection_query, InventoryTransaction.created_at, period)
+    connection_query = apply_user_scope(connection_query, InventoryTransaction.user_id, scope)
+
+    transfer_query = (
+        select(
+            destination_warehouse.provider_id.label("debtor_id"),
+            source_warehouse.provider_id.label("creditor_id"),
+            InventoryTransaction.material_id,
+            func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0).label("quantity"),
+        )
+        .join(source_warehouse, source_warehouse.id == InventoryTransaction.warehouse_id)
+        .join(
+            destination_warehouse,
+            destination_warehouse.id == InventoryTransaction.counterpart_warehouse_id,
+        )
+        .where(
+            InventoryTransaction.operation_type == InventoryTransactionType.TRANSFER_OUT,
+            source_warehouse.provider_id.is_not(None),
+            destination_warehouse.provider_id.is_not(None),
+            source_warehouse.provider_id != destination_warehouse.provider_id,
+        )
+        .group_by(
+            destination_warehouse.provider_id,
+            source_warehouse.provider_id,
+            InventoryTransaction.material_id,
+        )
+    )
+    transfer_query = apply_datetime_period(transfer_query, InventoryTransaction.created_at, period)
+    transfer_query = apply_user_scope(transfer_query, InventoryTransaction.user_id, scope)
+
+    directional: dict[tuple[int, int, int], dict[str, Decimal]] = {}
+    for source_name, query in (("connections", connection_query), ("transfers", transfer_query)):
+        for debtor_id, creditor_id, material_id, quantity in db.execute(query):
+            key = (int(debtor_id), int(creditor_id), int(material_id))
+            values = directional.setdefault(
+                key,
+                {"connections": Decimal("0"), "transfers": Decimal("0")},
+            )
+            values[source_name] += Decimal(quantity)
+
+    providers = {item.id: item for item in db.scalars(select(Provider))}
+    materials = {item.id: item for item in db.scalars(select(Material))}
+    rows = []
+    processed: set[tuple[int, int, int]] = set()
+    for debtor_id, creditor_id, material_id in directional:
+        pair_key = (min(debtor_id, creditor_id), max(debtor_id, creditor_id), material_id)
+        if pair_key in processed:
+            continue
+        processed.add(pair_key)
+        forward = directional.get(
+            (debtor_id, creditor_id, material_id),
+            {"connections": Decimal("0"), "transfers": Decimal("0")},
+        )
+        reverse = directional.get(
+            (creditor_id, debtor_id, material_id),
+            {"connections": Decimal("0"), "transfers": Decimal("0")},
+        )
+        forward_total = forward["connections"] + forward["transfers"]
+        reverse_total = reverse["connections"] + reverse["transfers"]
+        if forward_total == reverse_total:
+            continue
+        if forward_total < reverse_total:
+            debtor_id, creditor_id = creditor_id, debtor_id
+            forward, reverse = reverse, forward
+            forward_total, reverse_total = reverse_total, forward_total
+        if provider_id and provider_id not in {debtor_id, creditor_id}:
+            continue
+        debtor = providers.get(debtor_id)
+        creditor = providers.get(creditor_id)
+        material = materials.get(material_id)
+        if debtor is None or creditor is None or material is None:
+            continue
+        if search:
+            haystack = f"{debtor.name} {creditor.name} {material.name} {material.category or ''}".lower()
+            if search.lower() not in haystack:
+                continue
+        rows.append(
+            {
+                "debtor": debtor,
+                "creditor": creditor,
+                "material": material,
+                "connections": forward["connections"],
+                "transfers": forward["transfers"],
+                "offset": reverse_total,
+                "quantity": forward_total - reverse_total,
+                "unit": get_unit_label(material),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["debtor"].name.lower(),
+            row["creditor"].name.lower(),
+            row["material"].name.lower(),
+        ),
+    )
+
+
 def provider_cards(db: Session, period: dict, provider_id: int | None, search: str | None, scope: AccessScope | None = None) -> list[dict]:
     providers = select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name)
     if provider_id:
@@ -326,7 +455,9 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
     expenses = filtered_expenses(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
     finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
     inv_page = inventory_page(inventory, clean_search, page, sort, direction, per_page)
-    page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page}
+    settlements = material_settlements(db, period, provider_id, clean_search, scope)
+    settlement_page = paginate_rows(settlements, page, "name", "asc", per_page)
+    page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page, "material_settlements": settlement_page}
     page_data = page_map.get(active_tab)
     export_query = report_query(filters, active_tab, None, page_data.sort if page_data else None, page_data.direction if page_data else None)
     return {
@@ -343,6 +474,7 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
         "finance_page": finance_page,
         "inventory": inventory,
         "inventory_page": inv_page,
+        "material_settlements": settlement_page,
         "finance": finance,
         "income": income,
         "connection_total": total_for(db, connections_query, Connection.price),
@@ -375,6 +507,21 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
     if tab == "inventory":
         rows = [[r["material"].name, r["material"].item_type.value, r["receipt"], r["expense"], r["balance"], r["unit"]] for r in data["inventory_page"].items]
         return "inventory", ["\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435", "\u0422\u0438\u043f", "\u041f\u0440\u0438\u0445\u043e\u0434", "\u0420\u0430\u0441\u0445\u043e\u0434", "\u041e\u0441\u0442\u0430\u0442\u043e\u043a", "\u0415\u0434. \u0438\u0437\u043c."], rows
+    if tab == "material_settlements":
+        rows = [
+            [
+                row["debtor"].name,
+                row["creditor"].name,
+                row["material"].name,
+                row["connections"],
+                row["transfers"],
+                row["offset"],
+                row["quantity"],
+                row["unit"],
+            ]
+            for row in data["material_settlements"].items
+        ]
+        return "material-settlements", ["Кто должен", "Кому должен", "Материал", "Подключения", "Перемещения", "Встречный зачет", "Итого", "Ед. изм."], rows
     rows = [[i.created_at, FINANCE_TYPE_LABELS.get(i.transaction_type, i.transaction_type.value), i.provider.name if i.provider else "", i.amount, i.comment or "", i.user.full_name if i.user else ""] for i in data["finance_page"].items]
     return "finance", ["\u0414\u0430\u0442\u0430", "\u0422\u0438\u043f", "\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440", "\u0421\u0443\u043c\u043c\u0430", "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c"], rows
 

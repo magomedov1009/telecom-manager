@@ -20,6 +20,7 @@ class Provider(BaseModel):
     expenses: Mapped[list["Expense"]] = relationship(back_populates="provider")
     finance_transactions: Mapped[list["FinanceTransaction"]] = relationship(back_populates="provider")
     inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(back_populates="provider")
+    warehouses: Mapped[list["Warehouse"]] = relationship(back_populates="provider")
 
 
 class Client(BaseModel):
