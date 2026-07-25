@@ -11,11 +11,17 @@ class Warehouse(BaseModel):
     __tablename__ = "warehouses"
 
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True, nullable=False)
+    provider_id: Mapped[int | None] = mapped_column(
+        ForeignKey("providers.id", ondelete="SET NULL"),
+        index=True,
+    )
     active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
+    provider: Mapped["Provider | None"] = relationship(back_populates="warehouses")
     connections: Mapped[list["Connection"]] = relationship(back_populates="warehouse")
     inventory_transactions: Mapped[list["InventoryTransaction"]] = relationship(
-        back_populates="warehouse"
+        back_populates="warehouse",
+        foreign_keys="InventoryTransaction.warehouse_id",
     )
 
 
@@ -74,6 +80,10 @@ class InventoryTransaction(BaseModel):
         ForeignKey("providers.id", ondelete="SET NULL"),
         index=True,
     )
+    counterpart_warehouse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warehouses.id", ondelete="SET NULL"),
+        index=True,
+    )
     operation_type: Mapped[InventoryTransactionType] = mapped_column(
         Enum(InventoryTransactionType, name="inventory_transaction_type"),
         index=True,
@@ -82,7 +92,13 @@ class InventoryTransaction(BaseModel):
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
 
-    warehouse: Mapped["Warehouse"] = relationship(back_populates="inventory_transactions")
+    warehouse: Mapped["Warehouse"] = relationship(
+        back_populates="inventory_transactions",
+        foreign_keys=[warehouse_id],
+    )
+    counterpart_warehouse: Mapped["Warehouse | None"] = relationship(
+        foreign_keys=[counterpart_warehouse_id],
+    )
     material: Mapped["Material"] = relationship(back_populates="inventory_transactions")
     connection: Mapped["Connection | None"] = relationship(back_populates="inventory_transactions")
     user: Mapped["User"] = relationship(

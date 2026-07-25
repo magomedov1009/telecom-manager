@@ -203,8 +203,26 @@ def create_operation(
         if destination is None or not destination.active:
             raise InventoryError("Склад назначения не найден или отключен")
         ensure_sufficient_stock(db, warehouse_id, material_id, amount)
-        add_transaction(db, user, warehouse_id, material_id, InventoryTransactionType.TRANSFER_OUT, -amount, comment)
-        add_transaction(db, user, destination_warehouse_id, material_id, InventoryTransactionType.TRANSFER_IN, amount, comment)
+        add_transaction(
+            db,
+            user,
+            warehouse_id,
+            material_id,
+            InventoryTransactionType.TRANSFER_OUT,
+            -amount,
+            comment,
+            counterpart_warehouse_id=destination_warehouse_id,
+        )
+        add_transaction(
+            db,
+            user,
+            destination_warehouse_id,
+            material_id,
+            InventoryTransactionType.TRANSFER_IN,
+            amount,
+            comment,
+            counterpart_warehouse_id=warehouse_id,
+        )
     elif operation == "issue":
         ensure_sufficient_stock(db, warehouse_id, material_id, amount)
         add_transaction(db, user, warehouse_id, material_id, InventoryTransactionType.ISSUE_TO_THIRD_PARTY, -amount, comment)
@@ -232,8 +250,28 @@ def ensure_sufficient_stock(db: Session, warehouse_id: int, material_id: int, qu
         )
 
 
-def add_transaction(db: Session, user: User, warehouse_id: int, material_id: int, operation_type: InventoryTransactionType, quantity: Decimal, comment: str | None) -> None:
-    db.add(InventoryTransaction(warehouse_id=warehouse_id, material_id=material_id, user_id=user.id, operation_type=operation_type, quantity=quantity, comment=comment.strip() if comment else None))
+def add_transaction(
+    db: Session,
+    user: User,
+    warehouse_id: int,
+    material_id: int,
+    operation_type: InventoryTransactionType,
+    quantity: Decimal,
+    comment: str | None,
+    *,
+    counterpart_warehouse_id: int | None = None,
+) -> None:
+    db.add(
+        InventoryTransaction(
+            warehouse_id=warehouse_id,
+            material_id=material_id,
+            user_id=user.id,
+            operation_type=operation_type,
+            quantity=quantity,
+            comment=comment.strip() if comment else None,
+            counterpart_warehouse_id=counterpart_warehouse_id,
+        )
+    )
 
 
 def build_history_query(filters: dict, scope: AccessScope | None = None) -> Select[tuple[InventoryTransaction]]:
