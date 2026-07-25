@@ -220,9 +220,26 @@ def inventory_summary(db: Session, period: dict, provider_id: int | None, scope:
         receipt = apply_user_scope(receipt, InventoryTransaction.user_id, scope)
         spent = apply_user_scope(spent, InventoryTransaction.user_id, scope)
         if provider_id:
-            balance = balance.where(InventoryTransaction.provider_id == provider_id)
-            receipt = receipt.where(InventoryTransaction.provider_id == provider_id)
-            spent = spent.where(InventoryTransaction.provider_id == provider_id)
+            # Connections and provider-specific write-offs already carry
+            # provider_id. Manual warehouse operations (receipt, transfer,
+            # return, adjustment) do not, so attribute them to the owner of
+            # the warehouse instead.
+            effective_provider_id = func.coalesce(
+                InventoryTransaction.provider_id,
+                Warehouse.provider_id,
+            )
+            balance = balance.join(
+                Warehouse,
+                Warehouse.id == InventoryTransaction.warehouse_id,
+            ).where(effective_provider_id == provider_id)
+            receipt = receipt.join(
+                Warehouse,
+                Warehouse.id == InventoryTransaction.warehouse_id,
+            ).where(effective_provider_id == provider_id)
+            spent = spent.join(
+                Warehouse,
+                Warehouse.id == InventoryTransaction.warehouse_id,
+            ).where(effective_provider_id == provider_id)
         result[material.item_type].append({"material": material, "unit": get_unit_label(material), "receipt": decimal_scalar(db, receipt), "expense": decimal_scalar(db, spent), "balance": decimal_scalar(db, balance)})
     return {"materials": result[InventoryItemType.MATERIAL], "equipment": result[InventoryItemType.EQUIPMENT], "all": result[InventoryItemType.MATERIAL] + result[InventoryItemType.EQUIPMENT]}
 
