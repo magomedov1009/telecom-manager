@@ -1,7 +1,10 @@
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/repositories/local_repository.dart';
@@ -17,7 +20,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String period = 'month';
   String section = 'connections';
   String? providerId;
+  DateTime? customFrom;
+  DateTime? customTo;
+  final search = TextEditingController();
   ReportSummary? lastSummary;
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
 
   (DateTime?, DateTime?) dates() {
     final now = DateTime.now();
@@ -50,9 +62,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
         DateTime(now.year, now.month),
         DateTime(now.year, now.month, now.day),
       ),
+      'custom' => (customFrom, customTo),
       _ => (null, null),
     };
   }
+
+  Future<void> selectCustomDate({required bool from}) async {
+    final value = await showDatePicker(
+      context: context,
+      initialDate: from
+          ? (customFrom ?? customTo ?? DateTime.now())
+          : (customTo ?? customFrom ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (value == null) return;
+    setState(() {
+      if (from) {
+        customFrom = value;
+        if (customTo != null && value.isAfter(customTo!)) customTo = value;
+      } else {
+        customTo = value;
+        if (customFrom != null && value.isBefore(customFrom!)) {
+          customFrom = value;
+        }
+      }
+    });
+  }
+
+  String shortDate(DateTime? value) => value == null
+      ? 'Выбрать'
+      : '${value.day.toString().padLeft(2, '0')}.'
+            '${value.month.toString().padLeft(2, '0')}.${value.year}';
 
   Future<ReportSummary> load() {
     final range = dates();
@@ -70,10 +111,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
     appBar: AppBar(
       title: const Text('Отчёты'),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.share_outlined),
-          tooltip: 'Экспорт CSV',
-          onPressed: lastSummary == null ? null : export,
+        PopupMenuButton<String>(
+          enabled: lastSummary != null,
+          tooltip: 'Экспорт',
+          icon: const Icon(Icons.ios_share_outlined),
+          onSelected: export,
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'csv', child: Text('CSV')),
+            PopupMenuItem(value: 'xlsx', child: Text('Excel (.xlsx)')),
+            PopupMenuItem(value: 'pdf', child: Text('PDF')),
+          ],
         ),
       ],
     ),
@@ -91,10 +138,43 @@ class _ReportsScreenState extends State<ReportsScreen> {
             DropdownMenuItem(value: 'yesterday', child: Text('Вчера')),
             DropdownMenuItem(value: 'week', child: Text('Неделя')),
             DropdownMenuItem(value: 'month', child: Text('Месяц')),
+            DropdownMenuItem(
+              value: 'custom',
+              child: Text('Произвольный период'),
+            ),
             DropdownMenuItem(value: 'all', child: Text('За всё время')),
           ],
-          onChanged: (value) => setState(() => period = value!),
+          onChanged: (value) => setState(() {
+            period = value!;
+            if (period == 'custom' && customFrom == null && customTo == null) {
+              final now = DateTime.now();
+              customFrom = DateTime(now.year, now.month, now.day);
+              customTo = customFrom;
+            }
+          }),
         ),
+        if (period == 'custom') ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => selectCustomDate(from: true),
+                  icon: const Icon(Icons.date_range_outlined),
+                  label: Text('С ${shortDate(customFrom)}'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => selectCustomDate(from: false),
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text('По ${shortDate(customTo)}'),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 12),
         FutureBuilder<List<LookupItem>>(
           future: widget.repository.providers(),
@@ -148,6 +228,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
           },
         ),
         const SizedBox(height: 18),
+        TextField(
+          controller: search,
+          decoration: const InputDecoration(
+            labelText: 'Поиск в детализации',
+            hintText: 'Договор, адрес, материал или комментарий',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 12),
         DropdownButtonFormField<String>(
           initialValue: section,
           decoration: const InputDecoration(
@@ -155,6 +246,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             border: OutlineInputBorder(),
           ),
           items: const [
+            DropdownMenuItem(value: 'providers', child: Text('Провайдеры')),
             DropdownMenuItem(value: 'connections', child: Text('Подключения')),
             DropdownMenuItem(value: 'works', child: Text('Допработы')),
             DropdownMenuItem(value: 'expenses', child: Text('Расходы')),
@@ -162,6 +254,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
               value: 'inventory',
               child: Text('Складские списания'),
             ),
+            DropdownMenuItem(
+              value: 'material_settlements',
+              child: Text('Долги материалов'),
+            ),
+            DropdownMenuItem(value: 'finance', child: Text('Финансы')),
           ],
           onChanged: (value) => setState(() => section = value!),
         ),
@@ -172,6 +269,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             dateFrom: dates().$1,
             dateTo: dates().$2,
             providerId: providerId,
+            search: search.text,
           ),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
@@ -224,22 +322,121 @@ class _ReportsScreenState extends State<ReportsScreen> {
     ),
   );
 
-  Future<void> export() async {
+  Future<void> export(String format) async {
     final data = lastSummary!;
-    final directory = await getTemporaryDirectory();
-    final file = File('${directory.path}/telecom-manager-report.csv');
-    await file.writeAsString(
-      '\uFEFFПоказатель;Значение\n'
-      'Подключения;${data.connections}\n'
-      'Сумма подключений;${data.connectionAmount}\n'
-      'Допработы;${data.extraWorks}\n'
-      'Сумма допработ;${data.extraWorkAmount}\n'
-      'Расходы;${data.expenses}\n'
-      'Прибыль;${data.profit}\n'
-      'Списано материалов;${data.materialSpent}\n',
+    final range = dates();
+    final details = await widget.repository.reportDetails(
+      section: section,
+      dateFrom: range.$1,
+      dateTo: range.$2,
+      providerId: providerId,
+      search: search.text,
     );
+    final directory = await getTemporaryDirectory();
+    final baseName =
+        'telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}';
+    late final File file;
+    if (format == 'xlsx') {
+      file = File('${directory.path}/$baseName.xlsx');
+      final workbook = Excel.createExcel();
+      final sheet = workbook['Отчёт'];
+      workbook.delete('Sheet1');
+      sheet.appendRow([TextCellValue('Показатель'), TextCellValue('Значение')]);
+      for (final row in _summaryRows(data)) {
+        sheet.appendRow([TextCellValue(row.$1), TextCellValue(row.$2)]);
+      }
+      sheet.appendRow([]);
+      sheet.appendRow([
+        TextCellValue('Название'),
+        TextCellValue('Описание'),
+        TextCellValue('Значение'),
+      ]);
+      for (final item in details) {
+        sheet.appendRow([
+          TextCellValue(item.title),
+          TextCellValue(item.subtitle),
+          DoubleCellValue(item.value),
+        ]);
+      }
+      await file.writeAsBytes(workbook.encode()!);
+    } else if (format == 'pdf') {
+      file = File('${directory.path}/$baseName.pdf');
+      final document = pw.Document();
+      final font = await _loadPdfFont();
+      document.addPage(
+        pw.MultiPage(
+          theme: font == null
+              ? null
+              : pw.ThemeData.withFont(base: font, bold: font),
+          build: (_) => [
+            pw.Header(level: 0, text: 'Telecom Manager — отчёт'),
+            pw.TableHelper.fromTextArray(
+              headers: const ['Показатель', 'Значение'],
+              data: _summaryRows(data).map((row) => [row.$1, row.$2]).toList(),
+            ),
+            pw.SizedBox(height: 18),
+            pw.Header(level: 1, text: 'Детализация'),
+            pw.TableHelper.fromTextArray(
+              headers: const ['Название', 'Описание', 'Значение'],
+              data: details
+                  .map(
+                    (item) => [
+                      item.title,
+                      item.subtitle,
+                      item.value.toStringAsFixed(2),
+                    ],
+                  )
+                  .toList(),
+            ),
+          ],
+        ),
+      );
+      await file.writeAsBytes(await document.save());
+    } else {
+      file = File('${directory.path}/$baseName.csv');
+      final buffer = StringBuffer('\uFEFFПоказатель;Значение\n');
+      for (final row in _summaryRows(data)) {
+        buffer.writeln('${_csv(row.$1)};${_csv(row.$2)}');
+      }
+      buffer.writeln();
+      buffer.writeln('Название;Описание;Значение');
+      for (final item in details) {
+        buffer.writeln(
+          '${_csv(item.title)};${_csv(item.subtitle)};${item.value}',
+        );
+      }
+      await file.writeAsString(buffer.toString());
+    }
     await SharePlus.instance.share(
       ShareParams(files: [XFile(file.path)], text: 'Отчёт Telecom Manager'),
     );
+  }
+
+  List<(String, String)> _summaryRows(ReportSummary data) => [
+    ('Подключения', data.connections.toString()),
+    ('Сумма подключений', data.connectionAmount.toStringAsFixed(2)),
+    ('Допработы', data.extraWorks.toString()),
+    ('Сумма допработ', data.extraWorkAmount.toStringAsFixed(2)),
+    ('Общий доход', data.income.toStringAsFixed(2)),
+    ('Расходы', data.expenses.toStringAsFixed(2)),
+    ('Прибыль', data.profit.toStringAsFixed(2)),
+    ('Списано материалов', data.materialSpent.toString()),
+  ];
+
+  String _csv(String value) => '"${value.replaceAll('"', '""')}"';
+
+  Future<pw.Font?> _loadPdfFont() async {
+    const candidates = [
+      '/system/fonts/Roboto-Regular.ttf',
+      '/system/fonts/NotoSans-Regular.ttf',
+      r'C:\Windows\Fonts\arial.ttf',
+    ];
+    for (final path in candidates) {
+      final file = File(path);
+      if (!await file.exists()) continue;
+      final bytes = await file.readAsBytes();
+      return pw.Font.ttf(ByteData.sublistView(Uint8List.fromList(bytes)));
+    }
+    return null;
   }
 }

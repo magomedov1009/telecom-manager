@@ -1030,6 +1030,20 @@ class LocalRepository {
     final orgId = await organizationId;
     final from = dateFrom?.toIso8601String().substring(0, 10);
     final to = dateTo?.toIso8601String().substring(0, 10);
+    final inventoryFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final inventoryToExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     String conditions(String dateColumn, String providerColumn) {
       return [
         'organization_id = ?',
@@ -1075,16 +1089,19 @@ class LocalRepository {
       'provider_id',
       'amount',
     );
-    final materialRows = await db.rawQuery('''
+    final materialRows = await db.rawQuery(
+      '''
       SELECT COALESCE(SUM(ABS(quantity)), 0) amount
       FROM inventory_transactions
       WHERE organization_id = ? AND deleted_at IS NULL
         AND quantity < 0
         AND operation_type IN ('CONNECTION', 'WRITE_OFF')
-        ${from == null ? '' : 'AND substr(occurred_at, 1, 10) >= ?'}
-        ${to == null ? '' : 'AND substr(occurred_at, 1, 10) <= ?'}
+        ${inventoryFrom == null ? '' : 'AND occurred_at >= ?'}
+        ${inventoryToExclusive == null ? '' : 'AND occurred_at < ?'}
         ${providerId == null ? '' : 'AND provider_id = ?'}
-      ''', args());
+      ''',
+      [orgId, ?inventoryFrom, ?inventoryToExclusive, ?providerId],
+    );
     final connection = connectionRows.single;
     return ReportSummary(
       connections: (connection['item_count']! as num).toInt(),
@@ -1101,11 +1118,83 @@ class LocalRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
     String? providerId,
+    String search = '',
   }) async {
+    if (section == 'providers') {
+      final result = <ReportDetailItem>[];
+      for (final provider in await providers()) {
+        if (providerId != null && provider.id != providerId) continue;
+        final summary = await reportSummary(
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          providerId: provider.id,
+        );
+        result.add(
+          ReportDetailItem(
+            title: provider.name,
+            subtitle:
+                'Подключений: ${summary.connections} · '
+                'Допработ: ${summary.extraWorks} · '
+                'Расходы: ${summary.expenses.toStringAsFixed(2)}',
+            value: summary.profit,
+          ),
+        );
+      }
+      return _filterReportDetails(result, search);
+    }
+    if (section == 'material_settlements') {
+      return _filterReportDetails(
+        (await materialSettlements())
+            .map(
+              (item) => ReportDetailItem(
+                title: '${item.debtorName} → ${item.creditorName}',
+                subtitle: '${item.materialName} · ${item.unitName}',
+                value: item.quantity,
+              ),
+            )
+            .toList(),
+        search,
+      );
+    }
+    if (section == 'finance') {
+      final items =
+          (await financeJournal(
+                providerId: providerId,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                search: search,
+              ))
+              .map(
+                (item) => ReportDetailItem(
+                  title: item.type,
+                  subtitle: [
+                    if (item.providerName != null) item.providerName!,
+                    if (item.comment != null) item.comment!,
+                  ].join(' · '),
+                  value: item.amount,
+                ),
+              )
+              .toList();
+      return _filterReportDetails(items, search);
+    }
     final db = await database.instance;
     final orgId = await organizationId;
     final from = dateFrom?.toIso8601String().substring(0, 10);
     final to = dateTo?.toIso8601String().substring(0, 10);
+    final inventoryFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final inventoryToExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final args = <Object?>[orgId, ?from, ?to, ?providerId];
     String dateFilter(String column) =>
         '${from == null ? '' : 'AND $column >= ?'} '
@@ -1153,7 +1242,8 @@ class LocalRepository {
           ''', args);
         break;
       case 'inventory':
-        rows = await db.rawQuery('''
+        rows = await db.rawQuery(
+          '''
           SELECT material.name title,
                  warehouse.name || ' · ' || substr(movement.occurred_at, 1, 10) subtitle,
                  ABS(movement.quantity) value
@@ -1163,21 +1253,42 @@ class LocalRepository {
           WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
             AND movement.quantity < 0
             AND movement.operation_type IN ('CONNECTION', 'WRITE_OFF')
-            ${dateFilter('substr(movement.occurred_at, 1, 10)')}
+            ${inventoryFrom == null ? '' : 'AND movement.occurred_at >= ?'}
+            ${inventoryToExclusive == null ? '' : 'AND movement.occurred_at < ?'}
             ${providerId == null ? '' : 'AND movement.provider_id = ?'}
           ORDER BY movement.occurred_at DESC
-          ''', args);
+          ''',
+          [orgId, ?inventoryFrom, ?inventoryToExclusive, ?providerId],
+        );
         break;
       default:
         throw ArgumentError('Неизвестный раздел отчёта');
     }
-    return rows
-        .map(
-          (row) => ReportDetailItem(
-            title: row['title']! as String,
-            subtitle: row['subtitle']! as String,
-            value: (row['value']! as num).toDouble(),
-          ),
+    return _filterReportDetails(
+      rows
+          .map(
+            (row) => ReportDetailItem(
+              title: row['title']! as String,
+              subtitle: row['subtitle']! as String,
+              value: (row['value']! as num).toDouble(),
+            ),
+          )
+          .toList(),
+      search,
+    );
+  }
+
+  List<ReportDetailItem> _filterReportDetails(
+    List<ReportDetailItem> items,
+    String search,
+  ) {
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return items;
+    return items
+        .where(
+          (item) =>
+              item.title.toLowerCase().contains(normalized) ||
+              item.subtitle.toLowerCase().contains(normalized),
         )
         .toList();
   }

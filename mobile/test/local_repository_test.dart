@@ -135,6 +135,13 @@ void main() {
       ),
       isEmpty,
     );
+    expect(
+      (await repository.reportSummary(
+        dateFrom: DateTime.now(),
+        dateTo: DateTime.now(),
+      )).materialSpent,
+      3,
+    );
   });
 
   test(
@@ -833,8 +840,18 @@ void main() {
         dateFrom: DateTime(2026, 7, 1),
         dateTo: DateTime(2026, 7, 31),
         providerId: provider.id,
+        search: 'report-client',
       ),
       hasLength(1),
+    );
+    expect(
+      await repository.reportDetails(
+        section: 'connections',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        search: 'нет такого клиента',
+      ),
+      isEmpty,
     );
     expect(
       await repository.reportDetails(
@@ -844,6 +861,24 @@ void main() {
         providerId: provider.id,
       ),
       hasLength(1),
+    );
+    expect(
+      await repository.reportDetails(
+        section: 'providers',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        providerId: provider.id,
+      ),
+      hasLength(1),
+    );
+    expect(
+      await repository.reportDetails(
+        section: 'finance',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        providerId: provider.id,
+      ),
+      hasLength(4),
     );
   });
 
