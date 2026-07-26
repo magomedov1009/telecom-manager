@@ -208,6 +208,7 @@ void main() {
       materials: [
         ConnectionMaterialInput(materialId: material.id, quantity: 3),
       ],
+      comment: 'Срочная установка',
     );
 
     final balance = (await repository.materialBalancesForWarehouse(
@@ -232,6 +233,18 @@ void main() {
     expect(dashboard.events, isNotEmpty);
     expect(client.connections, 1);
     expect(await repository.connections(clientId: clientId), hasLength(1));
+    expect(
+      await repository.connections(
+        search: 'срочная',
+        providerId: provider.id,
+        connectionType: 'NEW',
+        warehouseId: warehouse.id,
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+      ),
+      hasLength(1),
+    );
+    expect(await repository.connections(connectionType: 'RECONNECT'), isEmpty);
     expect(await repository.pendingChanges(), pendingBefore + 5);
   });
 

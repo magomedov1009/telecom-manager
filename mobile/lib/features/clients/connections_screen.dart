@@ -15,13 +15,35 @@ class ConnectionsScreen extends StatefulWidget {
 
 class _ConnectionsScreenState extends State<ConnectionsScreen> {
   late Future<List<ConnectionListItem>> data;
+  final search = TextEditingController();
+  String? providerId;
+  String? connectionType;
+  String? warehouseId;
+  DateTime? dateFrom;
+  DateTime? dateTo;
   @override
   void initState() {
     super.initState();
     reload();
   }
 
-  void reload() => setState(() => data = widget.repository.connections());
+  void reload() => setState(
+    () => data = widget.repository.connections(
+      search: search.text,
+      providerId: providerId,
+      connectionType: connectionType,
+      warehouseId: warehouseId,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    ),
+  );
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
   static const labels = {
     'NEW': 'Новое подключение',
     'RECONNECT': 'Переподключение',
@@ -34,61 +56,203 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Подключения')),
-    body: FutureBuilder<List<ConnectionListItem>>(
-      future: data,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.data!.isEmpty) {
-          return const Center(child: Text('Подключений пока нет'));
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(20),
-          itemCount: snapshot.data!.length,
-          separatorBuilder: (_, _) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final item = snapshot.data![index];
-            return Card(
-              child: ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.router_outlined)),
-                title: Text(item.clientLogin),
-                subtitle: Text(
-                  '${item.providerName} · ${labels[item.connectionType] ?? item.connectionType}\n${item.address}',
-                ),
-                isThreeLine: true,
-                trailing: PopupMenuButton<String>(
-                  onSelected: (action) async {
-                    if (action == 'edit') {
-                      final saved = await showModalBottomSheet<bool>(
-                        context: context,
-                        isScrollControlled: true,
-                        useSafeArea: true,
-                        builder: (_) => _EditConnectionSheet(
-                          repository: widget.repository,
-                          item: item,
-                        ),
-                      );
-                      if (saved == true) {
-                        widget.onChanged();
-                        reload();
-                      }
-                    } else {
-                      await remove(item);
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'edit', child: Text('Изменить')),
-                    PopupMenuItem(value: 'delete', child: Text('Удалить')),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    body: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: _filters(),
+        ),
+        Expanded(
+          child: FutureBuilder<List<ConnectionListItem>>(
+            future: data,
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.data!.isEmpty) {
+                return const Center(child: Text('Подключения не найдены'));
+              }
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                itemCount: snapshot.data!.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final item = snapshot.data![index];
+                  return Card(
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.router_outlined),
+                      ),
+                      title: Text(
+                        '${item.clientLogin} · ${item.price.toStringAsFixed(0)} ₽',
+                      ),
+                      subtitle: Text(
+                        '${item.providerName} · '
+                        '${labels[item.connectionType] ?? item.connectionType}\n'
+                        '${item.address} · ${formatDate(item.connectionDate)}',
+                      ),
+                      isThreeLine: true,
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (action) async {
+                          if (action == 'edit') {
+                            final saved = await showModalBottomSheet<bool>(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              builder: (_) => _EditConnectionSheet(
+                                repository: widget.repository,
+                                item: item,
+                              ),
+                            );
+                            if (saved == true) {
+                              widget.onChanged();
+                              reload();
+                            }
+                          } else {
+                            await remove(item);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Изменить')),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Удалить'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     ),
   );
+
+  Widget _filters() => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    leading: const Icon(Icons.filter_alt_outlined),
+    title: const Text('Поиск и фильтры'),
+    children: [
+      TextField(
+        controller: search,
+        decoration: const InputDecoration(
+          labelText: 'Договор, логин, адрес, телефон или комментарий',
+          prefixIcon: Icon(Icons.search),
+        ),
+        onSubmitted: (_) => reload(),
+      ),
+      const SizedBox(height: 8),
+      FutureBuilder<List<List<LookupItem>>>(
+        future: Future.wait([
+          widget.repository.providers(),
+          widget.repository.warehouses(),
+        ]),
+        builder: (context, snapshot) => Column(
+          children: [
+            _filterLookup(
+              'Провайдер',
+              providerId,
+              snapshot.data?.first ?? const [],
+              (value) => setState(() => providerId = value),
+            ),
+            const SizedBox(height: 8),
+            _filterLookup(
+              'Склад',
+              warehouseId,
+              snapshot.data?.last ?? const [],
+              (value) => setState(() => warehouseId = value),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String?>(
+        initialValue: connectionType,
+        decoration: const InputDecoration(labelText: 'Тип подключения'),
+        items: [
+          const DropdownMenuItem<String?>(value: null, child: Text('Все')),
+          for (final entry in labels.entries)
+            DropdownMenuItem<String?>(
+              value: entry.key,
+              child: Text(entry.value),
+            ),
+        ],
+        onChanged: (value) => setState(() => connectionType = value),
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: _ConnectionDateField(
+              label: 'С',
+              value: dateFrom,
+              onChanged: (value) => setState(() => dateFrom = value),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _ConnectionDateField(
+              label: 'По',
+              value: dateTo,
+              onChanged: (value) => setState(() => dateTo = value),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () {
+                search.clear();
+                setState(() {
+                  providerId = null;
+                  warehouseId = null;
+                  connectionType = null;
+                  dateFrom = null;
+                  dateTo = null;
+                });
+                reload();
+              },
+              child: const Text('Сбросить'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: FilledButton(
+              onPressed: reload,
+              child: const Text('Применить'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+    ],
+  );
+
+  Widget _filterLookup(
+    String label,
+    String? value,
+    List<LookupItem> items,
+    ValueChanged<String?> changed,
+  ) => DropdownButtonFormField<String?>(
+    initialValue: value,
+    decoration: InputDecoration(labelText: label),
+    items: [
+      const DropdownMenuItem<String?>(value: null, child: Text('Все')),
+      for (final item in items)
+        DropdownMenuItem<String?>(value: item.id, child: Text(item.name)),
+    ],
+    onChanged: changed,
+  );
+
+  String formatDate(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}.'
+      '${value.month.toString().padLeft(2, '0')}.${value.year}';
 
   Future<void> remove(ConnectionListItem item) async {
     final confirmed = await showDialog<bool>(
@@ -369,4 +533,41 @@ class _EditConnectionSheetState extends State<_EditConnectionSheet> {
       });
     }
   }
+}
+
+class _ConnectionDateField extends StatelessWidget {
+  const _ConnectionDateField({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final DateTime? value;
+  final ValueChanged<DateTime> onChanged;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: () async {
+      final selected = await showDatePicker(
+        context: context,
+        initialDate: value ?? DateTime.now(),
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+      );
+      if (selected != null) onChanged(selected);
+    },
+    child: InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      child: Text(
+        value == null
+            ? 'Не выбрано'
+            : '${value!.day.toString().padLeft(2, '0')}.'
+                  '${value!.month.toString().padLeft(2, '0')}.${value!.year}',
+      ),
+    ),
+  );
 }

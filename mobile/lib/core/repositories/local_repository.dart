@@ -2031,24 +2031,69 @@ class LocalRepository {
         .toList();
   }
 
-  Future<List<ConnectionListItem>> connections({String? clientId}) async {
+  Future<List<ConnectionListItem>> connections({
+    String? clientId,
+    String search = '',
+    String? providerId,
+    String? connectionType,
+    String? warehouseId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
       SELECT connection.id, connection.connection_type,
-             connection.connection_date, connection.price,
-             client.login, client.address, provider.name provider_name
+             connection.connection_date, connection.price, connection.comment,
+             client.login, client.contract_number, client.address, client.phone,
+             provider.name provider_name
       FROM connections connection
       JOIN clients client ON client.id = connection.client_id
       JOIN providers provider ON provider.id = client.provider_id
       WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
         ${clientId == null ? '' : 'AND connection.client_id = ?'}
+        ${providerId == null ? '' : 'AND client.provider_id = ?'}
+        ${connectionType == null ? '' : 'AND connection.connection_type = ?'}
+        ${warehouseId == null ? '' : 'AND connection.warehouse_id = ?'}
+        ${from == null ? '' : 'AND connection.connection_date >= ?'}
+        ${to == null ? '' : 'AND connection.connection_date <= ?'}
       ORDER BY connection.connection_date DESC, connection.created_at DESC
       ''',
-      [orgId, ?clientId],
+      [
+        orgId,
+        ?clientId,
+        ?providerId,
+        ?connectionType,
+        ?warehouseId,
+        ?from,
+        ?to,
+      ],
     );
-    return rows
+    final normalized = search.trim().toLowerCase();
+    final filtered = normalized.isEmpty
+        ? rows
+        : rows
+              .where(
+                (row) =>
+                    [
+                      row['contract_number'],
+                      row['login'],
+                      row['address'],
+                      row['phone'],
+                      row['comment'],
+                    ].any(
+                      (value) =>
+                          value?.toString().toLowerCase().contains(
+                            normalized,
+                          ) ??
+                          false,
+                    ),
+              )
+              .toList();
+    return filtered
         .map(
           (row) => ConnectionListItem(
             id: row['id']! as String,
