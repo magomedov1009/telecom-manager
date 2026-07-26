@@ -14,6 +14,7 @@ from app.models.enums import (
 from app.models.events import EventLog
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
+from app.models.mobile_sync import MobileDeviceToken, MobileMembership, MobileOrganization, MobileSyncChange, MobileSyncRecord
 from app.models.users import User
 
 __all__ = [
@@ -35,6 +36,11 @@ __all__ = [
     "InventoryTransactionType",
     "Material",
     "MaterialUnit",
+    "MobileDeviceToken",
+    "MobileMembership",
+    "MobileOrganization",
+    "MobileSyncChange",
+    "MobileSyncRecord",
     "Provider",
     "User",
     "UserRole",
