@@ -86,4 +86,107 @@ void main() {
     expect(await repository.pendingChanges(), 0);
     await database.close();
   });
+
+  test('remote changes are applied in dependency order', () async {
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final repository = LocalRepository(database);
+    await repository.initialize();
+    final now = DateTime(2026, 7, 27).toUtc().toIso8601String();
+
+    await repository.applyRemoteChanges([
+      {
+        'entity_type': 'warehouse',
+        'entity_id': 'warehouse-remote',
+        'operation': 'upsert',
+        'version': 1,
+        'payload': {
+          'id': 'warehouse-remote',
+          'organization_id': 'server-org',
+          'provider_id': 'provider-remote',
+          'name': 'Удалённый склад',
+          'is_active': 1,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        },
+      },
+      {
+        'entity_type': 'provider',
+        'entity_id': 'provider-remote',
+        'operation': 'upsert',
+        'version': 1,
+        'payload': {
+          'id': 'provider-remote',
+          'organization_id': 'server-org',
+          'name': 'Удалённый провайдер',
+          'is_active': 1,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        },
+      },
+    ], 2);
+
+    expect(
+      (await repository.providers()).map((item) => item.name),
+      contains('Удалённый провайдер'),
+    );
+    expect(
+      (await repository.warehouses()).map((item) => item.name),
+      contains('Удалённый склад'),
+    );
+    expect(await repository.syncCursor(), 2);
+    await database.close();
+  });
+
+  test('remote pull never overwrites an unsent local edit', () async {
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final repository = LocalRepository(database);
+    await repository.initialize();
+    for (final item in await repository.syncQueue()) {
+      await repository.acknowledgeSync(item.entityType, item.entityId);
+    }
+    await repository.addProvider('Локальное имя');
+    final provider = (await repository.providerCatalog()).singleWhere(
+      (item) => item.name == 'Локальное имя',
+    );
+    final now = DateTime(2026, 7, 27).toUtc().toIso8601String();
+
+    await repository.applyRemoteChanges([
+      {
+        'entity_type': 'provider',
+        'entity_id': provider.id,
+        'operation': 'upsert',
+        'version': 1,
+        'payload': {
+          'id': provider.id,
+          'organization_id': 'server-org',
+          'name': 'Серверное имя',
+          'is_active': 1,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'synced',
+        },
+      },
+    ], 1);
+
+    expect(
+      (await repository.providerCatalog())
+          .singleWhere((item) => item.id == provider.id)
+          .name,
+      'Локальное имя',
+    );
+    expect((await repository.syncQueue()).single.entityId, provider.id);
+    expect(await repository.syncCursor(), 1);
+    await database.close();
+  });
 }

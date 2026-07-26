@@ -4167,20 +4167,74 @@ class LocalRepository {
       'extra_work_material': 'extra_work_materials',
       'expense': 'expenses',
     };
+    const priorities = {
+      'provider': 10,
+      'providers': 10,
+      'material': 10,
+      'materials': 10,
+      'extra_work_type': 10,
+      'extra_work_types': 10,
+      'user': 10,
+      'warehouse': 20,
+      'warehouses': 20,
+      'client': 20,
+      'connection': 30,
+      'extra_work': 30,
+      'expense': 30,
+      'connection_material': 40,
+      'extra_work_material': 40,
+      'inventory_transaction': 40,
+      'finance_transaction': 40,
+    };
+    final ordered = [...changes]
+      ..sort((left, right) {
+        final leftDelete = left['operation'] == 'delete';
+        final rightDelete = right['operation'] == 'delete';
+        if (leftDelete != rightDelete) return leftDelete ? 1 : -1;
+        final leftPriority = priorities[left['entity_type']] ?? 100;
+        final rightPriority = priorities[right['entity_type']] ?? 100;
+        return leftDelete
+            ? rightPriority.compareTo(leftPriority)
+            : leftPriority.compareTo(rightPriority);
+      });
     await db.transaction((transaction) async {
-      for (final change in changes) {
+      for (final change in ordered) {
         final table = tables[change['entity_type']];
         if (table == null) continue;
+        final entityId = change['entity_id']! as String;
+        final pending =
+            Sqflite.firstIntValue(
+              await transaction.rawQuery(
+                'SELECT COUNT(*) FROM sync_queue WHERE entity_id = ?',
+                [entityId],
+              ),
+            ) ??
+            0;
+        if (pending > 0) {
+          await transaction.rawUpdate(
+            '''
+            UPDATE sync_queue
+            SET attempts = attempts + 1,
+                last_error = 'Конфликт с изменением на сервере'
+            WHERE entity_id = ?
+            ''',
+            [entityId],
+          );
+          continue;
+        }
         final payload = Map<String, Object?>.from(change['payload']! as Map);
         if (payload.containsKey('organization_id')) {
           payload['organization_id'] = orgId;
+        }
+        if (payload.containsKey('sync_state')) {
+          payload['sync_state'] = 'synced';
         }
         if (change['operation'] == 'delete') {
           await transaction.update(
             table,
             {'deleted_at': DateTime.now().toUtc().toIso8601String()},
             where: 'id = ?',
-            whereArgs: [change['entity_id']],
+            whereArgs: [entityId],
           );
         } else {
           await transaction.insert(
