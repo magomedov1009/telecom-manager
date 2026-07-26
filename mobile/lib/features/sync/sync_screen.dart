@@ -4,10 +4,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/repositories/local_repository.dart';
 import '../catalogs/catalogs_screen.dart';
 import '../reports/reports_screen.dart';
+import '../settings/organization_users_screen.dart';
 
 class SyncScreen extends StatefulWidget {
-  const SyncScreen({super.key, required this.repository});
+  const SyncScreen({
+    super.key,
+    required this.repository,
+    required this.role,
+    required this.onLogout,
+  });
   final LocalRepository repository;
+  final String role;
+  final VoidCallback onLogout;
 
   @override
   State<SyncScreen> createState() => _SyncScreenState();
@@ -40,32 +48,60 @@ class _SyncScreenState extends State<SyncScreen> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.settings_outlined),
-            title: const Text('Справочники'),
-            subtitle: const Text('Провайдеры, склады, материалы и виды работ'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => CatalogsScreen(repository: widget.repository),
+        if (widget.role == 'admin')
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Справочники'),
+              subtitle: const Text(
+                'Провайдеры, склады, материалы и виды работ',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => CatalogsScreen(repository: widget.repository),
+                ),
               ),
             ),
           ),
-        ),
-        Card(
-          child: ListTile(
-            leading: const Icon(Icons.bar_chart_outlined),
-            title: const Text('Отчёты'),
-            subtitle: const Text('Периоды, провайдеры и экспорт CSV'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => ReportsScreen(repository: widget.repository),
+        if (widget.role != 'installer')
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.bar_chart_outlined),
+              title: const Text('Отчёты'),
+              subtitle: const Text('Периоды, провайдеры и экспорт CSV'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => ReportsScreen(repository: widget.repository),
+                ),
               ),
             ),
+          ),
+        if (widget.role == 'admin')
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.manage_accounts_outlined),
+              title: const Text('Организации и пользователи'),
+              subtitle: const Text('Роли и отдельные рабочие пространства'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      OrganizationUsersScreen(repository: widget.repository),
+                ),
+              ),
+            ),
+          ),
+        const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Выйти'),
+            onTap: widget.onLogout,
           ),
         ),
         const SizedBox(height: 16),

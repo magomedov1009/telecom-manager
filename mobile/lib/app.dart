@@ -7,6 +7,7 @@ import 'features/inventory/inventory_screen.dart';
 import 'features/clients/clients_screen.dart';
 import 'features/sync/sync_screen.dart';
 import 'features/works/works_screen.dart';
+import 'features/auth/login_screen.dart';
 
 class TelecomManagerApp extends StatelessWidget {
   const TelecomManagerApp({super.key, required this.repository});
@@ -35,15 +36,67 @@ class TelecomManagerApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: AppShell(repository: repository),
+      home: _AuthGate(repository: repository),
+    );
+  }
+}
+
+class _AuthGate extends StatefulWidget {
+  const _AuthGate({required this.repository});
+  final LocalRepository repository;
+  @override
+  State<_AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<_AuthGate> {
+  UserItem? user;
+  bool loading = true;
+  @override
+  void initState() {
+    super.initState();
+    widget.repository.currentUser().then((value) {
+      if (mounted) {
+        setState(() {
+          user = value;
+          loading = false;
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (user == null) {
+      return LoginScreen(
+        repository: widget.repository,
+        onLogin: (value) => setState(() => user = value),
+      );
+    }
+    return AppShell(
+      repository: widget.repository,
+      user: user!,
+      onLogout: () async {
+        await widget.repository.logout();
+        if (mounted) setState(() => user = null);
+      },
     );
   }
 }
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key, required this.repository});
+  const AppShell({
+    super.key,
+    required this.repository,
+    required this.user,
+    required this.onLogout,
+  });
 
   final LocalRepository repository;
+  final UserItem user;
+  final VoidCallback onLogout;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -85,6 +138,8 @@ class _AppShellState extends State<AppShell> {
       SyncScreen(
         key: ValueKey('sync-$refreshKey'),
         repository: widget.repository,
+        role: widget.user.role,
+        onLogout: widget.onLogout,
       ),
     ];
     return Scaffold(

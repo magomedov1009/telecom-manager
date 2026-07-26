@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+import 'package:cryptography/cryptography.dart';
 
 import '../database/app_database.dart';
 
@@ -62,6 +63,21 @@ class LookupItem {
   const LookupItem(this.id, this.name);
   final String id;
   final String name;
+}
+
+class UserItem {
+  const UserItem({
+    required this.id,
+    required this.username,
+    required this.fullName,
+    required this.role,
+    required this.isActive,
+  });
+  final String id;
+  final String username;
+  final String fullName;
+  final String role;
+  final bool isActive;
 }
 
 class ClientListItem {
@@ -239,12 +255,291 @@ class LocalRepository {
         ) ??
         0;
     if (count == 0) await _seedLocalWorkspace(db);
+    final orgId = await organizationId;
+    await db.insert('app_settings', {
+      'key': 'current_organization_id',
+      'value': orgId,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final users =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM users WHERE organization_id = ?',
+            [orgId],
+          ),
+        ) ??
+        0;
+    if (users == 0) {
+      await _insertUser(
+        db,
+        organizationId: orgId,
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+        password: '0000',
+      );
+    }
+    final withoutPassword = await db.query(
+      'users',
+      columns: ['id'],
+      where: 'organization_id = ? AND password_hash IS NULL',
+      whereArgs: [orgId],
+    );
+    for (final user in withoutPassword) {
+      await _setPassword(db, user['id']! as String, '0000');
+    }
   }
 
   Future<String> get organizationId async {
     final db = await database.instance;
+    final setting = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['current_organization_id'],
+      limit: 1,
+    );
+    if (setting.isNotEmpty) return setting.single['value']! as String;
     final rows = await db.query('organizations', limit: 1);
     return rows.single['id']! as String;
+  }
+
+  Future<List<LookupItem>> organizations() async {
+    final db = await database.instance;
+    final rows = await db.query(
+      'organizations',
+      columns: ['id', 'name'],
+      where: 'deleted_at IS NULL',
+      orderBy: 'name',
+    );
+    return rows
+        .map((row) => LookupItem(row['id']! as String, row['name']! as String))
+        .toList();
+  }
+
+  Future<void> switchOrganization(String id) async {
+    final db = await database.instance;
+    final exists =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM organizations WHERE id = ? AND deleted_at IS NULL',
+            [id],
+          ),
+        ) ??
+        0;
+    if (exists != 1) throw ArgumentError('Организация не найдена');
+    await db.insert('app_settings', {
+      'key': 'current_organization_id',
+      'value': id,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String> addOrganization(String name) async {
+    final clean = _requiredName(name);
+    final db = await database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id = _uuid.v7();
+    final row = <String, Object?>{
+      'id': id,
+      'name': clean,
+      'mode': 'local',
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('organizations', row);
+      await _queueRow(transaction, id, 'organization', row, now);
+      await _insertUser(
+        transaction,
+        organizationId: id,
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+        password: '0000',
+      );
+    });
+    await switchOrganization(id);
+    return id;
+  }
+
+  Future<List<UserItem>> users() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'users',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'full_name',
+    );
+    return rows
+        .map(
+          (row) => UserItem(
+            id: row['id']! as String,
+            username: row['username']! as String,
+            fullName: row['full_name']! as String,
+            role: row['role']! as String,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> addUser({
+    required String username,
+    required String fullName,
+    required String role,
+    required String password,
+  }) async {
+    if (!{'admin', 'manager', 'installer'}.contains(role)) {
+      throw ArgumentError('Неизвестная роль');
+    }
+    final db = await database.instance;
+    await _insertUser(
+      db,
+      organizationId: await organizationId,
+      username: _requiredName(username),
+      fullName: _requiredName(fullName),
+      role: role,
+      password: password,
+    );
+  }
+
+  Future<void> _insertUser(
+    DatabaseExecutor db, {
+    required String organizationId,
+    required String username,
+    required String fullName,
+    required String role,
+    required String password,
+  }) async {
+    if (password.length < 4) {
+      throw ArgumentError('Пароль должен содержать минимум 4 символа');
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': organizationId,
+      'username': username,
+      'full_name': fullName,
+      'role': role,
+      'is_active': 1,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.insert('users', row);
+    await _setPassword(db, row['id']! as String, password);
+    final stored = (await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [row['id']],
+      limit: 1,
+    )).single;
+    row['password_hash'] = stored['password_hash'];
+    row['password_salt'] = stored['password_salt'];
+    await _queueRow(db, organizationId, 'user', row, now);
+  }
+
+  Future<void> _setPassword(
+    DatabaseExecutor db,
+    String userId,
+    String password,
+  ) async {
+    final algorithm = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 100000,
+      bits: 256,
+    );
+    final salt = SecretKeyData.random(length: 16).bytes;
+    final key = await algorithm.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: salt,
+    );
+    await db.update(
+      'users',
+      {
+        'password_hash': base64Encode(await key.extractBytes()),
+        'password_salt': base64Encode(salt),
+      },
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
+  Future<UserItem?> authenticate(String username, String password) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'users',
+      where:
+          'organization_id = ? AND username = ? AND is_active = 1 AND deleted_at IS NULL',
+      whereArgs: [orgId, username.trim()],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.single;
+    final salt = base64Decode(row['password_salt']! as String);
+    final algorithm = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 100000,
+      bits: 256,
+    );
+    final key = await algorithm.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: salt,
+    );
+    if (base64Encode(await key.extractBytes()) != row['password_hash']) {
+      return null;
+    }
+    await db.insert('app_settings', {
+      'key': 'current_user_id',
+      'value': row['id']! as String,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return UserItem(
+      id: row['id']! as String,
+      username: row['username']! as String,
+      fullName: row['full_name']! as String,
+      role: row['role']! as String,
+      isActive: true,
+    );
+  }
+
+  Future<UserItem?> currentUser() async {
+    final db = await database.instance;
+    final setting = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+      limit: 1,
+    );
+    if (setting.isEmpty) return null;
+    final rows = await db.query(
+      'users',
+      where: 'id = ? AND organization_id = ? AND is_active = 1',
+      whereArgs: [setting.single['value'], await organizationId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.single;
+    return UserItem(
+      id: row['id']! as String,
+      username: row['username']! as String,
+      fullName: row['full_name']! as String,
+      role: row['role']! as String,
+      isActive: true,
+    );
+  }
+
+  Future<void> logout() async {
+    final db = await database.instance;
+    await db.delete(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+    );
   }
 
   Future<DashboardSummary> dashboardSummary() async {

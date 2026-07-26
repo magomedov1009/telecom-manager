@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 5,
+        version: 7,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -148,6 +148,7 @@ class AppDatabase {
     await _createConnectionMaterials(db);
     await _createFinanceTables(db);
     await _createWorkAndExpenseTables(db);
+    await _createUsersTable(db);
     await db.execute('''
       CREATE TABLE sync_queue (
         id TEXT PRIMARY KEY,
@@ -206,6 +207,13 @@ class AppDatabase {
     }
     if (oldVersion < 5) {
       await _createWorkAndExpenseTables(db);
+    }
+    if (oldVersion < 6) {
+      await _createUsersTable(db);
+    }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE users ADD COLUMN password_hash TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN password_salt TEXT');
     }
   }
 
@@ -335,6 +343,30 @@ class AppDatabase {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS ix_expenses_org_date ON expenses(organization_id, expense_date)',
+    );
+  }
+
+  Future<void> _createUsersTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        username TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'installer')),
+        password_hash TEXT,
+        password_salt TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending',
+        UNIQUE (organization_id, username)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_users_org_role ON users(organization_id, role)',
     );
   }
 }
