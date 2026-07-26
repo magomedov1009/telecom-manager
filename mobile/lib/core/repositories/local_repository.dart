@@ -1200,6 +1200,204 @@ class LocalRepository {
     });
   }
 
+  Future<void> updateConnection({
+    required String connectionId,
+    required String warehouseId,
+    required String connectionType,
+    required DateTime connectionDate,
+    required double price,
+    required double officeAmount,
+    required double installerAmount,
+    required List<ConnectionMaterialInput> materials,
+    String? comment,
+  }) async {
+    if (price < 0 || officeAmount < 0 || installerAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
+    }
+    if (materials.any((item) => item.quantity <= 0)) {
+      throw ArgumentError('Количество материала должно быть больше нуля');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.rawQuery(
+        '''
+        SELECT connection.*, client.provider_id
+        FROM connections connection
+        JOIN clients client ON client.id = connection.client_id
+        WHERE connection.id = ? AND connection.organization_id = ?
+          AND connection.deleted_at IS NULL
+        ''',
+        [connectionId, orgId],
+      );
+      if (rows.isEmpty) throw ArgumentError('Подключение не найдено');
+      final oldInventory = await transaction.query(
+        'inventory_transactions',
+        where:
+            'connection_id = ? AND operation_type = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, 'CONNECTION'],
+      );
+      for (final original in oldInventory) {
+        final reversal = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': original['warehouse_id'],
+          'provider_id': original['provider_id'],
+          'material_id': original['material_id'],
+          'connection_id': connectionId,
+          'operation_type': 'RETURN',
+          'quantity': -(original['quantity']! as num).toDouble(),
+          'comment': 'Пересчёт подключения',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', reversal);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          reversal,
+          now,
+        );
+      }
+      for (final table in ['connection_materials', 'finance_transactions']) {
+        final oldRows = await transaction.query(
+          table,
+          where: 'connection_id = ? AND deleted_at IS NULL',
+          whereArgs: [connectionId],
+        );
+        for (final old in oldRows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [old['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: table == 'connection_materials'
+                ? 'connection_material'
+                : 'finance_transaction',
+            entityId: old['id']! as String,
+            operation: 'delete',
+            payload: {...old, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+      for (final material in materials) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
+          throw StateError('Недостаточно материала на выбранном складе');
+        }
+      }
+      final version = (rows.single['version']! as num).toInt() + 1;
+      final connectionRow = <String, Object?>{
+        ...rows.single,
+        'warehouse_id': warehouseId,
+        'connection_type': connectionType,
+        'connection_date': connectionDate.toIso8601String().substring(0, 10),
+        'price': price,
+        'office_amount': officeAmount,
+        'installer_amount': installerAmount,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': version,
+        'sync_state': 'pending',
+      }..remove('provider_id');
+      await transaction.update(
+        'connections',
+        connectionRow,
+        where: 'id = ?',
+        whereArgs: [connectionId],
+      );
+      await _queueRow(transaction, orgId, 'connection', connectionRow, now);
+      final providerId = rows.single['provider_id']! as String;
+      for (final material in materials) {
+        final usage = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'connection_id': connectionId,
+          'material_id': material.materialId,
+          'quantity': material.quantity,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        final movement = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': providerId,
+          'material_id': material.materialId,
+          'connection_id': connectionId,
+          'operation_type': 'CONNECTION',
+          'quantity': -material.quantity,
+          'comment': comment,
+          'occurred_at': connectionDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('connection_materials', usage);
+        await transaction.insert('inventory_transactions', movement);
+        await _queueRow(transaction, orgId, 'connection_material', usage, now);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          movement,
+          now,
+        );
+      }
+      for (final accrual in [
+        (
+          amount: installerAmount,
+          to: 'INSTALLER',
+          label: 'Начисление монтажнику',
+        ),
+        (amount: officeAmount, to: 'OFFICE', label: 'Начисление офису'),
+      ]) {
+        if (accrual.amount <= 0) continue;
+        final finance = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'connection_id': connectionId,
+          'transaction_type': 'CONNECTION',
+          'accrual_to': accrual.to,
+          'amount': accrual.amount,
+          'comment': accrual.label,
+          'occurred_at': connectionDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', finance);
+        await _queueRow(
+          transaction,
+          orgId,
+          'finance_transaction',
+          finance,
+          now,
+        );
+      }
+    });
+  }
+
   Future<String> addClient({
     required String providerId,
     required String contractNumber,

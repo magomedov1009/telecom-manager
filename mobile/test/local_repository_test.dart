@@ -292,6 +292,65 @@ void main() {
     expect((await repository.financeSummary()).customerReceived, 0);
   });
 
+  test(
+    'editing connection atomically recalculates stock and finance',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final material = (await repository.materials()).first;
+      await repository.addReceipt(
+        warehouseId: warehouse.id,
+        materialId: material.id,
+        quantity: 5,
+      );
+      final clientId = await repository.addClient(
+        providerId: provider.id,
+        contractNumber: 'edit-1',
+        login: 'edit-client',
+        address: 'Редактирование',
+      );
+      final connectionId = await repository.addConnection(
+        clientId: clientId,
+        warehouseId: warehouse.id,
+        connectionType: 'NEW',
+        connectionDate: DateTime(2026, 7, 26),
+        price: 1000,
+        officeAmount: 300,
+        installerAmount: 700,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 2),
+        ],
+      );
+
+      await repository.updateConnection(
+        connectionId: connectionId,
+        warehouseId: warehouse.id,
+        connectionType: 'RECONNECT',
+        connectionDate: DateTime(2026, 7, 27),
+        price: 600,
+        officeAmount: 100,
+        installerAmount: 500,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 1),
+        ],
+      );
+
+      expect(
+        (await repository.materialBalancesForWarehouse(
+          warehouse.id,
+        )).singleWhere((item) => item.materialId == material.id).quantity,
+        4,
+      );
+      final finance = await repository.financeSummary();
+      expect(finance.customerReceived, 600);
+      expect(finance.officeAccrued, 100);
+      expect(
+        (await repository.connections()).single.connectionType,
+        'RECONNECT',
+      );
+    },
+  );
+
   test('installer expense increases office debt and reduces cash', () async {
     final provider = (await repository.providers()).first;
     await repository.addExpense(
