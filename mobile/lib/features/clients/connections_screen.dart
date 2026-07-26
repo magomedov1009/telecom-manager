@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/repositories/local_repository.dart';
+import 'clients_screen.dart';
 
 class ConnectionsScreen extends StatefulWidget {
   const ConnectionsScreen({
@@ -129,7 +130,58 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
         ),
       ],
     ),
+    floatingActionButton: FloatingActionButton.extended(
+      onPressed: addConnection,
+      icon: const Icon(Icons.add_link),
+      label: const Text('Подключение'),
+    ),
   );
+
+  Future<void> addConnection() async {
+    final clients = await widget.repository.clients();
+    if (!mounted) return;
+    if (clients.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сначала добавьте клиента')),
+      );
+      return;
+    }
+    final selected = await showDialog<ClientListItem>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Выберите клиента'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: clients.length,
+            itemBuilder: (_, index) {
+              final client = clients[index];
+              return ListTile(
+                title: Text(client.login),
+                subtitle: Text('${client.providerName} · ${client.address}'),
+                onTap: () => Navigator.pop(dialogContext, client),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => ConnectionSheet(
+        repository: widget.repository,
+        client: selected,
+      ),
+    );
+    if (saved == true) {
+      widget.onChanged();
+      reload();
+    }
+  }
 
   Widget _filters() => ExpansionTile(
     tilePadding: EdgeInsets.zero,

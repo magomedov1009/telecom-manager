@@ -136,12 +136,6 @@ def _mobile_payload(item, fields: tuple[str, ...]) -> dict:
 
 def _bootstrap_site_data(db: Session, organization_id: int) -> None:
     """Seed the primary mobile workspace from the existing website database."""
-    if db.scalar(
-        select(func.count()).select_from(MobileSyncRecord).where(
-            MobileSyncRecord.organization_id == organization_id
-        )
-    ):
-        return
     primary_id = db.scalar(select(MobileOrganization.id).order_by(MobileOrganization.id))
     if primary_id != organization_id:
         return
@@ -188,6 +182,15 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
     )
     for entity_type, model, fields in specs:
         for item in db.scalars(select(model).order_by(model.id)):
+            exists = db.scalar(
+                select(MobileSyncRecord.id).where(
+                    MobileSyncRecord.organization_id == organization_id,
+                    MobileSyncRecord.entity_type == entity_type,
+                    MobileSyncRecord.entity_id == str(item.id),
+                )
+            )
+            if exists is not None:
+                continue
             payload = _mobile_payload(item, fields)
             if entity_type == "material":
                 payload["is_active"] = payload.pop("active")

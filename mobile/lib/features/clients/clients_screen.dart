@@ -200,7 +200,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                               context: context,
                               isScrollControlled: true,
                               useSafeArea: true,
-                              builder: (_) => _ConnectionSheet(
+                              builder: (_) => ConnectionSheet(
                                 repository: widget.repository,
                                 client: client,
                               ),
@@ -410,17 +410,21 @@ class _ClientSheetState extends State<_ClientSheet> {
   }
 }
 
-class _ConnectionSheet extends StatefulWidget {
-  const _ConnectionSheet({required this.repository, required this.client});
+class ConnectionSheet extends StatefulWidget {
+  const ConnectionSheet({
+    super.key,
+    required this.repository,
+    required this.client,
+  });
 
   final LocalRepository repository;
   final ClientListItem client;
 
   @override
-  State<_ConnectionSheet> createState() => _ConnectionSheetState();
+  State<ConnectionSheet> createState() => _ConnectionSheetState();
 }
 
-class _ConnectionSheetState extends State<_ConnectionSheet> {
+class _ConnectionSheetState extends State<ConnectionSheet> {
   final price = TextEditingController(text: '0');
   final office = TextEditingController(text: '0');
   final installer = TextEditingController(text: '0');
