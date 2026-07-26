@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
+import 'connections_screen.dart';
 
 class ClientsScreen extends StatefulWidget {
   const ClientsScreen({
@@ -40,6 +41,21 @@ class _ClientsScreenState extends State<ClientsScreen> {
           'Клиенты',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Все подключения',
+            icon: const Icon(Icons.router_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => ConnectionsScreen(
+                  repository: widget.repository,
+                  onChanged: reload,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
       body: FutureBuilder<List<ClientListItem>>(
         future: clients,

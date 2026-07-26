@@ -245,6 +245,53 @@ void main() {
     },
   );
 
+  test('deleting connection restores stock and reverses finance', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 5,
+    );
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: 'delete-1',
+      login: 'delete-client',
+      address: 'Удаление',
+    );
+    final connectionId = await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 7, 26),
+      price: 1000,
+      officeAmount: 300,
+      installerAmount: 700,
+      materials: [
+        ConnectionMaterialInput(materialId: material.id, quantity: 2),
+      ],
+    );
+    expect(
+      (await repository.materialBalancesForWarehouse(
+        warehouse.id,
+      )).singleWhere((item) => item.materialId == material.id).quantity,
+      3,
+    );
+    expect((await repository.financeSummary()).customerReceived, 1000);
+
+    await repository.deleteConnection(connectionId);
+
+    expect(await repository.connections(), isEmpty);
+    expect(
+      (await repository.materialBalancesForWarehouse(
+        warehouse.id,
+      )).singleWhere((item) => item.materialId == material.id).quantity,
+      5,
+    );
+    expect((await repository.financeSummary()).customerReceived, 0);
+  });
+
   test('installer expense increases office debt and reduces cash', () async {
     final provider = (await repository.providers()).first;
     await repository.addExpense(

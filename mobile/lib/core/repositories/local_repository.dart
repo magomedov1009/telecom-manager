@@ -100,6 +100,25 @@ class ClientListItem {
   final int connections;
 }
 
+class ConnectionListItem {
+  const ConnectionListItem({
+    required this.id,
+    required this.clientLogin,
+    required this.address,
+    required this.providerName,
+    required this.connectionType,
+    required this.connectionDate,
+    required this.price,
+  });
+  final String id;
+  final String clientLogin;
+  final String address;
+  final String providerName;
+  final String connectionType;
+  final DateTime connectionDate;
+  final double price;
+}
+
 class MaterialBalance {
   const MaterialBalance({
     required this.materialId,
@@ -1066,6 +1085,119 @@ class LocalRepository {
           ),
         )
         .toList();
+  }
+
+  Future<List<ConnectionListItem>> connections() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT connection.id, connection.connection_type,
+             connection.connection_date, connection.price,
+             client.login, client.address, provider.name provider_name
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      JOIN providers provider ON provider.id = client.provider_id
+      WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+      ORDER BY connection.connection_date DESC, connection.created_at DESC
+      ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => ConnectionListItem(
+            id: row['id']! as String,
+            clientLogin: (row['login'] as String?) ?? '',
+            address: row['address']! as String,
+            providerName: row['provider_name']! as String,
+            connectionType: row['connection_type']! as String,
+            connectionDate: DateTime.parse(row['connection_date']! as String),
+            price: (row['price']! as num).toDouble(),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> deleteConnection(String connectionId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final connectionRows = await transaction.query(
+        'connections',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, orgId],
+        limit: 1,
+      );
+      if (connectionRows.isEmpty) {
+        throw ArgumentError('Подключение не найдено');
+      }
+      final connection = connectionRows.single;
+      final inventoryRows = await transaction.query(
+        'inventory_transactions',
+        where:
+            'connection_id = ? AND operation_type = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, 'CONNECTION'],
+      );
+      for (final original in inventoryRows) {
+        final returnRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': original['warehouse_id'],
+          'provider_id': original['provider_id'],
+          'material_id': original['material_id'],
+          'connection_id': connectionId,
+          'operation_type': 'RETURN',
+          'quantity': -(original['quantity']! as num).toDouble(),
+          'comment': 'Отмена подключения',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', returnRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          returnRow,
+          now,
+        );
+      }
+      Future<void> softDelete(String table, String entityType) async {
+        final rows = await transaction.query(
+          table,
+          where: table == 'connections'
+              ? 'id = ?'
+              : '${table == 'connection_materials' ? 'connection_id' : 'connection_id'} = ? AND deleted_at IS NULL',
+          whereArgs: [connectionId],
+        );
+        for (final row in rows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: entityType,
+            entityId: row['id']! as String,
+            operation: 'delete',
+            payload: {...row, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+
+      await softDelete('connection_materials', 'connection_material');
+      await softDelete('finance_transactions', 'finance_transaction');
+      await softDelete('connections', 'connection');
+      // Preserve the original connection row in the delete payload.
+      assert(connection['id'] == connectionId);
+    });
   }
 
   Future<String> addClient({
