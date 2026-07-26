@@ -108,6 +108,13 @@ void main() {
         'ADJUSTMENT',
       }),
     );
+    final writeOffs = await repository.inventoryHistory(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'WRITE_OFF',
+    );
+    expect(writeOffs, hasLength(1));
+    expect(writeOffs.single.quantity, -3);
   });
 
   test(
@@ -300,6 +307,18 @@ void main() {
       final debt = (await repository.materialSettlements()).single;
       expect(debt.quantity, 4);
       expect(debt.materialName, material.name);
+      expect(
+        (await repository.inventoryBalances(
+          warehouseId: source.id,
+        )).singleWhere((item) => item.materialId == material.id).quantity,
+        6,
+      );
+      expect(
+        (await repository.inventoryBalances(
+          warehouseId: destination.id,
+        )).singleWhere((item) => item.materialId == material.id).quantity,
+        4,
+      );
 
       await repository.addTransfer(
         sourceWarehouseId: destination.id,

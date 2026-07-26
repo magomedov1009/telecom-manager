@@ -20,15 +20,22 @@ class InventoryScreen extends StatefulWidget {
 
 class _InventoryScreenState extends State<InventoryScreen> {
   late Future<List<InventoryBalance>> balances;
+  late Future<List<LookupItem>> warehouseOptions;
+  String? selectedWarehouseId;
 
   @override
   void initState() {
     super.initState();
     balances = widget.repository.inventoryBalances();
+    warehouseOptions = widget.repository.warehouses();
   }
 
   void reload() {
-    setState(() => balances = widget.repository.inventoryBalances());
+    setState(
+      () => balances = widget.repository.inventoryBalances(
+        warehouseId: selectedWarehouseId,
+      ),
+    );
     widget.onChanged();
   }
 
@@ -82,47 +89,90 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<InventoryBalance>>(
-        future: balances,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-            itemCount: snapshot.data!.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final item = snapshot.data![index];
-              return Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(16),
-                  leading: CircleAvatar(
-                    child: Icon(
-                      item.itemType == 'EQUIPMENT'
-                          ? Icons.router_outlined
-                          : Icons.cable_outlined,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: FutureBuilder<List<LookupItem>>(
+              future: warehouseOptions,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const LinearProgressIndicator();
+                }
+                return DropdownButtonFormField<String>(
+                  initialValue: selectedWarehouseId,
+                  decoration: const InputDecoration(
+                    labelText: 'Остатки на складе',
+                    prefixIcon: Icon(Icons.warehouse_outlined),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: null,
+                      child: Text('Все склады'),
                     ),
-                  ),
-                  title: Text(
-                    item.name,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    item.itemType == 'EQUIPMENT' ? 'Оборудование' : 'Материал',
-                  ),
-                  trailing: Text(
-                    '${quantity(item.quantity)} ${item.unitName}',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+                    ...snapshot.data!.map(
+                      (item) => DropdownMenuItem(
+                        value: item.id,
+                        child: Text(item.name),
+                      ),
                     ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                  ],
+                  onChanged: (value) {
+                    selectedWarehouseId = value;
+                    reload();
+                  },
+                );
+              },
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<InventoryBalance>>(
+              future: balances,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                  itemCount: snapshot.data!.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final item = snapshot.data![index];
+                    return Card(
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.all(16),
+                        leading: CircleAvatar(
+                          child: Icon(
+                            item.itemType == 'EQUIPMENT'
+                                ? Icons.router_outlined
+                                : Icons.cable_outlined,
+                          ),
+                        ),
+                        title: Text(
+                          item.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          item.itemType == 'EQUIPMENT'
+                              ? 'Оборудование'
+                              : 'Материал',
+                        ),
+                        trailing: Text(
+                          '${quantity(item.quantity)} ${item.unitName}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {

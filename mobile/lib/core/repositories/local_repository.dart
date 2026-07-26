@@ -752,7 +752,9 @@ class LocalRepository {
     );
   }
 
-  Future<List<InventoryBalance>> inventoryBalances() async {
+  Future<List<InventoryBalance>> inventoryBalances({
+    String? warehouseId,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
@@ -763,12 +765,13 @@ class LocalRepository {
       LEFT JOIN inventory_transactions transaction_row
         ON transaction_row.material_id = material.id
        AND transaction_row.deleted_at IS NULL
+       ${warehouseId == null ? '' : 'AND transaction_row.warehouse_id = ?'}
       WHERE material.organization_id = ?
         AND material.deleted_at IS NULL
       GROUP BY material.id, material.name, material.item_type, material.unit_name
       ORDER BY material.item_type, material.name
     ''',
-      [orgId],
+      [?warehouseId, orgId],
     );
     return rows
         .map(
@@ -931,7 +934,11 @@ class LocalRepository {
     return clean;
   }
 
-  Future<List<InventoryHistoryItem>> inventoryHistory() async {
+  Future<List<InventoryHistoryItem>> inventoryHistory({
+    String? warehouseId,
+    String? materialId,
+    String? operationType,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
@@ -943,9 +950,12 @@ class LocalRepository {
       JOIN warehouses warehouse ON warehouse.id = movement.warehouse_id
       JOIN materials material ON material.id = movement.material_id
       WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
+        ${warehouseId == null ? '' : 'AND movement.warehouse_id = ?'}
+        ${materialId == null ? '' : 'AND movement.material_id = ?'}
+        ${operationType == null ? '' : 'AND movement.operation_type = ?'}
       ORDER BY movement.occurred_at DESC, movement.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?warehouseId, ?materialId, ?operationType],
     );
     return rows
         .map(
