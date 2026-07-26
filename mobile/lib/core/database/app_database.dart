@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -98,6 +98,7 @@ class AppDatabase {
         counterpart_warehouse_id TEXT REFERENCES warehouses(id),
         provider_id TEXT REFERENCES providers(id),
         material_id TEXT NOT NULL REFERENCES materials(id),
+        connection_id TEXT,
         operation_type TEXT NOT NULL,
         quantity REAL NOT NULL CHECK (quantity <> 0),
         comment TEXT,
@@ -169,6 +170,9 @@ class AppDatabase {
       'CREATE INDEX ix_inventory_org_material ON inventory_transactions(organization_id, material_id)',
     );
     await db.execute(
+      'CREATE INDEX ix_inventory_connection ON inventory_transactions(connection_id)',
+    );
+    await db.execute(
       'CREATE INDEX ix_sync_queue_created ON sync_queue(created_at)',
     );
   }
@@ -185,6 +189,14 @@ class AppDatabase {
       );
       await db.execute(
         'CREATE INDEX ix_connections_org_date ON connections(organization_id, connection_date)',
+      );
+    }
+    if (oldVersion < 3) {
+      await db.execute(
+        'ALTER TABLE inventory_transactions ADD COLUMN connection_id TEXT',
+      );
+      await db.execute(
+        'CREATE INDEX ix_inventory_connection ON inventory_transactions(connection_id)',
       );
     }
   }
