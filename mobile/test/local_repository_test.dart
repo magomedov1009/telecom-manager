@@ -375,5 +375,23 @@ void main() {
     expect(report.income, 2200);
     expect(report.expenses, 200);
     expect(report.profit, 2000);
+    expect(
+      await repository.reportDetails(
+        section: 'connections',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        providerId: provider.id,
+      ),
+      hasLength(1),
+    );
+    expect(
+      await repository.reportDetails(
+        section: 'expenses',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        providerId: provider.id,
+      ),
+      hasLength(1),
+    );
   });
 }

@@ -214,6 +214,17 @@ class ReportSummary {
   double get profit => income - expenses;
 }
 
+class ReportDetailItem {
+  const ReportDetailItem({
+    required this.title,
+    required this.subtitle,
+    required this.value,
+  });
+  final String title;
+  final String subtitle;
+  final double value;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -554,6 +565,92 @@ class LocalRepository {
       expenses: (expenseRows['amount']! as num).toDouble(),
       materialSpent: (materialRows.single['amount']! as num).toDouble(),
     );
+  }
+
+  Future<List<ReportDetailItem>> reportDetails({
+    required String section,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? providerId,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
+    final args = <Object?>[orgId, ?from, ?to, ?providerId];
+    String dateFilter(String column) =>
+        '${from == null ? '' : 'AND $column >= ?'} '
+        '${to == null ? '' : 'AND $column <= ?'}';
+    late final List<Map<String, Object?>> rows;
+    switch (section) {
+      case 'connections':
+        rows = await db.rawQuery('''
+          SELECT client.login title,
+                 client.address || ' · ' || connection.connection_date subtitle,
+                 connection.price value
+          FROM connections connection
+          JOIN clients client ON client.id = connection.client_id
+          WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+            ${dateFilter('connection.connection_date')}
+            ${providerId == null ? '' : 'AND client.provider_id = ?'}
+          ORDER BY connection.connection_date DESC
+          ''', args);
+        break;
+      case 'works':
+        rows = await db.rawQuery('''
+          SELECT type.name title,
+                 provider.name || ' · ' || work.work_date subtitle,
+                 work.amount value
+          FROM extra_works work
+          JOIN extra_work_types type ON type.id = work.work_type_id
+          JOIN providers provider ON provider.id = work.provider_id
+          WHERE work.organization_id = ? AND work.deleted_at IS NULL
+            ${dateFilter('work.work_date')}
+            ${providerId == null ? '' : 'AND work.provider_id = ?'}
+          ORDER BY work.work_date DESC
+          ''', args);
+        break;
+      case 'expenses':
+        rows = await db.rawQuery('''
+          SELECT expense.description title,
+                 provider.name || ' · ' || expense.expense_date subtitle,
+                 expense.amount value
+          FROM expenses expense
+          JOIN providers provider ON provider.id = expense.provider_id
+          WHERE expense.organization_id = ? AND expense.deleted_at IS NULL
+            ${dateFilter('expense.expense_date')}
+            ${providerId == null ? '' : 'AND expense.provider_id = ?'}
+          ORDER BY expense.expense_date DESC
+          ''', args);
+        break;
+      case 'inventory':
+        rows = await db.rawQuery('''
+          SELECT material.name title,
+                 warehouse.name || ' · ' || substr(movement.occurred_at, 1, 10) subtitle,
+                 ABS(movement.quantity) value
+          FROM inventory_transactions movement
+          JOIN materials material ON material.id = movement.material_id
+          JOIN warehouses warehouse ON warehouse.id = movement.warehouse_id
+          WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
+            AND movement.quantity < 0
+            AND movement.operation_type IN ('CONNECTION', 'WRITE_OFF')
+            ${dateFilter('substr(movement.occurred_at, 1, 10)')}
+            ${providerId == null ? '' : 'AND movement.provider_id = ?'}
+          ORDER BY movement.occurred_at DESC
+          ''', args);
+        break;
+      default:
+        throw ArgumentError('Неизвестный раздел отчёта');
+    }
+    return rows
+        .map(
+          (row) => ReportDetailItem(
+            title: row['title']! as String,
+            subtitle: row['subtitle']! as String,
+            value: (row['value']! as num).toDouble(),
+          ),
+        )
+        .toList();
   }
 
   Future<List<ClientListItem>> clients() async {

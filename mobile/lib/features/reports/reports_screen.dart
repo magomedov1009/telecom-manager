@@ -15,6 +15,7 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   String period = 'month';
+  String section = 'connections';
   String? providerId;
   ReportSummary? lastSummary;
 
@@ -23,6 +24,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return switch (period) {
       'today' => (
         DateTime(now.year, now.month, now.day),
+        DateTime(now.year, now.month, now.day),
+      ),
+      'yesterday' => (
+        DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).subtract(const Duration(days: 1)),
+        DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).subtract(const Duration(days: 1)),
+      ),
+      'week' => (
+        DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).subtract(Duration(days: now.weekday - 1)),
         DateTime(now.year, now.month, now.day),
       ),
       'month' => (
@@ -59,14 +80,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        SegmentedButton<String>(
-          segments: const [
-            ButtonSegment(value: 'today', label: Text('Сегодня')),
-            ButtonSegment(value: 'month', label: Text('Месяц')),
-            ButtonSegment(value: 'all', label: Text('Всё время')),
+        DropdownButtonFormField<String>(
+          initialValue: period,
+          decoration: const InputDecoration(
+            labelText: 'Период',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'today', child: Text('Сегодня')),
+            DropdownMenuItem(value: 'yesterday', child: Text('Вчера')),
+            DropdownMenuItem(value: 'week', child: Text('Неделя')),
+            DropdownMenuItem(value: 'month', child: Text('Месяц')),
+            DropdownMenuItem(value: 'all', child: Text('За всё время')),
           ],
-          selected: {period},
-          onSelectionChanged: (value) => setState(() => period = value.first),
+          onChanged: (value) => setState(() => period = value!),
         ),
         const SizedBox(height: 12),
         FutureBuilder<List<LookupItem>>(
@@ -117,6 +144,62 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 _row('Прибыль', money(data.profit), important: true),
                 _row('Списано материалов', data.materialSpent.toString()),
               ],
+            );
+          },
+        ),
+        const SizedBox(height: 18),
+        DropdownButtonFormField<String>(
+          initialValue: section,
+          decoration: const InputDecoration(
+            labelText: 'Детализация',
+            border: OutlineInputBorder(),
+          ),
+          items: const [
+            DropdownMenuItem(value: 'connections', child: Text('Подключения')),
+            DropdownMenuItem(value: 'works', child: Text('Допработы')),
+            DropdownMenuItem(value: 'expenses', child: Text('Расходы')),
+            DropdownMenuItem(
+              value: 'inventory',
+              child: Text('Складские списания'),
+            ),
+          ],
+          onChanged: (value) => setState(() => section = value!),
+        ),
+        const SizedBox(height: 10),
+        FutureBuilder<List<ReportDetailItem>>(
+          future: widget.repository.reportDetails(
+            section: section,
+            dateFrom: dates().$1,
+            dateTo: dates().$2,
+            providerId: providerId,
+          ),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const LinearProgressIndicator();
+            }
+            if (snapshot.data!.isEmpty) {
+              return const Card(
+                child: ListTile(title: Text('Нет записей за период')),
+              );
+            }
+            return Column(
+              children: snapshot.data!
+                  .map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Card(
+                        child: ListTile(
+                          title: Text(item.title),
+                          subtitle: Text(item.subtitle),
+                          trailing: Text(
+                            item.value.toStringAsFixed(2),
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
             );
           },
         ),
