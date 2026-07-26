@@ -1937,6 +1937,70 @@ class LocalRepository {
     });
   }
 
+  Future<void> addInventoryOperation({
+    required String warehouseId,
+    required String materialId,
+    required String operationType,
+    required double quantity,
+    String adjustmentDirection = 'plus',
+    String? comment,
+  }) async {
+    const supported = {
+      'ISSUE_TO_THIRD_PARTY',
+      'RETURN',
+      'WRITE_OFF',
+      'ADJUSTMENT',
+    };
+    if (!supported.contains(operationType)) {
+      throw ArgumentError('Некорректный тип складской операции');
+    }
+    if (quantity <= 0) {
+      throw ArgumentError('Количество должно быть больше нуля');
+    }
+    if (!{'plus', 'minus'}.contains(adjustmentDirection)) {
+      throw ArgumentError('Некорректное направление корректировки');
+    }
+    final isNegative =
+        operationType == 'ISSUE_TO_THIRD_PARTY' ||
+        operationType == 'WRITE_OFF' ||
+        (operationType == 'ADJUSTMENT' && adjustmentDirection == 'minus');
+    final signedQuantity = isNegative ? -quantity : quantity;
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      if (isNegative) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId,
+          materialId: materialId,
+        );
+        if (available + 0.000001 < quantity) {
+          throw StateError(
+            'Недостаточно на складе. Остаток: $available, требуется: $quantity',
+          );
+        }
+      }
+      final row = <String, Object?>{
+        'id': _uuid.v7(),
+        'organization_id': orgId,
+        'warehouse_id': warehouseId,
+        'material_id': materialId,
+        'operation_type': operationType,
+        'quantity': signedQuantity,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'occurred_at': now,
+        'created_at': now,
+        'updated_at': now,
+        'version': 1,
+        'sync_state': 'pending',
+      };
+      await transaction.insert('inventory_transactions', row);
+      await _queueRow(transaction, orgId, 'inventory_transaction', row, now);
+    });
+  }
+
   Future<List<MaterialSettlement>> materialSettlements() async {
     final db = await database.instance;
     final orgId = await organizationId;

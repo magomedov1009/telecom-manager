@@ -51,6 +51,87 @@ void main() {
     expect(await repository.pendingChanges(), pendingBefore + 1);
   });
 
+  test('all manual inventory operations preserve stock mathematics', () async {
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 10,
+    );
+    await repository.addInventoryOperation(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'ISSUE_TO_THIRD_PARTY',
+      quantity: 2,
+    );
+    await repository.addInventoryOperation(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'RETURN',
+      quantity: 1,
+    );
+    await repository.addInventoryOperation(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'WRITE_OFF',
+      quantity: 3,
+    );
+    await repository.addInventoryOperation(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'ADJUSTMENT',
+      quantity: 4,
+      adjustmentDirection: 'plus',
+    );
+    await repository.addInventoryOperation(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      operationType: 'ADJUSTMENT',
+      quantity: 2,
+      adjustmentDirection: 'minus',
+    );
+
+    final balance = (await repository.materialBalancesForWarehouse(
+      warehouse.id,
+    )).singleWhere((item) => item.materialId == material.id);
+    expect(balance.quantity, 8);
+    expect(
+      (await repository.inventoryHistory())
+          .map((item) => item.operationType)
+          .toSet(),
+      containsAll({
+        'RECEIPT',
+        'ISSUE_TO_THIRD_PARTY',
+        'RETURN',
+        'WRITE_OFF',
+        'ADJUSTMENT',
+      }),
+    );
+  });
+
+  test(
+    'negative manual inventory operation rolls back when stock is low',
+    () async {
+      final warehouse = (await repository.warehouses()).first;
+      final material = (await repository.materials()).first;
+      final before = await repository.pendingChanges();
+
+      await expectLater(
+        repository.addInventoryOperation(
+          warehouseId: warehouse.id,
+          materialId: material.id,
+          operationType: 'WRITE_OFF',
+          quantity: 1,
+        ),
+        throwsStateError,
+      );
+
+      expect(await repository.pendingChanges(), before);
+      expect(await repository.inventoryHistory(), isEmpty);
+    },
+  );
+
   test('connection writes off material and queues related records', () async {
     final provider = (await repository.providers()).first;
     final warehouse = (await repository.warehouses()).first;
