@@ -15,6 +15,24 @@ class DashboardSummary {
     required this.clients,
     required this.connections,
     required this.pendingChanges,
+    required this.newClients,
+    required this.reconnects,
+    required this.equipmentReplacements,
+    required this.finance,
+    required this.extraWorks,
+    required this.extraWorkAmount,
+    required this.expensesInstaller,
+    required this.expensesOffice,
+    required this.expenseOperations,
+    required this.topExpenseCategory,
+    required this.topExpenseAmount,
+    required this.averageCheck,
+    required this.averageProfit,
+    required this.averageExpense,
+    required this.averageMaterialSpent,
+    required this.stock,
+    required this.attention,
+    required this.events,
   });
 
   final String organizationName;
@@ -24,6 +42,56 @@ class DashboardSummary {
   final int clients;
   final int connections;
   final int pendingChanges;
+  final int newClients;
+  final int reconnects;
+  final int equipmentReplacements;
+  final FinanceSummary finance;
+  final int extraWorks;
+  final double extraWorkAmount;
+  final double expensesInstaller;
+  final double expensesOffice;
+  final int expenseOperations;
+  final String? topExpenseCategory;
+  final double topExpenseAmount;
+  final double? averageCheck;
+  final double? averageProfit;
+  final double? averageExpense;
+  final double? averageMaterialSpent;
+  final List<DashboardStockItem> stock;
+  final List<String> attention;
+  final List<DashboardEvent> events;
+}
+
+class DashboardStockItem {
+  const DashboardStockItem({
+    required this.name,
+    required this.itemType,
+    required this.unitName,
+    required this.balance,
+    required this.spent,
+  });
+
+  final String name;
+  final String itemType;
+  final String unitName;
+  final double balance;
+  final double spent;
+}
+
+class DashboardEvent {
+  const DashboardEvent({
+    required this.kind,
+    required this.type,
+    required this.title,
+    required this.amount,
+    required this.occurredAt,
+  });
+
+  final String kind;
+  final String type;
+  final String title;
+  final double amount;
+  final DateTime occurredAt;
 }
 
 class InventoryBalance {
@@ -913,7 +981,11 @@ class LocalRepository {
     });
   }
 
-  Future<DashboardSummary> dashboardSummary() async {
+  Future<DashboardSummary> dashboardSummary({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? providerId,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final organization = (await db.query(
@@ -930,6 +1002,133 @@ class LocalRepository {
           ),
         ) ??
         0;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
+    final occurredFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final occurredTo = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
+    final connectionWhere = [
+      'connection.organization_id = ?',
+      'connection.deleted_at IS NULL',
+      'client.deleted_at IS NULL',
+      if (from != null) 'connection.connection_date >= ?',
+      if (to != null) 'connection.connection_date <= ?',
+      if (providerId != null) 'client.provider_id = ?',
+    ].join(' AND ');
+    final periodArgs = <Object?>[orgId, ?from, ?to, ?providerId];
+    final connectionMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS total,
+        COUNT(DISTINCT CASE WHEN connection.connection_type = 'NEW'
+          THEN connection.client_id END) AS new_clients,
+        SUM(CASE WHEN connection.connection_type = 'RECONNECT'
+          THEN 1 ELSE 0 END) AS reconnects,
+        SUM(CASE WHEN connection.connection_type = 'ONU_REPLACE'
+          THEN 1 ELSE 0 END) AS equipment_replacements
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      WHERE $connectionWhere
+      ''', periodArgs)).single;
+    final finance = await financeSummary(
+      providerId: providerId,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+    final extraMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS item_count, COALESCE(SUM(amount), 0) AS amount
+      FROM extra_works
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND work_date >= ?'}
+        ${to == null ? '' : 'AND work_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      ''', periodArgs)).single;
+    final expenseMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS item_count, COALESCE(SUM(amount), 0) AS total,
+        COALESCE(SUM(CASE WHEN paid_by = 'INSTALLER' THEN amount ELSE 0 END), 0)
+          AS installer,
+        COALESCE(SUM(CASE WHEN paid_by = 'OFFICE' THEN amount ELSE 0 END), 0)
+          AS office
+      FROM expenses
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND expense_date >= ?'}
+        ${to == null ? '' : 'AND expense_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      ''', periodArgs)).single;
+    final topExpenseRows = await db.rawQuery('''
+      SELECT category, COALESCE(SUM(amount), 0) AS amount
+      FROM expenses
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND expense_date >= ?'}
+        ${to == null ? '' : 'AND expense_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      GROUP BY category ORDER BY amount DESC LIMIT 1
+      ''', periodArgs);
+    final stockRows = await db.rawQuery(
+      '''
+      SELECT material.name, material.item_type, material.unit_name,
+        COALESCE(SUM(transaction_row.quantity), 0) AS balance,
+        COALESCE(SUM(CASE
+          WHEN transaction_row.quantity < 0
+            ${occurredFrom == null ? '' : 'AND transaction_row.occurred_at >= ?'}
+            ${occurredTo == null ? '' : 'AND transaction_row.occurred_at < ?'}
+          THEN ABS(transaction_row.quantity) ELSE 0 END), 0) AS spent
+      FROM materials material
+      LEFT JOIN inventory_transactions transaction_row
+        ON transaction_row.material_id = material.id
+       AND transaction_row.deleted_at IS NULL
+       ${providerId == null ? '' : '''
+       AND COALESCE(
+         transaction_row.provider_id,
+         (SELECT warehouse.provider_id FROM warehouses warehouse
+          WHERE warehouse.id = transaction_row.warehouse_id)
+       ) = ?'''}
+      WHERE material.organization_id = ? AND material.deleted_at IS NULL
+        AND material.is_active = 1
+      GROUP BY material.id, material.name, material.item_type, material.unit_name
+      ORDER BY material.item_type, material.name
+      ''',
+      [?occurredFrom, ?occurredTo, ?providerId, orgId],
+    );
+    final stock = stockRows
+        .map(
+          (row) => DashboardStockItem(
+            name: row['name']! as String,
+            itemType: row['item_type']! as String,
+            unitName: row['unit_name']! as String,
+            balance: (row['balance']! as num).toDouble(),
+            spent: (row['spent']! as num).toDouble(),
+          ),
+        )
+        .toList();
+    final events = await _dashboardEvents(
+      db,
+      organizationId: orgId,
+      providerId: providerId,
+    );
+    final connections = (connectionMetrics['total']! as num).toInt();
+    final materialSpent = stock
+        .where((item) => item.itemType == 'MATERIAL')
+        .fold<double>(0, (total, item) => total + item.spent);
+    final attention = <String>[
+      for (final item in stock)
+        if (item.itemType == 'MATERIAL' && item.balance <= 10)
+          'Заканчивается материал: ${item.name}'
+        else if (item.itemType == 'EQUIPMENT' && item.balance <= 2)
+          'Заканчивается оборудование: ${item.name}',
+      if (finance.officeOwesMe >= 10000) 'Большой долг офиса',
+      if (finance.iOweOffice >= 10000) 'Большой долг монтажника',
+      if (finance.profit < 0) 'Отрицательная прибыль',
+    ];
     final pending =
         Sqflite.firstIntValue(
           await db.rawQuery(
@@ -944,9 +1143,75 @@ class LocalRepository {
       warehouses: await count('warehouses'),
       materials: await count('materials'),
       clients: await count('clients'),
-      connections: await count('connections'),
+      connections: connections,
       pendingChanges: pending,
+      newClients: (connectionMetrics['new_clients']! as num).toInt(),
+      reconnects: (connectionMetrics['reconnects'] as num? ?? 0).toInt(),
+      equipmentReplacements:
+          (connectionMetrics['equipment_replacements'] as num? ?? 0).toInt(),
+      finance: finance,
+      extraWorks: (extraMetrics['item_count']! as num).toInt(),
+      extraWorkAmount: (extraMetrics['amount']! as num).toDouble(),
+      expensesInstaller: (expenseMetrics['installer']! as num).toDouble(),
+      expensesOffice: (expenseMetrics['office']! as num).toDouble(),
+      expenseOperations: (expenseMetrics['item_count']! as num).toInt(),
+      topExpenseCategory: topExpenseRows.isEmpty
+          ? null
+          : topExpenseRows.single['category']! as String,
+      topExpenseAmount: topExpenseRows.isEmpty
+          ? 0
+          : (topExpenseRows.single['amount']! as num).toDouble(),
+      averageCheck: connections == 0
+          ? null
+          : finance.customerReceived / connections,
+      averageProfit: connections == 0 ? null : finance.profit / connections,
+      averageExpense: connections == 0
+          ? null
+          : finance.expensesTotal / connections,
+      averageMaterialSpent: connections == 0
+          ? null
+          : materialSpent / connections,
+      stock: stock,
+      attention: attention,
+      events: events,
     );
+  }
+
+  Future<List<DashboardEvent>> _dashboardEvents(
+    DatabaseExecutor db, {
+    required String organizationId,
+    String? providerId,
+  }) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT 'finance' AS kind, transaction_type AS type,
+        COALESCE(comment, transaction_type) AS title, amount, occurred_at
+      FROM finance_transactions
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      UNION ALL
+      SELECT 'inventory' AS kind, operation_type AS type,
+        COALESCE(material.name, operation_type) AS title,
+        inventory.quantity AS amount, inventory.occurred_at
+      FROM inventory_transactions inventory
+      LEFT JOIN materials material ON material.id = inventory.material_id
+      WHERE inventory.organization_id = ? AND inventory.deleted_at IS NULL
+        ${providerId == null ? '' : 'AND inventory.provider_id = ?'}
+      ORDER BY occurred_at DESC LIMIT 10
+      ''',
+      [organizationId, ?providerId, organizationId, ?providerId],
+    );
+    return rows
+        .map(
+          (row) => DashboardEvent(
+            kind: row['kind']! as String,
+            type: row['type']! as String,
+            title: row['title']! as String,
+            amount: (row['amount']! as num).toDouble(),
+            occurredAt: DateTime.parse(row['occurred_at']! as String),
+          ),
+        )
+        .toList();
   }
 
   Future<List<InventoryBalance>> inventoryBalances({

@@ -215,6 +215,21 @@ void main() {
     )).singleWhere((item) => item.materialId == material.id);
     final client = (await repository.clients()).single;
     expect(balance.quantity, 7);
+    final dashboard = await repository.dashboardSummary(
+      dateFrom: DateTime(2026, 7, 1),
+      dateTo: DateTime(2026, 7, 31),
+      providerId: provider.id,
+    );
+    expect(dashboard.connections, 1);
+    expect(dashboard.newClients, 1);
+    expect(dashboard.finance.customerReceived, 1500);
+    expect(dashboard.finance.installerAccrued, 1000);
+    expect(dashboard.finance.officeAccrued, 500);
+    expect(
+      dashboard.stock.singleWhere((item) => item.name == material.name).spent,
+      3,
+    );
+    expect(dashboard.events, isNotEmpty);
     expect(client.connections, 1);
     expect(await repository.connections(clientId: clientId), hasLength(1));
     expect(await repository.pendingChanges(), pendingBefore + 5);
