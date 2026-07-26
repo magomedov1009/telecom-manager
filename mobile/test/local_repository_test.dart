@@ -261,4 +261,37 @@ void main() {
     expect(summary.availableCash, -500);
     expect((await repository.expenses()).single.description, 'Бензин');
   });
+
+  test(
+    'extra work atomically writes off stock and accrues installer income',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final material = (await repository.materials()).first;
+      final workType = (await repository.extraWorkTypes()).first;
+      await repository.addReceipt(
+        warehouseId: warehouse.id,
+        materialId: material.id,
+        quantity: 8,
+      );
+
+      await repository.addExtraWork(
+        providerId: provider.id,
+        workTypeId: workType.id,
+        workDate: DateTime(2026, 7, 27),
+        amount: 700,
+        warehouseId: warehouse.id,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 3),
+        ],
+      );
+
+      final balance = (await repository.materialBalancesForWarehouse(
+        warehouse.id,
+      )).singleWhere((item) => item.materialId == material.id);
+      expect(balance.quantity, 5);
+      expect((await repository.extraWorks()).single.amount, 700);
+      expect((await repository.financeSummary()).officeOwesMe, 700);
+    },
+  );
 }
