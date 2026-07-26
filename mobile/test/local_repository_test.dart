@@ -28,7 +28,7 @@ void main() {
     expect(summary.providers, 2);
     expect(summary.warehouses, 2);
     expect(summary.materials, 2);
-    expect(summary.pendingChanges, 7);
+    expect(summary.pendingChanges, 9);
   });
 
   test('receipt updates stock and sync queue atomically', () async {
@@ -244,4 +244,21 @@ void main() {
       expect((await repository.financeJournal()).length, 3);
     },
   );
+
+  test('installer expense increases office debt and reduces cash', () async {
+    final provider = (await repository.providers()).first;
+    await repository.addExpense(
+      providerId: provider.id,
+      category: 'fuel',
+      description: 'Бензин',
+      amount: 500,
+      paidBy: 'INSTALLER',
+      expenseDate: DateTime(2026, 7, 26),
+    );
+
+    final summary = await repository.financeSummary();
+    expect(summary.officeOwesMe, 500);
+    expect(summary.availableCash, -500);
+    expect((await repository.expenses()).single.description, 'Бензин');
+  });
 }

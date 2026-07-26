@@ -144,6 +144,24 @@ class FinanceJournalItem {
   final DateTime occurredAt;
 }
 
+class ExpenseItem {
+  const ExpenseItem({
+    required this.category,
+    required this.description,
+    required this.amount,
+    required this.paidBy,
+    required this.providerName,
+    required this.expenseDate,
+  });
+
+  final String category;
+  final String description;
+  final double amount;
+  final String paidBy;
+  final String providerName;
+  final DateTime expenseDate;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -765,9 +783,12 @@ class LocalRepository {
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
     );
-    final installerExpenses = await sum(
-      "CASE WHEN transaction_type = 'EXPENSE' AND accrual_to = 'INSTALLER' THEN ABS(amount) ELSE 0 END",
-    );
+    final expenseRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE organization_id = ? AND paid_by = 'INSTALLER'
+        AND deleted_at IS NULL$providerClause
+      ''', arguments);
+    final installerExpenses = (expenseRows.single['amount']! as num).toDouble();
     final balance =
         extraWorkInstaller +
         installerExpenses -
@@ -860,6 +881,103 @@ class LocalRepository {
         now: now,
       );
     });
+  }
+
+  Future<void> addExpense({
+    required String providerId,
+    required String category,
+    required String description,
+    required double amount,
+    required String paidBy,
+    required DateTime expenseDate,
+    String? comment,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Сумма должна быть больше нуля');
+    if (description.trim().isEmpty) {
+      throw ArgumentError('Описание обязательно');
+    }
+    if (!{'INSTALLER', 'OFFICE'}.contains(paidBy)) {
+      throw ArgumentError('Укажите, кто оплатил расход');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final expenseId = _uuid.v7();
+    final expenseRow = <String, Object?>{
+      'id': expenseId,
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'category': category,
+      'description': description.trim(),
+      'amount': amount,
+      'paid_by': paidBy,
+      'expense_date': expenseDate.toIso8601String().substring(0, 10),
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    final financeRow = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'expense_id': expenseId,
+      'transaction_type': 'EXPENSE',
+      'amount': -amount,
+      'comment': description.trim(),
+      'occurred_at': expenseDate.toUtc().toIso8601String(),
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('expenses', expenseRow);
+      await transaction.insert('finance_transactions', financeRow);
+      for (final item in [
+        ('expense', expenseRow),
+        ('finance_transaction', financeRow),
+      ]) {
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: item.$1,
+          entityId: item.$2['id']! as String,
+          operation: 'upsert',
+          payload: item.$2,
+          now: now,
+        );
+      }
+    });
+  }
+
+  Future<List<ExpenseItem>> expenses() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT expense.category, expense.description, expense.amount,
+             expense.paid_by, expense.expense_date, provider.name provider_name
+      FROM expenses expense
+      JOIN providers provider ON provider.id = expense.provider_id
+      WHERE expense.organization_id = ? AND expense.deleted_at IS NULL
+      ORDER BY expense.expense_date DESC, expense.created_at DESC
+      ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => ExpenseItem(
+            category: row['category']! as String,
+            description: row['description']! as String,
+            amount: (row['amount']! as num).toDouble(),
+            paidBy: row['paid_by']! as String,
+            providerName: row['provider_name']! as String,
+            expenseDate: DateTime.parse(row['expense_date']! as String),
+          ),
+        )
+        .toList();
   }
 
   Future<double> _balanceInTransaction(
@@ -968,6 +1086,29 @@ class LocalRepository {
           'item_type': 'MATERIAL',
           'unit_name': 'м',
           'category': 'Кабель',
+          'created_at': now,
+          'updated_at': now,
+        },
+      ),
+      (
+        'extra_work_types',
+        {
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'name': 'Ремонт линии',
+          'default_price': 0,
+          'requires_materials': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+      ),
+      (
+        'extra_work_types',
+        {
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'name': 'Настройка оборудования',
+          'default_price': 0,
           'created_at': now,
           'updated_at': now,
         },

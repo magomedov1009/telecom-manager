@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 4,
+        version: 5,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -147,6 +147,7 @@ class AppDatabase {
     ''');
     await _createConnectionMaterials(db);
     await _createFinanceTables(db);
+    await _createWorkAndExpenseTables(db);
     await db.execute('''
       CREATE TABLE sync_queue (
         id TEXT PRIMARY KEY,
@@ -203,6 +204,9 @@ class AppDatabase {
     if (oldVersion < 4) {
       await _createFinanceTables(db);
     }
+    if (oldVersion < 5) {
+      await _createWorkAndExpenseTables(db);
+    }
   }
 
   Future<void> _createConnectionMaterials(Database db) async {
@@ -252,6 +256,85 @@ class AppDatabase {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS ix_finance_provider ON finance_transactions(provider_id)',
+    );
+  }
+
+  Future<void> _createWorkAndExpenseTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS extra_work_types (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        name TEXT NOT NULL,
+        description TEXT,
+        default_price REAL,
+        requires_materials INTEGER NOT NULL DEFAULT 0,
+        requires_equipment INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending',
+        UNIQUE (organization_id, name)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS extra_works (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        provider_id TEXT NOT NULL REFERENCES providers(id),
+        work_type_id TEXT NOT NULL REFERENCES extra_work_types(id),
+        warehouse_id TEXT REFERENCES warehouses(id),
+        work_date TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount >= 0),
+        office_amount REAL NOT NULL DEFAULT 0,
+        installer_amount REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'completed',
+        comment TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS extra_work_materials (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        extra_work_id TEXT NOT NULL REFERENCES extra_works(id) ON DELETE CASCADE,
+        material_id TEXT NOT NULL REFERENCES materials(id),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        provider_id TEXT NOT NULL REFERENCES providers(id),
+        category TEXT NOT NULL,
+        description TEXT NOT NULL,
+        amount REAL NOT NULL CHECK (amount > 0),
+        paid_by TEXT NOT NULL,
+        expense_date TEXT NOT NULL,
+        comment TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_extra_works_org_date ON extra_works(organization_id, work_date)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_expenses_org_date ON expenses(organization_id, expense_date)',
     );
   }
 }
