@@ -87,7 +87,7 @@ void main() {
     final client = (await repository.clients()).single;
     expect(balance.quantity, 7);
     expect(client.connections, 1);
-    expect(await repository.pendingChanges(), pendingBefore + 3);
+    expect(await repository.pendingChanges(), pendingBefore + 5);
   });
 
   test('insufficient stock rolls back the whole connection', () async {
@@ -201,6 +201,47 @@ void main() {
       expect(debt.creditorName, warehouse.name);
       expect(debt.debtorName, clientProvider.name);
       expect(debt.quantity, 2);
+    },
+  );
+
+  test(
+    'finance debt follows website connection and office payment formula',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final clientId = await repository.addClient(
+        providerId: provider.id,
+        contractNumber: '3001',
+        login: 'finance-client',
+        address: 'Финансовый тест',
+      );
+      await repository.addConnection(
+        clientId: clientId,
+        warehouseId: warehouse.id,
+        connectionType: 'WITHOUT_MATERIALS',
+        connectionDate: DateTime(2026, 7, 26),
+        price: 1500,
+        officeAmount: 500,
+        installerAmount: 1000,
+        materials: const [],
+      );
+
+      var summary = await repository.financeSummary();
+      expect(summary.customerReceived, 1500);
+      expect(summary.officeAccrued, 500);
+      expect(summary.iOweOffice, 500);
+      expect(summary.availableCash, 1500);
+
+      await repository.addManualFinanceTransaction(
+        transactionType: 'PAYMENT_TO_OFFICE',
+        amount: 300,
+        providerId: provider.id,
+      );
+      summary = await repository.financeSummary();
+      expect(summary.paidToOffice, 300);
+      expect(summary.iOweOffice, 200);
+      expect(summary.availableCash, 1200);
+      expect((await repository.financeJournal()).length, 3);
     },
   );
 }

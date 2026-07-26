@@ -107,6 +107,43 @@ class MaterialSettlement {
   final double quantity;
 }
 
+class FinanceSummary {
+  const FinanceSummary({
+    required this.customerReceived,
+    required this.officeAccrued,
+    required this.paidToOffice,
+    required this.paidFromOffice,
+    required this.balance,
+    required this.availableCash,
+  });
+
+  final double customerReceived;
+  final double officeAccrued;
+  final double paidToOffice;
+  final double paidFromOffice;
+  final double balance;
+  final double availableCash;
+
+  double get officeOwesMe => balance > 0 ? balance : 0;
+  double get iOweOffice => balance < 0 ? -balance : 0;
+}
+
+class FinanceJournalItem {
+  const FinanceJournalItem({
+    required this.type,
+    required this.providerName,
+    required this.amount,
+    required this.comment,
+    required this.occurredAt,
+  });
+
+  final String type;
+  final String? providerName;
+  final double amount;
+  final String? comment;
+  final DateTime occurredAt;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -423,6 +460,41 @@ class LocalRepository {
         payload: connectionRow,
         now: now,
       );
+      for (final accrual in [
+        (
+          amount: installerAmount,
+          to: 'INSTALLER',
+          comment: 'Начисление монтажнику',
+        ),
+        (amount: officeAmount, to: 'OFFICE', comment: 'Начисление офису'),
+      ]) {
+        if (accrual.amount <= 0) continue;
+        final financeRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': clientProviderId,
+          'connection_id': id,
+          'transaction_type': 'CONNECTION',
+          'accrual_to': accrual.to,
+          'amount': accrual.amount,
+          'comment': accrual.comment,
+          'occurred_at': connectionDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', financeRow);
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: financeRow['id']! as String,
+          operation: 'upsert',
+          payload: financeRow,
+          now: now,
+        );
+      }
       for (final material in materials) {
         final materialRow = <String, Object?>{
           'id': _uuid.v7(),
@@ -659,6 +731,135 @@ class LocalRepository {
         quantity: item.amount.abs(),
       );
     }).toList()..sort((a, b) => a.debtorName.compareTo(b.debtorName));
+  }
+
+  Future<FinanceSummary> financeSummary({String? providerId}) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final providerClause = providerId == null ? '' : ' AND provider_id = ?';
+    final arguments = <Object?>[orgId, ?providerId];
+    Future<double> sum(String condition) async {
+      final rows = await db.rawQuery('''
+        SELECT COALESCE(SUM($condition), 0) AS amount
+        FROM finance_transactions
+        WHERE organization_id = ? AND deleted_at IS NULL$providerClause
+        ''', arguments);
+      return (rows.single['amount']! as num).toDouble();
+    }
+
+    final customerReceived = await sum(
+      "CASE WHEN transaction_type = 'CONNECTION' AND amount > 0 THEN amount ELSE 0 END",
+    );
+    final officeAccrued = await sum(
+      "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
+    );
+    final paidFromOffice = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
+    );
+    final paidToOffice = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
+    );
+    final adjustments = await sum(
+      "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
+    );
+    final extraWorkInstaller = await sum(
+      "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
+    );
+    final installerExpenses = await sum(
+      "CASE WHEN transaction_type = 'EXPENSE' AND accrual_to = 'INSTALLER' THEN ABS(amount) ELSE 0 END",
+    );
+    final balance =
+        extraWorkInstaller +
+        installerExpenses -
+        paidFromOffice +
+        adjustments -
+        officeAccrued +
+        paidToOffice;
+    return FinanceSummary(
+      customerReceived: customerReceived,
+      officeAccrued: officeAccrued,
+      paidToOffice: paidToOffice,
+      paidFromOffice: paidFromOffice,
+      balance: balance,
+      availableCash:
+          customerReceived + paidFromOffice - paidToOffice - installerExpenses,
+    );
+  }
+
+  Future<List<FinanceJournalItem>> financeJournal({String? providerId}) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT transaction_row.transaction_type, transaction_row.amount,
+             transaction_row.comment, transaction_row.occurred_at,
+             provider.name AS provider_name
+      FROM finance_transactions transaction_row
+      LEFT JOIN providers provider ON provider.id = transaction_row.provider_id
+      WHERE transaction_row.organization_id = ?
+        AND transaction_row.deleted_at IS NULL
+        ${providerId == null ? '' : 'AND transaction_row.provider_id = ?'}
+      ORDER BY transaction_row.occurred_at DESC, transaction_row.created_at DESC
+      ''',
+      [orgId, ?providerId],
+    );
+    return rows
+        .map(
+          (row) => FinanceJournalItem(
+            type: row['transaction_type']! as String,
+            providerName: row['provider_name'] as String?,
+            amount: (row['amount']! as num).toDouble(),
+            comment: row['comment'] as String?,
+            occurredAt: DateTime.parse(row['occurred_at']! as String),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> addManualFinanceTransaction({
+    required String transactionType,
+    required double amount,
+    String? providerId,
+    String? comment,
+  }) async {
+    const allowed = {'PAYMENT_TO_OFFICE', 'PAYMENT_FROM_OFFICE', 'ADJUSTMENT'};
+    if (!allowed.contains(transactionType)) {
+      throw ArgumentError('Неизвестный тип финансовой операции');
+    }
+    if (amount <= 0) {
+      throw ArgumentError('Сумма должна быть больше нуля');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final signedAmount = transactionType == 'PAYMENT_TO_OFFICE'
+        ? -amount
+        : amount;
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'transaction_type': transactionType,
+      'amount': signedAmount,
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'occurred_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('finance_transactions', row);
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'finance_transaction',
+        entityId: row['id']! as String,
+        operation: 'upsert',
+        payload: row,
+        now: now,
+      );
+    });
   }
 
   Future<double> _balanceInTransaction(
