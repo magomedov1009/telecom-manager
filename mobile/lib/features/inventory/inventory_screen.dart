@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
+import 'settlements_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({
@@ -43,6 +44,31 @@ class _InventoryScreenState extends State<InventoryScreen> {
           'Склад',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Переместить между складами',
+            icon: const Icon(Icons.swap_horiz),
+            onPressed: () async {
+              final saved = await showModalBottomSheet<bool>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => _TransferSheet(repository: widget.repository),
+              );
+              if (saved == true) reload();
+            },
+          ),
+          IconButton(
+            tooltip: 'Долги провайдеров',
+            icon: const Icon(Icons.balance_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    SettlementsScreen(repository: widget.repository),
+              ),
+            ),
+          ),
+        ],
       ),
       body: FutureBuilder<List<InventoryBalance>>(
         future: balances,
@@ -99,6 +125,191 @@ class _InventoryScreenState extends State<InventoryScreen> {
         label: const Text('Приход'),
       ),
     );
+  }
+}
+
+class _TransferSheet extends StatefulWidget {
+  const _TransferSheet({required this.repository});
+
+  final LocalRepository repository;
+
+  @override
+  State<_TransferSheet> createState() => _TransferSheetState();
+}
+
+class _TransferSheetState extends State<_TransferSheet> {
+  final quantityController = TextEditingController();
+  final commentController = TextEditingController();
+  String? sourceId;
+  String? destinationId;
+  String? materialId;
+  bool saving = false;
+  String? error;
+
+  @override
+  void dispose() {
+    quantityController.dispose();
+    commentController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        MediaQuery.viewInsetsOf(context).bottom + 24,
+      ),
+      child: FutureBuilder<(List<LookupItem>, List<LookupItem>)>(
+        future: Future.wait([
+          widget.repository.warehouses(),
+          widget.repository.materials(),
+        ]).then((items) => (items[0], items[1])),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const SizedBox(
+              height: 250,
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final warehouses = snapshot.data!.$1;
+          final materials = snapshot.data!.$2;
+          sourceId ??= warehouses.firstOrNull?.id;
+          destinationId ??= warehouses.length > 1 ? warehouses[1].id : null;
+          materialId ??= materials.firstOrNull?.id;
+          return SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'Перемещение',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 18),
+                _warehouseField('Со склада', sourceId, warehouses, (value) {
+                  sourceId = value;
+                }),
+                const SizedBox(height: 12),
+                _warehouseField('На склад', destinationId, warehouses, (value) {
+                  destinationId = value;
+                }),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: materialId,
+                  decoration: const InputDecoration(
+                    labelText: 'Материал или оборудование',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: materials
+                      .map(
+                        (item) => DropdownMenuItem(
+                          value: item.id,
+                          child: Text(item.name),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) => materialId = value,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: quantityController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Количество',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: commentController,
+                  decoration: const InputDecoration(
+                    labelText: 'Комментарий',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: saving ? null : save,
+                  icon: const Icon(Icons.swap_horiz),
+                  label: Text(saving ? 'Перемещение…' : 'Переместить'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  DropdownButtonFormField<String> _warehouseField(
+    String label,
+    String? value,
+    List<LookupItem> warehouses,
+    ValueChanged<String?> onChanged,
+  ) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      items: warehouses
+          .map(
+            (item) => DropdownMenuItem(value: item.id, child: Text(item.name)),
+          )
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
+
+  Future<void> save() async {
+    final value = double.tryParse(
+      quantityController.text.trim().replaceAll(',', '.'),
+    );
+    if (sourceId == null ||
+        destinationId == null ||
+        materialId == null ||
+        value == null ||
+        value <= 0) {
+      setState(() => error = 'Проверьте склады, позицию и количество');
+      return;
+    }
+    setState(() {
+      saving = true;
+      error = null;
+    });
+    try {
+      await widget.repository.addTransfer(
+        sourceWarehouseId: sourceId!,
+        destinationWarehouseId: destinationId!,
+        materialId: materialId!,
+        quantity: value,
+        comment: commentController.text,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (exception) {
+      setState(() {
+        saving = false;
+        error = exception
+            .toString()
+            .replaceFirst('Bad state: ', '')
+            .replaceFirst('Invalid argument(s): ', '');
+      });
+    }
   }
 }
 

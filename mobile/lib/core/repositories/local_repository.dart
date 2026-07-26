@@ -91,6 +91,22 @@ class ConnectionMaterialInput {
   final double quantity;
 }
 
+class MaterialSettlement {
+  const MaterialSettlement({
+    required this.creditorName,
+    required this.debtorName,
+    required this.materialName,
+    required this.unitName,
+    required this.quantity,
+  });
+
+  final String creditorName;
+  final String debtorName;
+  final String materialName;
+  final String unitName;
+  final double quantity;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -378,21 +394,22 @@ class LocalRepository {
       'sync_state': 'pending',
     };
     await db.transaction((transaction) async {
+      final client = (await transaction.query(
+        'clients',
+        columns: ['provider_id'],
+        where: 'id = ? AND organization_id = ?',
+        whereArgs: [clientId, orgId],
+        limit: 1,
+      )).single;
+      final clientProviderId = client['provider_id']! as String;
       for (final material in materials) {
-        final available =
-            Sqflite.firstIntValue(
-              await transaction.rawQuery(
-                '''
-            SELECT CAST(COALESCE(SUM(quantity), 0) * 1000 AS INTEGER)
-            FROM inventory_transactions
-            WHERE organization_id = ? AND warehouse_id = ?
-              AND material_id = ? AND deleted_at IS NULL
-            ''',
-                [orgId, warehouseId, material.materialId],
-              ),
-            ) ??
-            0;
-        if (available < (material.quantity * 1000).round()) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
           throw StateError('Недостаточно материала на выбранном складе');
         }
       }
@@ -422,7 +439,9 @@ class LocalRepository {
           'id': _uuid.v7(),
           'organization_id': orgId,
           'warehouse_id': warehouseId,
+          'provider_id': clientProviderId,
           'material_id': material.materialId,
+          'connection_id': id,
           'operation_type': 'CONNECTION',
           'quantity': -material.quantity,
           'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
@@ -455,6 +474,87 @@ class LocalRepository {
       }
     });
     return id;
+  }
+
+  Future<void> addTransfer({
+    required String sourceWarehouseId,
+    required String destinationWarehouseId,
+    required String materialId,
+    required double quantity,
+    String? comment,
+  }) async {
+    if (sourceWarehouseId == destinationWarehouseId) {
+      throw ArgumentError('Выберите разные склады');
+    }
+    if (quantity <= 0) {
+      throw ArgumentError('Количество должно быть больше нуля');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final available = await _balanceInTransaction(
+        transaction,
+        organizationId: orgId,
+        warehouseId: sourceWarehouseId,
+        materialId: materialId,
+      );
+      if (available + 0.000001 < quantity) {
+        throw StateError('Недостаточно материала на складе отправителя');
+      }
+      final destination = (await transaction.query(
+        'warehouses',
+        columns: ['provider_id'],
+        where: 'id = ? AND organization_id = ?',
+        whereArgs: [destinationWarehouseId, orgId],
+        limit: 1,
+      )).single;
+      final destinationProviderId = destination['provider_id'] as String?;
+      final cleanComment = comment?.trim().isEmpty == true
+          ? null
+          : comment?.trim();
+      for (final movement in [
+        (
+          warehouseId: sourceWarehouseId,
+          counterpartId: destinationWarehouseId,
+          type: 'TRANSFER_OUT',
+          amount: -quantity,
+        ),
+        (
+          warehouseId: destinationWarehouseId,
+          counterpartId: sourceWarehouseId,
+          type: 'TRANSFER_IN',
+          amount: quantity,
+        ),
+      ]) {
+        final row = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': movement.warehouseId,
+          'counterpart_warehouse_id': movement.counterpartId,
+          'provider_id': destinationProviderId,
+          'material_id': materialId,
+          'operation_type': movement.type,
+          'quantity': movement.amount,
+          'comment': cleanComment,
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', row);
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'inventory_transaction',
+          entityId: row['id']! as String,
+          operation: 'upsert',
+          payload: row,
+          now: now,
+        );
+      }
+    });
   }
 
   Future<void> addReceipt({
@@ -496,6 +596,87 @@ class LocalRepository {
         now: now,
       );
     });
+  }
+
+  Future<List<MaterialSettlement>> materialSettlements() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT creditor.id AS creditor_id, creditor.name AS creditor_name,
+             debtor.id AS debtor_id, debtor.name AS debtor_name,
+             material.id AS material_id, material.name AS material_name,
+             material.unit_name,
+             SUM(-transaction_row.quantity) AS quantity
+      FROM inventory_transactions transaction_row
+      JOIN warehouses source ON source.id = transaction_row.warehouse_id
+      JOIN providers creditor ON creditor.id = source.provider_id
+      JOIN providers debtor ON debtor.id = transaction_row.provider_id
+      JOIN materials material ON material.id = transaction_row.material_id
+      WHERE transaction_row.organization_id = ?
+        AND transaction_row.deleted_at IS NULL
+        AND transaction_row.operation_type IN ('CONNECTION', 'TRANSFER_OUT')
+        AND transaction_row.quantity < 0
+        AND creditor.id <> debtor.id
+      GROUP BY creditor.id, creditor.name, debtor.id, debtor.name,
+               material.id, material.name, material.unit_name
+      ''',
+      [orgId],
+    );
+    final net = <String, ({double amount, Map<String, Object?> row})>{};
+    for (final row in rows) {
+      final creditorId = row['creditor_id']! as String;
+      final debtorId = row['debtor_id']! as String;
+      final materialId = row['material_id']! as String;
+      final forward = creditorId.compareTo(debtorId) < 0;
+      final first = forward ? creditorId : debtorId;
+      final second = forward ? debtorId : creditorId;
+      final key = '$first|$second|$materialId';
+      final signed = (row['quantity']! as num).toDouble() * (forward ? 1 : -1);
+      final previous = net[key];
+      net[key] = (
+        amount: (previous?.amount ?? 0) + signed,
+        row: forward
+            ? row
+            : {
+                ...row,
+                'creditor_name': row['debtor_name'],
+                'debtor_name': row['creditor_name'],
+              },
+      );
+    }
+    return net.values.where((item) => item.amount.abs() > 0.000001).map((item) {
+      final positive = item.amount > 0;
+      return MaterialSettlement(
+        creditorName:
+            (positive ? item.row['creditor_name'] : item.row['debtor_name'])
+                as String,
+        debtorName:
+            (positive ? item.row['debtor_name'] : item.row['creditor_name'])
+                as String,
+        materialName: item.row['material_name']! as String,
+        unitName: item.row['unit_name']! as String,
+        quantity: item.amount.abs(),
+      );
+    }).toList()..sort((a, b) => a.debtorName.compareTo(b.debtorName));
+  }
+
+  Future<double> _balanceInTransaction(
+    DatabaseExecutor transaction, {
+    required String organizationId,
+    required String warehouseId,
+    required String materialId,
+  }) async {
+    final rows = await transaction.rawQuery(
+      '''
+      SELECT COALESCE(SUM(quantity), 0) AS quantity
+      FROM inventory_transactions
+      WHERE organization_id = ? AND warehouse_id = ?
+        AND material_id = ? AND deleted_at IS NULL
+      ''',
+      [organizationId, warehouseId, materialId],
+    );
+    return (rows.single['quantity']! as num).toDouble();
   }
 
   Future<int> pendingChanges() async {

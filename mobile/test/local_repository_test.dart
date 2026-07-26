@@ -121,4 +121,86 @@ void main() {
     expect((await repository.clients()).single.connections, 0);
     expect(await repository.pendingChanges(), pendingBefore);
   });
+
+  test(
+    'warehouse transfers create debt and reverse transfer offsets it',
+    () async {
+      final warehouses = await repository.warehouses();
+      final material = (await repository.materials()).first;
+      final source = warehouses.first;
+      final destination = warehouses.last;
+      await repository.addReceipt(
+        warehouseId: source.id,
+        materialId: material.id,
+        quantity: 10,
+      );
+
+      await repository.addTransfer(
+        sourceWarehouseId: source.id,
+        destinationWarehouseId: destination.id,
+        materialId: material.id,
+        quantity: 6,
+      );
+      await repository.addTransfer(
+        sourceWarehouseId: destination.id,
+        destinationWarehouseId: source.id,
+        materialId: material.id,
+        quantity: 2,
+      );
+
+      final debt = (await repository.materialSettlements()).single;
+      expect(debt.quantity, 4);
+      expect(debt.materialName, material.name);
+
+      await repository.addTransfer(
+        sourceWarehouseId: destination.id,
+        destinationWarehouseId: source.id,
+        materialId: material.id,
+        quantity: 4,
+      );
+      expect(await repository.materialSettlements(), isEmpty);
+    },
+  );
+
+  test(
+    'connection with another provider warehouse creates material debt',
+    () async {
+      final providers = await repository.providers();
+      final warehouses = await repository.warehouses();
+      final material = (await repository.materials()).first;
+      final warehouse = warehouses.first;
+      final clientProvider = providers.singleWhere(
+        (item) => item.name != warehouse.name,
+      );
+      await repository.addReceipt(
+        warehouseId: warehouse.id,
+        materialId: material.id,
+        quantity: 5,
+      );
+      final clientId = await repository.addClient(
+        providerId: clientProvider.id,
+        contractNumber: '2001',
+        login: 'foreign-provider-client',
+        address: 'Адрес другого провайдера',
+      );
+
+      await repository.addConnection(
+        clientId: clientId,
+        warehouseId: warehouse.id,
+        connectionType: 'NEW',
+        connectionDate: DateTime(2026, 7, 26),
+        price: 0,
+        officeAmount: 0,
+        installerAmount: 0,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 2),
+        ],
+      );
+
+      final debt = (await repository.materialSettlements()).single;
+      expect(debt.creditorName, warehouse.name);
+      expect(debt.debtorName, clientProvider.name);
+      expect(debt.quantity, 2);
+    },
+  );
 }
