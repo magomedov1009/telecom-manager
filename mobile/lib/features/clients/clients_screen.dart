@@ -106,12 +106,45 @@ class _ClientsScreenState extends State<ClientsScreen> {
   }
 
   Future<void> editClient(ClientListItem client) async {
-    final saved = await showModalBottomSheet<bool>(
+    final saved = await showModalBottomSheet<Object?>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (_) =>
           _ClientSheet(repository: widget.repository, initial: client),
+    );
+    if (saved == true) reload();
+  }
+
+  Future<void> addClientOnly() async {
+    final created = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _ClientSheet(repository: widget.repository),
+    );
+    if (created != null) reload();
+  }
+
+  Future<void> addNewConnection() async {
+    final clientId = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _ClientSheet(repository: widget.repository),
+    );
+    if (clientId is! String || !mounted) return;
+    final allClients = await widget.repository.clients();
+    final client = allClients.firstWhere((item) => item.id == clientId);
+    if (!mounted) return;
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => ConnectionSheet(
+        repository: widget.repository,
+        client: client,
+      ),
     );
     if (saved == true) reload();
   }
@@ -127,6 +160,11 @@ class _ClientsScreenState extends State<ClientsScreen> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Добавить только клиента',
+            icon: const Icon(Icons.person_add_alt),
+            onPressed: addClientOnly,
+          ),
           IconButton(
             tooltip: 'Все подключения',
             icon: const Icon(Icons.router_outlined),
@@ -218,17 +256,9 @@ class _ClientsScreenState extends State<ClientsScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          final saved = await showModalBottomSheet<bool>(
-            context: context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            builder: (_) => _ClientSheet(repository: widget.repository),
-          );
-          if (saved == true) reload();
-        },
-        icon: const Icon(Icons.person_add_alt),
-        label: const Text('Клиент'),
+        onPressed: addNewConnection,
+        icon: const Icon(Icons.add_link),
+        label: const Text('Новое подключение'),
       ),
     );
   }
@@ -381,7 +411,7 @@ class _ClientSheetState extends State<_ClientSheet> {
     });
     try {
       if (widget.initial == null) {
-        await widget.repository.addClient(
+        final clientId = await widget.repository.addClient(
           providerId: providerId!,
           contractNumber: contract.text,
           login: login.text,
@@ -389,6 +419,8 @@ class _ClientSheetState extends State<_ClientSheet> {
           phone: phone.text,
           comment: comment.text,
         );
+        if (mounted) Navigator.pop(context, clientId);
+        return;
       } else {
         await widget.repository.updateClient(
           clientId: widget.initial!.id,

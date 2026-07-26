@@ -182,15 +182,6 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
     )
     for entity_type, model, fields in specs:
         for item in db.scalars(select(model).order_by(model.id)):
-            exists = db.scalar(
-                select(MobileSyncRecord.id).where(
-                    MobileSyncRecord.organization_id == organization_id,
-                    MobileSyncRecord.entity_type == entity_type,
-                    MobileSyncRecord.entity_id == str(item.id),
-                )
-            )
-            if exists is not None:
-                continue
             payload = _mobile_payload(item, fields)
             if entity_type == "material":
                 payload["is_active"] = payload.pop("active")
@@ -202,27 +193,51 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
             elif entity_type == "inventory_transaction":
                 payload["occurred_at"] = item.created_at.isoformat()
                 payload["extra_work_id"] = None
+                if (
+                    _value(item.operation_type) == "TRANSFER_OUT"
+                    and item.counterpart_warehouse_id is not None
+                ):
+                    destination = db.get(Warehouse, item.counterpart_warehouse_id)
+                    payload["provider_id"] = (
+                        str(destination.provider_id)
+                        if destination is not None
+                        and destination.provider_id is not None
+                        else None
+                    )
             elif entity_type == "finance_transaction":
                 payload["occurred_at"] = item.created_at.isoformat()
             elif entity_type == "expense":
                 payload["description"] = item.comment or _value(item.category)
                 payload["expense_date"] = item.created_at.date().isoformat()
-            record = MobileSyncRecord(
-                organization_id=organization_id,
-                entity_type=entity_type,
-                entity_id=str(item.id),
-                payload=payload,
-                version=1,
+            record = db.scalar(
+                select(MobileSyncRecord).where(
+                    MobileSyncRecord.organization_id == organization_id,
+                    MobileSyncRecord.entity_type == entity_type,
+                    MobileSyncRecord.entity_id == str(item.id),
+                )
             )
-            db.add(record)
-            db.flush()
+            if record is None:
+                record = MobileSyncRecord(
+                    organization_id=organization_id,
+                    entity_type=entity_type,
+                    entity_id=str(item.id),
+                    payload=payload,
+                    version=1,
+                )
+                db.add(record)
+                db.flush()
+            elif record.payload == payload:
+                continue
+            else:
+                record.payload = payload
+                record.version += 1
             db.add(MobileSyncChange(
                 organization_id=organization_id,
                 record_id=record.id,
                 entity_type=entity_type,
                 entity_id=str(item.id),
                 operation="upsert",
-                version=1,
+                version=record.version,
             ))
 
 

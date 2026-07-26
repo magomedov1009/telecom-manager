@@ -3066,25 +3066,44 @@ class LocalRepository {
     final orgId = await organizationId;
     final rows = await db.rawQuery(
       '''
+      WITH debt_movements AS (
+        SELECT transaction_row.warehouse_id,
+               transaction_row.material_id,
+               transaction_row.provider_id AS debtor_id,
+               -transaction_row.quantity AS quantity
+        FROM inventory_transactions transaction_row
+        WHERE transaction_row.organization_id = ?
+          AND transaction_row.deleted_at IS NULL
+          AND transaction_row.operation_type IN ('CONNECTION', 'ADJUSTMENT')
+          AND transaction_row.provider_id IS NOT NULL
+        UNION ALL
+        SELECT transaction_row.warehouse_id,
+               transaction_row.material_id,
+               destination.provider_id AS debtor_id,
+               -transaction_row.quantity AS quantity
+        FROM inventory_transactions transaction_row
+        JOIN warehouses destination
+          ON destination.id = transaction_row.counterpart_warehouse_id
+        WHERE transaction_row.organization_id = ?
+          AND transaction_row.deleted_at IS NULL
+          AND transaction_row.operation_type = 'TRANSFER_OUT'
+          AND transaction_row.quantity < 0
+      )
       SELECT creditor.id AS creditor_id, creditor.name AS creditor_name,
              debtor.id AS debtor_id, debtor.name AS debtor_name,
              material.id AS material_id, material.name AS material_name,
-             material.unit_name,
-             SUM(-transaction_row.quantity) AS quantity
-      FROM inventory_transactions transaction_row
-      JOIN warehouses source ON source.id = transaction_row.warehouse_id
+             material.unit_name, SUM(debt_movements.quantity) AS quantity
+      FROM debt_movements
+      JOIN warehouses source ON source.id = debt_movements.warehouse_id
       JOIN providers creditor ON creditor.id = source.provider_id
-      JOIN providers debtor ON debtor.id = transaction_row.provider_id
-      JOIN materials material ON material.id = transaction_row.material_id
-      WHERE transaction_row.organization_id = ?
-        AND transaction_row.deleted_at IS NULL
-        AND transaction_row.operation_type IN ('CONNECTION', 'TRANSFER_OUT')
-        AND transaction_row.quantity < 0
-        AND creditor.id <> debtor.id
+      JOIN providers debtor ON debtor.id = debt_movements.debtor_id
+      JOIN materials material ON material.id = debt_movements.material_id
+      WHERE creditor.id <> debtor.id
       GROUP BY creditor.id, creditor.name, debtor.id, debtor.name,
                material.id, material.name, material.unit_name
+      HAVING ABS(SUM(debt_movements.quantity)) > 0.000001
       ''',
-      [orgId],
+      [orgId, orgId],
     );
     final net = <String, ({double amount, Map<String, Object?> row})>{};
     for (final row in rows) {
