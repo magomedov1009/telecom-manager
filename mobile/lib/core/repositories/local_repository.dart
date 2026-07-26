@@ -255,6 +255,46 @@ class ExtraWorkItem {
   final String? comment;
 }
 
+class ExtraWorkEditData {
+  const ExtraWorkEditData({
+    required this.providerId,
+    required this.workTypeId,
+    required this.workDate,
+    required this.amount,
+    required this.warehouseId,
+    required this.materials,
+    required this.comment,
+  });
+
+  final String providerId;
+  final String workTypeId;
+  final DateTime workDate;
+  final double amount;
+  final String? warehouseId;
+  final Map<String, double> materials;
+  final String? comment;
+}
+
+class ExpenseEditData {
+  const ExpenseEditData({
+    required this.providerId,
+    required this.category,
+    required this.description,
+    required this.amount,
+    required this.paidBy,
+    required this.expenseDate,
+    required this.comment,
+  });
+
+  final String providerId;
+  final String category;
+  final String description;
+  final double amount;
+  final String paidBy;
+  final DateTime expenseDate;
+  final String? comment;
+}
+
 class ReportSummary {
   const ReportSummary({
     required this.connections,
@@ -2259,6 +2299,355 @@ class LocalRepository {
           ),
         )
         .toList();
+  }
+
+  Future<ExtraWorkEditData> extraWorkEditData(String extraWorkId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'extra_works',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [extraWorkId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw ArgumentError('Дополнительная работа не найдена');
+    }
+    final row = rows.single;
+    final usages = await db.query(
+      'extra_work_materials',
+      columns: ['material_id', 'quantity'],
+      where: 'extra_work_id = ? AND deleted_at IS NULL',
+      whereArgs: [extraWorkId],
+    );
+    return ExtraWorkEditData(
+      providerId: row['provider_id']! as String,
+      workTypeId: row['work_type_id']! as String,
+      workDate: DateTime.parse(row['work_date']! as String),
+      amount: (row['amount']! as num).toDouble(),
+      warehouseId: row['warehouse_id'] as String?,
+      materials: {
+        for (final usage in usages)
+          usage['material_id']! as String: (usage['quantity']! as num)
+              .toDouble(),
+      },
+      comment: row['comment'] as String?,
+    );
+  }
+
+  Future<ExpenseEditData> expenseEditData(String expenseId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'expenses',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [expenseId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Расход не найден');
+    final row = rows.single;
+    return ExpenseEditData(
+      providerId: row['provider_id']! as String,
+      category: row['category']! as String,
+      description: row['description']! as String,
+      amount: (row['amount']! as num).toDouble(),
+      paidBy: row['paid_by']! as String,
+      expenseDate: DateTime.parse(row['expense_date']! as String),
+      comment: row['comment'] as String?,
+    );
+  }
+
+  Future<void> updateExpense({
+    required String expenseId,
+    required String providerId,
+    required String category,
+    required String description,
+    required double amount,
+    required String paidBy,
+    required DateTime expenseDate,
+    String? comment,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Сумма должна быть больше нуля');
+    if (description.trim().isEmpty) {
+      throw ArgumentError('Описание обязательно');
+    }
+    if (!{'INSTALLER', 'OFFICE'}.contains(paidBy)) {
+      throw ArgumentError('Укажите, кто оплатил расход');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'expenses',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Расход не найден');
+      final oldFinance = await transaction.query(
+        'finance_transactions',
+        where: 'expense_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId],
+      );
+      for (final old in oldFinance) {
+        await transaction.update(
+          'finance_transactions',
+          {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+          where: 'id = ?',
+          whereArgs: [old['id']],
+        );
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: old['id']! as String,
+          operation: 'delete',
+          payload: {...old, 'deleted_at': now},
+          now: now,
+        );
+      }
+      final expenseRow = <String, Object?>{
+        ...rows.single,
+        'provider_id': providerId,
+        'category': category,
+        'description': description.trim(),
+        'amount': amount,
+        'paid_by': paidBy,
+        'expense_date': expenseDate.toIso8601String().substring(0, 10),
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'expenses',
+        expenseRow,
+        where: 'id = ?',
+        whereArgs: [expenseId],
+      );
+      await _queueRow(transaction, orgId, 'expense', expenseRow, now);
+      final financeRow = <String, Object?>{
+        'id': _uuid.v7(),
+        'organization_id': orgId,
+        'provider_id': providerId,
+        'expense_id': expenseId,
+        'transaction_type': 'EXPENSE',
+        'amount': -amount,
+        'comment': description.trim(),
+        'occurred_at': expenseDate.toUtc().toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
+        'version': 1,
+        'sync_state': 'pending',
+      };
+      await transaction.insert('finance_transactions', financeRow);
+      await _queueRow(
+        transaction,
+        orgId,
+        'finance_transaction',
+        financeRow,
+        now,
+      );
+    });
+  }
+
+  Future<void> updateExtraWork({
+    required String extraWorkId,
+    required String providerId,
+    required String workTypeId,
+    required DateTime workDate,
+    required double amount,
+    String? warehouseId,
+    List<ConnectionMaterialInput> materials = const [],
+    String? comment,
+  }) async {
+    if (amount < 0) {
+      throw ArgumentError('Стоимость не может быть отрицательной');
+    }
+    if (materials.any((item) => item.quantity <= 0)) {
+      throw ArgumentError('Количество материала должно быть больше нуля');
+    }
+    if (materials.isNotEmpty && warehouseId == null) {
+      throw ArgumentError('Выберите склад для списания');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'extra_works',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        throw ArgumentError('Дополнительная работа не найдена');
+      }
+      final oldWork = rows.single;
+      final oldUsages = await transaction.query(
+        'extra_work_materials',
+        where: 'extra_work_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId],
+      );
+      final oldWarehouseId = oldWork['warehouse_id'] as String?;
+      if (oldUsages.isNotEmpty && oldWarehouseId == null) {
+        throw StateError('У дополнительной работы не указан склад');
+      }
+      for (final usage in oldUsages) {
+        final reversal = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': oldWarehouseId,
+          'provider_id': oldWork['provider_id'],
+          'material_id': usage['material_id'],
+          'extra_work_id': extraWorkId,
+          'operation_type': 'RETURN',
+          'quantity': (usage['quantity']! as num).toDouble(),
+          'comment': 'Пересчёт дополнительной работы',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', reversal);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          reversal,
+          now,
+        );
+      }
+      for (final table in ['extra_work_materials', 'finance_transactions']) {
+        final oldRows = await transaction.query(
+          table,
+          where: 'extra_work_id = ? AND deleted_at IS NULL',
+          whereArgs: [extraWorkId],
+        );
+        for (final old in oldRows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [old['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: table == 'extra_work_materials'
+                ? 'extra_work_material'
+                : 'finance_transaction',
+            entityId: old['id']! as String,
+            operation: 'delete',
+            payload: {...old, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+      for (final material in materials) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId!,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
+          throw StateError('Недостаточно материала на выбранном складе');
+        }
+      }
+      final workRow = <String, Object?>{
+        ...oldWork,
+        'provider_id': providerId,
+        'work_type_id': workTypeId,
+        'warehouse_id': warehouseId,
+        'work_date': workDate.toIso8601String().substring(0, 10),
+        'amount': amount,
+        'installer_amount': amount,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (oldWork['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'extra_works',
+        workRow,
+        where: 'id = ?',
+        whereArgs: [extraWorkId],
+      );
+      await _queueRow(transaction, orgId, 'extra_work', workRow, now);
+      for (final material in materials) {
+        final usageRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'extra_work_id': extraWorkId,
+          'material_id': material.materialId,
+          'quantity': material.quantity,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        final inventoryRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': providerId,
+          'material_id': material.materialId,
+          'extra_work_id': extraWorkId,
+          'operation_type': 'WRITE_OFF',
+          'quantity': -material.quantity,
+          'comment': 'Допработа',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('extra_work_materials', usageRow);
+        await transaction.insert('inventory_transactions', inventoryRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'extra_work_material',
+          usageRow,
+          now,
+        );
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          inventoryRow,
+          now,
+        );
+      }
+      if (amount > 0) {
+        final financeRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'extra_work_id': extraWorkId,
+          'transaction_type': 'EXTRA_WORK',
+          'accrual_to': 'INSTALLER',
+          'amount': amount,
+          'comment': 'Допработа: офис должен монтажнику',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', financeRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'finance_transaction',
+          financeRow,
+          now,
+        );
+      }
+    });
   }
 
   Future<void> deleteExtraWork(String extraWorkId) async {

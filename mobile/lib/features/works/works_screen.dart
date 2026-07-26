@@ -99,6 +99,52 @@ class _WorksScreenState extends State<WorksScreen> {
     }
   }
 
+  Future<void> editExtraWork(ExtraWorkItem item) async {
+    try {
+      final initial = await widget.repository.extraWorkEditData(item.id);
+      if (!mounted) return;
+      final saved = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => _ExtraWorkSheet(
+          repository: widget.repository,
+          editId: item.id,
+          initial: initial,
+        ),
+      );
+      if (saved == true) reload();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> editExpense(ExpenseItem item) async {
+    try {
+      final initial = await widget.repository.expenseEditData(item.id);
+      if (!mounted) return;
+      final saved = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => _ExpenseSheet(
+          repository: widget.repository,
+          editId: item.id,
+          initial: initial,
+        ),
+      );
+      if (saved == true) reload();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -172,11 +218,18 @@ class _WorksScreenState extends State<WorksScreen> {
                               PopupMenuButton<String>(
                                 tooltip: 'Действия',
                                 onSelected: (value) {
+                                  if (value == 'edit') {
+                                    editExtraWork(item);
+                                  }
                                   if (value == 'delete') {
                                     deleteExtraWork(item);
                                   }
                                 },
                                 itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Редактировать'),
+                                  ),
                                   PopupMenuItem(
                                     value: 'delete',
                                     child: Text('Удалить'),
@@ -210,9 +263,14 @@ class _WorksScreenState extends State<WorksScreen> {
                             PopupMenuButton<String>(
                               tooltip: 'Действия',
                               onSelected: (value) {
+                                if (value == 'edit') editExpense(item);
                                 if (value == 'delete') deleteExpense(item);
                               },
                               itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Редактировать'),
+                                ),
                                 PopupMenuItem(
                                   value: 'delete',
                                   child: Text('Удалить'),
@@ -250,8 +308,10 @@ class _WorksScreenState extends State<WorksScreen> {
 }
 
 class _ExtraWorkSheet extends StatefulWidget {
-  const _ExtraWorkSheet({required this.repository});
+  const _ExtraWorkSheet({required this.repository, this.editId, this.initial});
   final LocalRepository repository;
+  final String? editId;
+  final ExtraWorkEditData? initial;
   @override
   State<_ExtraWorkSheet> createState() => _ExtraWorkSheetState();
 }
@@ -262,6 +322,20 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
   final comment = TextEditingController();
   String? providerId, typeId, warehouseId, materialId, error;
   bool saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    if (initial == null) return;
+    providerId = initial.providerId;
+    typeId = initial.workTypeId;
+    warehouseId = initial.warehouseId;
+    materialId = initial.materials.keys.firstOrNull;
+    amount.text = initial.amount.toString();
+    quantity.text = initial.materials.values.firstOrNull?.toString() ?? '';
+    comment.text = initial.comment ?? '';
+  }
 
   @override
   void dispose() {
@@ -301,8 +375,10 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Новая допработа',
+                Text(
+                  widget.editId == null
+                      ? 'Новая допработа'
+                      : 'Редактирование допработы',
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 16),
@@ -408,17 +484,31 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
     });
     try {
       final qty = parse(quantity.text);
-      await widget.repository.addExtraWork(
-        providerId: providerId!,
-        workTypeId: typeId!,
-        workDate: DateTime.now(),
-        amount: parse(amount.text),
-        warehouseId: qty > 0 ? warehouseId : null,
-        materials: qty > 0 && materialId != null
-            ? [ConnectionMaterialInput(materialId: materialId!, quantity: qty)]
-            : const [],
-        comment: comment.text,
-      );
+      final materials = qty > 0 && materialId != null
+          ? [ConnectionMaterialInput(materialId: materialId!, quantity: qty)]
+          : const <ConnectionMaterialInput>[];
+      if (widget.editId == null) {
+        await widget.repository.addExtraWork(
+          providerId: providerId!,
+          workTypeId: typeId!,
+          workDate: DateTime.now(),
+          amount: parse(amount.text),
+          warehouseId: qty > 0 ? warehouseId : null,
+          materials: materials,
+          comment: comment.text,
+        );
+      } else {
+        await widget.repository.updateExtraWork(
+          extraWorkId: widget.editId!,
+          providerId: providerId!,
+          workTypeId: typeId!,
+          workDate: widget.initial!.workDate,
+          amount: parse(amount.text),
+          warehouseId: qty > 0 ? warehouseId : null,
+          materials: materials,
+          comment: comment.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() {
@@ -433,8 +523,10 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
 }
 
 class _ExpenseSheet extends StatefulWidget {
-  const _ExpenseSheet({required this.repository});
+  const _ExpenseSheet({required this.repository, this.editId, this.initial});
   final LocalRepository repository;
+  final String? editId;
+  final ExpenseEditData? initial;
   @override
   State<_ExpenseSheet> createState() => _ExpenseSheetState();
 }
@@ -446,6 +538,20 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
   String? providerId, error;
   String category = 'other', paidBy = 'INSTALLER';
   bool saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final initial = widget.initial;
+    if (initial == null) return;
+    providerId = initial.providerId;
+    category = initial.category;
+    paidBy = initial.paidBy;
+    description.text = initial.description;
+    amount.text = initial.amount.toString();
+    comment.text = initial.comment ?? '';
+  }
+
   @override
   void dispose() {
     description.dispose();
@@ -473,8 +579,10 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Новый расход',
+              Text(
+                widget.editId == null
+                    ? 'Новый расход'
+                    : 'Редактирование расхода',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 16),
@@ -582,15 +690,28 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
       error = null;
     });
     try {
-      await widget.repository.addExpense(
-        providerId: providerId!,
-        category: category,
-        description: description.text,
-        amount: value,
-        paidBy: paidBy,
-        expenseDate: DateTime.now(),
-        comment: comment.text,
-      );
+      if (widget.editId == null) {
+        await widget.repository.addExpense(
+          providerId: providerId!,
+          category: category,
+          description: description.text,
+          amount: value,
+          paidBy: paidBy,
+          expenseDate: DateTime.now(),
+          comment: comment.text,
+        );
+      } else {
+        await widget.repository.updateExpense(
+          expenseId: widget.editId!,
+          providerId: providerId!,
+          category: category,
+          description: description.text,
+          amount: value,
+          paidBy: paidBy,
+          expenseDate: widget.initial!.expenseDate,
+          comment: comment.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() {

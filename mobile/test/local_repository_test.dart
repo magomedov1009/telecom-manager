@@ -388,6 +388,36 @@ void main() {
     expect(await repository.expenses(), isEmpty);
   });
 
+  test('editing expense atomically recalculates finance', () async {
+    final provider = (await repository.providers()).first;
+    await repository.addExpense(
+      providerId: provider.id,
+      category: 'fuel',
+      description: 'Бензин',
+      amount: 500,
+      paidBy: 'INSTALLER',
+      expenseDate: DateTime(2026, 7, 26),
+    );
+    final expense = (await repository.expenses()).single;
+
+    await repository.updateExpense(
+      expenseId: expense.id,
+      providerId: provider.id,
+      category: 'tools',
+      description: 'Инструмент',
+      amount: 300,
+      paidBy: 'OFFICE',
+      expenseDate: DateTime(2026, 7, 27),
+    );
+
+    final summary = await repository.financeSummary();
+    expect(summary.officeOwesMe, 0);
+    expect(summary.availableCash, 0);
+    final changed = (await repository.expenses()).single;
+    expect(changed.description, 'Инструмент');
+    expect(changed.amount, 300);
+  });
+
   test(
     'extra work atomically writes off stock and accrues installer income',
     () async {
@@ -455,6 +485,48 @@ void main() {
       expect(await repository.extraWorks(), isEmpty);
     },
   );
+
+  test('editing extra work atomically recalculates stock and income', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    final workType = (await repository.extraWorkTypes()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 8,
+    );
+    await repository.addExtraWork(
+      providerId: provider.id,
+      workTypeId: workType.id,
+      workDate: DateTime(2026, 7, 27),
+      amount: 700,
+      warehouseId: warehouse.id,
+      materials: [
+        ConnectionMaterialInput(materialId: material.id, quantity: 3),
+      ],
+    );
+    final work = (await repository.extraWorks()).single;
+
+    await repository.updateExtraWork(
+      extraWorkId: work.id,
+      providerId: provider.id,
+      workTypeId: workType.id,
+      workDate: DateTime(2026, 7, 28),
+      amount: 400,
+      warehouseId: warehouse.id,
+      materials: [
+        ConnectionMaterialInput(materialId: material.id, quantity: 1),
+      ],
+    );
+
+    final balance = (await repository.materialBalancesForWarehouse(
+      warehouse.id,
+    )).singleWhere((item) => item.materialId == material.id);
+    expect(balance.quantity, 7);
+    expect((await repository.financeSummary()).officeOwesMe, 400);
+    expect((await repository.extraWorks()).single.amount, 400);
+  });
 
   test(
     'catalog additions are queued and duplicate names are rejected',
