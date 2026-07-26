@@ -100,6 +100,21 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
+  test('server URL removes website pages and API suffixes', () {
+    expect(
+      SyncService.normalizeServerUrl('http://2.26.84.53:8000/dashboard'),
+      'http://2.26.84.53:8000',
+    );
+    expect(
+      SyncService.normalizeServerUrl('2.26.84.53:8000/api/mobile/login'),
+      'http://2.26.84.53:8000',
+    );
+    expect(
+      SyncService.normalizeServerUrl('https://example.test/'),
+      'https://example.test',
+    );
+  });
+
   test(
     'connect creates isolated server workspace and acknowledges queue',
     () async {

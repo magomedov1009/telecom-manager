@@ -98,8 +98,28 @@ class SyncService {
   final http.Client client;
   final TokenStore tokenStore;
 
+  static String normalizeServerUrl(String value) {
+    var normalized = value.trim();
+    if (normalized.isEmpty) return normalized;
+    if (!normalized.startsWith('http://') &&
+        !normalized.startsWith('https://')) {
+      normalized = 'http://$normalized';
+    }
+    normalized = normalized.replaceFirst(
+      RegExp(r'/(?:dashboard|login)(?:/.*)?$', caseSensitive: false),
+      '',
+    );
+    normalized = normalized.replaceFirst(
+      RegExp(r'/api/mobile(?:/.*)?$', caseSensitive: false),
+      '',
+    );
+    return normalized.replaceAll(RegExp(r'/+$'), '');
+  }
+
+  String get normalizedServerUrl => normalizeServerUrl(serverUrl);
+
   Uri endpoint(String path, [Map<String, String>? query]) => Uri.parse(
-    '${serverUrl.trim().replaceAll(RegExp(r'/+$'), '')}/api/mobile$path',
+    '$normalizedServerUrl/api/mobile$path',
   ).replace(queryParameters: query);
 
   Future<ServerConnection> connect({
@@ -124,7 +144,7 @@ class SyncService {
     final body = jsonDecode(response.body) as Map<String, Object?>;
     await tokenStore.write(body['token']! as String);
     await repository.bindRemoteOrganization(
-      serverUrl: serverUrl,
+      serverUrl: normalizedServerUrl,
       remoteOrganizationId: '${body['organization_id']}',
       organizationName: body['organization_name']! as String,
       username: (body['username'] as String?) ?? username.trim(),
@@ -225,7 +245,7 @@ class SyncService {
   Future<SyncResult> synchronize() async {
     final token = await tokenStore.read();
     if (token == null) throw StateError('Сначала подключитесь к серверу');
-    if (!await repository.syncTargetMatches(serverUrl)) {
+    if (!await repository.syncTargetMatches(normalizedServerUrl)) {
       throw StateError(
         'Выбранная организация не связана с этим подключением. '
         'Подключите устройство заново.',

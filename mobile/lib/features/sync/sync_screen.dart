@@ -259,8 +259,15 @@ class _SyncScreenState extends State<SyncScreen> {
       statusMessage = null;
     });
     try {
+      final normalizedUrl = SyncService.normalizeServerUrl(
+        serverController.text,
+      );
+      if (normalizedUrl.isEmpty) {
+        throw StateError('Укажите адрес сервера');
+      }
+      serverController.text = normalizedUrl;
       final preferences = await SharedPreferences.getInstance();
-      await preferences.setString('server_url', serverController.text.trim());
+      await preferences.setString('server_url', normalizedUrl);
       var connection = await service().connect(
         username: usernameController.text,
         password: passwordController.text,
