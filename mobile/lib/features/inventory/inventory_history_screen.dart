@@ -17,6 +17,10 @@ class _InventoryHistoryScreenState extends State<InventoryHistoryScreen> {
   String? warehouseId;
   String? materialId;
   String? operationType;
+  String? itemType;
+  DateTime? dateFrom;
+  DateTime? dateTo;
+  final search = TextEditingController();
 
   static const operationLabels = {
     'RECEIPT': 'Приход',
@@ -45,15 +49,109 @@ class _InventoryHistoryScreenState extends State<InventoryHistoryScreen> {
         warehouseId: warehouseId,
         materialId: materialId,
         operationType: operationType,
+        itemType: itemType,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        search: search.text,
       ),
     );
   }
 
   @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  Future<void> selectDate({required bool from}) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: from
+          ? (dateFrom ?? dateTo ?? DateTime.now())
+          : (dateTo ?? dateFrom ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+    );
+    if (selected == null) return;
+    setState(() {
+      if (from) {
+        dateFrom = selected;
+        if (dateTo != null && selected.isAfter(dateTo!)) dateTo = selected;
+      } else {
+        dateTo = selected;
+        if (dateFrom != null && selected.isBefore(dateFrom!)) {
+          dateFrom = selected;
+        }
+      }
+    });
+    reload();
+  }
+
+  void resetFilters() {
+    search.clear();
+    warehouseId = null;
+    materialId = null;
+    operationType = null;
+    itemType = null;
+    dateFrom = null;
+    dateTo = null;
+    reload();
+  }
+
+  String shortDate(DateTime? value) => value == null
+      ? 'не выбрана'
+      : '${value.day.toString().padLeft(2, '0')}.'
+            '${value.month.toString().padLeft(2, '0')}.${value.year}';
+
+  @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('История склада')),
+    appBar: AppBar(
+      title: const Text('История склада'),
+      actions: [
+        IconButton(
+          tooltip: 'Сбросить фильтры',
+          onPressed: resetFilters,
+          icon: const Icon(Icons.filter_alt_off_outlined),
+        ),
+      ],
+    ),
     body: Column(
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: TextField(
+            controller: search,
+            decoration: const InputDecoration(
+              labelText: 'Поиск',
+              hintText: 'Материал, склад или комментарий',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (_) => reload(),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => selectDate(from: true),
+                  icon: const Icon(Icons.date_range_outlined),
+                  label: Text('С ${shortDate(dateFrom)}'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => selectDate(from: false),
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text('По ${shortDate(dateTo)}'),
+                ),
+              ),
+            ],
+          ),
+        ),
         FutureBuilder<(List<LookupItem>, List<LookupItem>)>(
           future: options,
           builder: (context, snapshot) {
@@ -90,6 +188,18 @@ class _InventoryHistoryScreenState extends State<InventoryHistoryScreen> {
                         .toList(),
                     onChanged: (value) {
                       operationType = value;
+                      reload();
+                    },
+                  ),
+                  _filter(
+                    label: 'Тип позиции',
+                    value: itemType,
+                    items: const [
+                      LookupItem('MATERIAL', 'Материалы'),
+                      LookupItem('EQUIPMENT', 'Оборудование'),
+                    ],
+                    onChanged: (value) {
+                      itemType = value;
                       reload();
                     },
                   ),
@@ -156,6 +266,7 @@ class _InventoryHistoryScreenState extends State<InventoryHistoryScreen> {
   }) => SizedBox(
     width: 180,
     child: DropdownButtonFormField<String>(
+      key: ValueKey('$label-$value'),
       initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(

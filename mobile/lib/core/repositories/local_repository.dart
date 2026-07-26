@@ -938,9 +938,27 @@ class LocalRepository {
     String? warehouseId,
     String? materialId,
     String? operationType,
+    String? itemType,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String search = '',
   }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final rows = await db.rawQuery(
       '''
       SELECT movement.operation_type, movement.quantity, movement.occurred_at,
@@ -953,11 +971,22 @@ class LocalRepository {
         ${warehouseId == null ? '' : 'AND movement.warehouse_id = ?'}
         ${materialId == null ? '' : 'AND movement.material_id = ?'}
         ${operationType == null ? '' : 'AND movement.operation_type = ?'}
+        ${itemType == null ? '' : 'AND material.item_type = ?'}
+        ${from == null ? '' : 'AND movement.occurred_at >= ?'}
+        ${toExclusive == null ? '' : 'AND movement.occurred_at < ?'}
       ORDER BY movement.occurred_at DESC, movement.created_at DESC
       ''',
-      [orgId, ?warehouseId, ?materialId, ?operationType],
+      [
+        orgId,
+        ?warehouseId,
+        ?materialId,
+        ?operationType,
+        ?itemType,
+        ?from,
+        ?toExclusive,
+      ],
     );
-    return rows
+    final result = rows
         .map(
           (row) => InventoryHistoryItem(
             operationType: row['operation_type']! as String,
@@ -967,6 +996,17 @@ class LocalRepository {
             occurredAt: DateTime.parse(row['occurred_at']! as String),
             comment: row['comment'] as String?,
           ),
+        )
+        .toList();
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (item) =>
+              item.materialName.toLowerCase().contains(normalized) ||
+              item.warehouseName.toLowerCase().contains(normalized) ||
+              item.operationType.toLowerCase().contains(normalized) ||
+              (item.comment?.toLowerCase().contains(normalized) ?? false),
         )
         .toList();
   }

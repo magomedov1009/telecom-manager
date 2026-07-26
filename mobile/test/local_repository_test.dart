@@ -76,6 +76,7 @@ void main() {
       materialId: material.id,
       operationType: 'WRITE_OFF',
       quantity: 3,
+      comment: 'Повреждённый кабель',
     );
     await repository.addInventoryOperation(
       warehouseId: warehouse.id,
@@ -112,9 +113,28 @@ void main() {
       warehouseId: warehouse.id,
       materialId: material.id,
       operationType: 'WRITE_OFF',
+      dateFrom: DateTime.now(),
+      dateTo: DateTime.now(),
+      search: 'повреждённый',
     );
     expect(writeOffs, hasLength(1));
     expect(writeOffs.single.quantity, -3);
+    final itemType = (await repository.inventoryBalances())
+        .singleWhere((item) => item.materialId == material.id)
+        .itemType;
+    expect(
+      await repository.inventoryHistory(
+        operationType: 'WRITE_OFF',
+        itemType: itemType,
+      ),
+      hasLength(1),
+    );
+    expect(
+      await repository.inventoryHistory(
+        dateFrom: DateTime.now().add(const Duration(days: 1)),
+      ),
+      isEmpty,
+    );
   });
 
   test(
