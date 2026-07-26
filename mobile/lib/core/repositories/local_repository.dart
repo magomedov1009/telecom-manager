@@ -506,6 +506,42 @@ class LocalRepository {
     );
   }
 
+  Future<UserItem?> currentUser() async {
+    final db = await database.instance;
+    final setting = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+      limit: 1,
+    );
+    if (setting.isEmpty) return null;
+    final rows = await db.query(
+      'users',
+      where: 'id = ? AND organization_id = ? AND is_active = 1',
+      whereArgs: [setting.single['value'], await organizationId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.single;
+    return UserItem(
+      id: row['id']! as String,
+      username: row['username']! as String,
+      fullName: row['full_name']! as String,
+      role: row['role']! as String,
+      isActive: true,
+    );
+  }
+
+  Future<void> logout() async {
+    final db = await database.instance;
+    await db.delete(
+      'app_settings',
+      where: 'key = ?',
+      whereArgs: ['current_user_id'],
+    );
+  }
+
   Future<DashboardSummary> dashboardSummary() async {
     final db = await database.instance;
     final orgId = await organizationId;
