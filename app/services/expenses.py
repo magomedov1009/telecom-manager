@@ -156,6 +156,8 @@ def build_expenses_query(filters: dict, scope: AccessScope | None = None):
         query = query.where(Expense.created_at >= datetime.combine(filters["date_from"], time.min))
     if filters.get("date_to"):
         query = query.where(Expense.created_at <= datetime.combine(filters["date_to"], time.max))
+    if filters.get("provider_id"):
+        query = query.where(Expense.provider_id == int(filters["provider_id"]))
     return query.order_by(Expense.created_at.desc(), Expense.id.desc())
 
 

@@ -15,7 +15,7 @@ from app.dependencies.auth import can_open_finance, can_open_reports, get_curren
 from app.models.clients import Client, Connection, ExtraWork, Provider
 from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
-from app.models.inventory import InventoryTransaction, Material
+from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
 from app.services.access import apply_user_scope, get_access_scope
 from app.services.finance import get_finance_stats
@@ -211,7 +211,12 @@ def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None
 
     connections = {
         "total": db.scalar(select(func.count()).select_from(connection_ids_subquery)) or 0,
-        "new_clients": db.scalar(select(func.count()).select_from(apply_user_scope((period_filter(select(Client), Client.created_at, period_data).join(Client.connections).where(Client.provider_id == provider_id) if provider_id else period_filter(select(Client), Client.created_at, period_data).join(Client.connections)), Connection.installer_id, scope).distinct().subquery())) or 0,
+        "new_clients": db.scalar(
+            select(func.count(func.distinct(Connection.client_id))).where(
+                Connection.id.in_(select(connection_ids_subquery.c.id)),
+                Connection.connection_type == ConnectionType.NEW,
+            )
+        ) or 0,
         "reconnects": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.RECONNECT)) or 0,
         "onu_replacements": db.scalar(select(func.count(Connection.id)).where(Connection.id.in_(select(connection_ids_subquery.c.id)), Connection.connection_type == ConnectionType.ONU_REPLACE)) or 0,
     }
@@ -239,7 +244,11 @@ def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None
             balance_query = select(func.coalesce(func.sum(InventoryTransaction.quantity), 0)).where(InventoryTransaction.material_id == item.id)
             balance_query = apply_user_scope(balance_query, InventoryTransaction.user_id, scope)
             if provider_id:
-                balance_query = balance_query.where(InventoryTransaction.provider_id == provider_id)
+                effective_provider_id = func.coalesce(InventoryTransaction.provider_id, Warehouse.provider_id)
+                balance_query = balance_query.join(
+                    Warehouse,
+                    Warehouse.id == InventoryTransaction.warehouse_id,
+                ).where(effective_provider_id == provider_id)
             balance = scalar_decimal(db, balance_query)
             spent_query = period_filter(
                     select(func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0)).where(InventoryTransaction.material_id == item.id, InventoryTransaction.quantity < 0),
@@ -248,7 +257,11 @@ def build_dashboard_data(db: Session, period_data: dict, provider_id: int | None
                 )
             spent_query = apply_user_scope(spent_query, InventoryTransaction.user_id, scope)
             if provider_id:
-                spent_query = spent_query.where(InventoryTransaction.provider_id == provider_id)
+                effective_provider_id = func.coalesce(InventoryTransaction.provider_id, Warehouse.provider_id)
+                spent_query = spent_query.join(
+                    Warehouse,
+                    Warehouse.id == InventoryTransaction.warehouse_id,
+                ).where(effective_provider_id == provider_id)
             spent = scalar_decimal(db, spent_query)
             rows.append({"label": item.name, "balance": balance, "spent": spent, "unit": item.unit_name or item.unit.value})
         return rows

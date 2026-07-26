@@ -114,6 +114,7 @@ def finance_page(
     filters = normalize_filters(period_from, period_to, transaction_type, parse_query_int(user_id), search, parse_query_int(provider_id))
     data = get_finance_page_data(db, filters=filters, page=page, current_user=current_user)
     expense_filters = normalize_expense_filters(search, None, period_from, period_to)
+    expense_filters["provider_id"] = parse_query_int(provider_id)
     object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=page, current_user=current_user))
     data.filters["period"] = active_period
     template = "finance/_module.html" if request.headers.get("HX-Request") else "finance/index.html"
@@ -157,6 +158,7 @@ def create_finance_operation(
     filters = normalize_filters(None, None, None, None, None)
     data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     expense_filters = normalize_expense_filters(None, None, None, None)
+    expense_filters["provider_id"] = None
     object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1, current_user=current_user))
     data.filters["period"] = "all"
     return render_finance(request, "finance/_module.html", current_user, data)
@@ -202,6 +204,7 @@ def create_finance_expense(
     filters = normalize_filters(None, None, None, None, None)
     data = get_finance_page_data(db, filters=filters, page=1, error=error, success=success, current_user=current_user)
     expense_filters = normalize_expense_filters(None, None, None, None)
+    expense_filters["provider_id"] = None
     object.__setattr__(data, "expenses_data", get_expenses_page_data(db, filters=expense_filters, page=1, current_user=current_user))
     data.filters["period"] = "all"
     if not request.headers.get("HX-Request"):

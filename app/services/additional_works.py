@@ -115,6 +115,7 @@ def parse_material_rows(material_ids: list[int], quantities: list[str]) -> list[
 
 
 def create_additional_work(db: Session, *, user: User, provider_id: int, work_date: date, work_type_id: int, amount: str, use_materials: bool, warehouse_id: int | None, material_ids: list[int], material_quantities: list[str], comment: str | None) -> ExtraWork:
+    operation_at = datetime.combine(work_date, time.min)
     provider = db.get(Provider, provider_id)
     if provider is None or not provider.is_active:
         raise AdditionalWorkError("Выберите активного провайдера")
@@ -150,8 +151,8 @@ def create_additional_work(db: Session, *, user: User, provider_id: int, work_da
     db.flush()
     for material_id, quantity in rows:
         db.add(ExtraWorkMaterial(extra_work_id=work.id, material_id=material_id, quantity=quantity, comment=comment))
-        db.add(InventoryTransaction(warehouse_id=warehouse.id, material_id=material_id, user_id=user.id, provider_id=provider.id, operation_type=InventoryTransactionType.WRITE_OFF, quantity=-quantity, comment=f"Допработа #{work.id}"))
+        db.add(InventoryTransaction(warehouse_id=warehouse.id, material_id=material_id, user_id=user.id, provider_id=provider.id, operation_type=InventoryTransactionType.WRITE_OFF, quantity=-quantity, comment=f"Допработа #{work.id}", created_at=operation_at))
     if installer:
-        db.add(FinanceTransaction(extra_work_id=work.id, provider_id=provider.id, user_id=user.id, amount=installer, transaction_type=FinanceTransactionType.EXTRA_WORK, accrual_to=PaidBy.INSTALLER, comment="Допработа: офис должен монтажнику"))
+        db.add(FinanceTransaction(extra_work_id=work.id, provider_id=provider.id, user_id=user.id, amount=installer, transaction_type=FinanceTransactionType.EXTRA_WORK, accrual_to=PaidBy.INSTALLER, comment="Допработа: офис должен монтажнику", created_at=operation_at))
     db.commit()
     return work

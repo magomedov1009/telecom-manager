@@ -38,17 +38,17 @@
   <div class="tab-content">
     <section class="tab-pane fade show active" id="finance-overview">
       <div class="row g-3 mb-4">
-        {% for label, value, icon, color in [
-          ('Получено от клиентов', data.stats.customer_received, 'bi-wallet2', 'primary'),
-          ('Доход монтажника', data.stats.installer_accrued, 'bi-person-check', 'primary'),
-          ('Доход офиса', data.stats.office_accrued, 'bi-building', 'primary'),
-          ('Общие расходы', data.stats.expenses_total, 'bi-receipt', 'danger'),
-          ('Чистая прибыль', data.stats.profit, 'bi-graph-up-arrow', 'success'),
-          ('Офис должен мне', data.stats.office_owes_me, 'bi-arrow-down-circle', 'warning'),
-          ('Я должен офису', data.stats.i_owe_office, 'bi-arrow-up-circle', 'warning'),
-          ('Доступный остаток монтажника', data.stats.available_installer_cash, 'bi-safe2', 'success')
+        {% for label, value, icon, color, hint in [
+          ('Получено от клиентов', data.stats.customer_received, 'bi-wallet2', 'primary', 'За выбранный период'),
+          ('Доход монтажника', data.stats.installer_accrued, 'bi-person-check', 'primary', 'За выбранный период'),
+          ('Доход офиса', data.stats.office_accrued, 'bi-building', 'primary', 'За выбранный период'),
+          ('Общие расходы', data.stats.expenses_total, 'bi-receipt', 'danger', 'За выбранный период'),
+          ('Чистая прибыль', data.stats.profit, 'bi-graph-up-arrow', 'success', 'За выбранный период'),
+          ('Офис должен мне', data.stats.office_owes_me, 'bi-arrow-down-circle', 'warning', 'На конец выбранного периода'),
+          ('Я должен офису', data.stats.i_owe_office, 'bi-arrow-up-circle', 'warning', 'На конец выбранного периода'),
+          ('Доступный остаток монтажника', data.stats.available_installer_cash, 'bi-safe2', 'success', 'За выбранный период')
         ] %}
-          <div class="col-md-6 col-xl-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body d-flex justify-content-between align-items-start gap-3"><div><div class="text-secondary small">{{ label }}</div><div class="h3 mb-1 text-{{ color }}">{{ value }}</div><div class="small text-secondary">За выбранный период</div></div><span class="badge text-bg-{{ color }}"><i class="bi {{ icon }}"></i></span></div></div></div>
+          <div class="col-md-6 col-xl-3"><div class="card h-100 border-0 shadow-sm"><div class="card-body d-flex justify-content-between align-items-start gap-3"><div><div class="text-secondary small">{{ label }}</div><div class="h3 mb-1 text-{{ color }}">{{ value }}</div><div class="small text-secondary">{{ hint }}</div></div><span class="badge text-bg-{{ color }}"><i class="bi {{ icon }}"></i></span></div></div></div>
         {% endfor %}
       </div>
     </section>
