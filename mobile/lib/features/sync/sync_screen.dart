@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/repositories/local_repository.dart';
+import '../../core/sync/sync_service.dart';
 import '../catalogs/catalogs_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/organization_users_screen.dart';
@@ -23,7 +24,11 @@ class SyncScreen extends StatefulWidget {
 
 class _SyncScreenState extends State<SyncScreen> {
   final serverController = TextEditingController();
+  final usernameController = TextEditingController();
+  final passwordController = TextEditingController();
   late Future<int> pending;
+  bool busy = false;
+  String? statusMessage;
 
   @override
   void initState() {
@@ -40,6 +45,8 @@ class _SyncScreenState extends State<SyncScreen> {
   @override
   void dispose() {
     serverController.dispose();
+    usernameController.dispose();
+    passwordController.dispose();
     super.dispose();
   }
 
@@ -150,7 +157,7 @@ class _SyncScreenState extends State<SyncScreen> {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Адрес сохраняется локально. Авторизацию и передачу данных подключим после добавления защищённого sync API.',
+                  'Укажите адрес сервера и данные пользователя сайта.',
                   style: TextStyle(color: Colors.black54),
                 ),
                 const SizedBox(height: 16),
@@ -164,22 +171,39 @@ class _SyncScreenState extends State<SyncScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: () async {
-                    final preferences = await SharedPreferences.getInstance();
-                    await preferences.setString(
-                      'server_url',
-                      serverController.text.trim(),
-                    );
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Адрес сервера сохранён')),
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.save_outlined),
-                  label: const Text('Сохранить адрес'),
+                TextField(
+                  controller: usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Логин сайта',
+                    border: OutlineInputBorder(),
+                  ),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Пароль сайта',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: busy ? null : connect,
+                  icon: const Icon(Icons.link),
+                  label: const Text('Подключить устройство'),
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: busy ? null : synchronize,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Синхронизировать сейчас'),
+                ),
+                if (statusMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(statusMessage!),
+                  ),
               ],
             ),
           ),
@@ -188,13 +212,62 @@ class _SyncScreenState extends State<SyncScreen> {
         const Card(
           child: ListTile(
             leading: Icon(Icons.lock_outline),
-            title: Text('Сейчас: только локальный режим'),
+            title: Text('Автономный режим сохраняется'),
             subtitle: Text(
-              'Ни одна запись не отправляется в сеть без готовой авторизации, организации и правил разрешения конфликтов.',
+              'Без интернета записи остаются в очереди и отправляются при следующей синхронизации.',
             ),
           ),
         ),
       ],
     );
+  }
+
+  SyncService service() => SyncService(
+    repository: widget.repository,
+    serverUrl: serverController.text.trim(),
+  );
+
+  Future<void> connect() async {
+    setState(() {
+      busy = true;
+      statusMessage = null;
+    });
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString('server_url', serverController.text.trim());
+      await service().connect(
+        username: usernameController.text,
+        password: passwordController.text,
+        deviceName: 'Android Telecom Manager',
+      );
+      setState(() => statusMessage = 'Устройство подключено');
+    } catch (error) {
+      setState(
+        () => statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> synchronize() async {
+    setState(() {
+      busy = true;
+      statusMessage = null;
+    });
+    try {
+      final result = await service().synchronize();
+      setState(() {
+        statusMessage =
+            'Отправлено: ${result.sent}, получено: ${result.received}, конфликтов: ${result.conflicts}';
+        pending = widget.repository.pendingChanges();
+      });
+    } catch (error) {
+      setState(
+        () => statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 }

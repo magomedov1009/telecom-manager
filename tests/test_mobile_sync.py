@@ -56,6 +56,14 @@ class MobileSyncTest(unittest.TestCase):
         )])
         self.assertEqual(push(request, self.db, self.token)[0].status, "accepted")
         self.assertEqual(push(request, self.db, self.token)[0].status, "duplicate")
+        conflict = PushRequest(changes=[PushItem(
+            entity_type="provider",
+            entity_id="018f0000-0000-7000-8000-000000000001",
+            operation="upsert",
+            version=1,
+            payload={"name": "CHANGED"},
+        )])
+        self.assertEqual(push(conflict, self.db, self.token)[0].status, "conflict")
         first_page = pull(self.db, self.token, cursor=0, limit=200)
         self.assertEqual(len(first_page.changes), 1)
         self.assertEqual(first_page.changes[0].payload["name"], "ELLKO")

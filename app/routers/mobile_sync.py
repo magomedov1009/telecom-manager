@@ -146,11 +146,11 @@ def push(
                 MobileSyncRecord.entity_id == item.entity_id,
             )
         )
-        if record is not None and item.version < record.version:
-            results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="conflict", server_version=record.version))
-            continue
         if record is not None and item.version == record.version and record.payload == item.payload:
             results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="duplicate", server_version=record.version))
+            continue
+        if record is not None and item.version <= record.version:
+            results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="conflict", server_version=record.version))
             continue
         if record is None:
             record = MobileSyncRecord(

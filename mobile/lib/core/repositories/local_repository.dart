@@ -241,6 +241,21 @@ class ReportDetailItem {
   final double value;
 }
 
+class SyncQueueItem {
+  const SyncQueueItem({
+    required this.entityType,
+    required this.entityId,
+    required this.operation,
+    required this.version,
+    required this.payload,
+  });
+  final String entityType;
+  final String entityId;
+  final String operation;
+  final int version;
+  final Map<String, Object?> payload;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -1827,6 +1842,121 @@ class LocalRepository {
           await db.rawQuery('SELECT COUNT(*) FROM sync_queue'),
         ) ??
         0;
+  }
+
+  Future<List<SyncQueueItem>> syncQueue({int limit = 200}) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'sync_queue',
+      where: 'organization_id = ?',
+      whereArgs: [orgId],
+      orderBy: 'created_at',
+      limit: limit,
+    );
+    return rows.map((row) {
+      final payload = Map<String, Object?>.from(
+        jsonDecode(row['payload']! as String) as Map,
+      );
+      return SyncQueueItem(
+        entityType: row['entity_type']! as String,
+        entityId: row['entity_id']! as String,
+        operation: row['operation']! as String,
+        version: (payload['version'] as num?)?.toInt() ?? 1,
+        payload: payload,
+      );
+    }).toList();
+  }
+
+  Future<void> acknowledgeSync(String entityType, String entityId) async {
+    final db = await database.instance;
+    await db.delete(
+      'sync_queue',
+      where: 'entity_type = ? AND entity_id = ?',
+      whereArgs: [entityType, entityId],
+    );
+  }
+
+  Future<void> markSyncError(
+    String entityType,
+    String entityId,
+    String error,
+  ) async {
+    final db = await database.instance;
+    await db.rawUpdate(
+      '''
+      UPDATE sync_queue SET attempts = attempts + 1, last_error = ?
+      WHERE entity_type = ? AND entity_id = ?
+      ''',
+      [error, entityType, entityId],
+    );
+  }
+
+  Future<int> syncCursor() async {
+    final db = await database.instance;
+    final row = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['sync_cursor'],
+      limit: 1,
+    );
+    return row.isEmpty ? 0 : int.tryParse(row.single['value']! as String) ?? 0;
+  }
+
+  Future<void> applyRemoteChanges(
+    List<Map<String, Object?>> changes,
+    int cursor,
+  ) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    const tables = {
+      'provider': 'providers',
+      'providers': 'providers',
+      'warehouse': 'warehouses',
+      'warehouses': 'warehouses',
+      'material': 'materials',
+      'materials': 'materials',
+      'user': 'users',
+      'client': 'clients',
+      'connection': 'connections',
+      'connection_material': 'connection_materials',
+      'inventory_transaction': 'inventory_transactions',
+      'finance_transaction': 'finance_transactions',
+      'extra_work_type': 'extra_work_types',
+      'extra_work_types': 'extra_work_types',
+      'extra_work': 'extra_works',
+      'extra_work_material': 'extra_work_materials',
+      'expense': 'expenses',
+    };
+    await db.transaction((transaction) async {
+      for (final change in changes) {
+        final table = tables[change['entity_type']];
+        if (table == null) continue;
+        final payload = Map<String, Object?>.from(change['payload']! as Map);
+        if (payload.containsKey('organization_id')) {
+          payload['organization_id'] = orgId;
+        }
+        if (change['operation'] == 'delete') {
+          await transaction.update(
+            table,
+            {'deleted_at': DateTime.now().toUtc().toIso8601String()},
+            where: 'id = ?',
+            whereArgs: [change['entity_id']],
+          );
+        } else {
+          await transaction.insert(
+            table,
+            payload,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+      await transaction.insert('app_settings', {
+        'key': 'sync_cursor',
+        'value': cursor.toString(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
   }
 
   Future<void> _seedLocalWorkspace(Database db) async {
