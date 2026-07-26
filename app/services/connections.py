@@ -1,5 +1,5 @@
 ﻿from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 from math import ceil
 from urllib.parse import urlencode
@@ -296,6 +296,7 @@ def add_connection_materials_and_transactions(
     material_rows: list[tuple[int, Decimal]],
     comment: str | None,
 ) -> None:
+    operation_at = datetime.combine(connection.connection_date, time.min)
     for material_id, quantity in material_rows:
         db.add(ConnectionMaterial(connection_id=connection.id, material_id=material_id, quantity=quantity, comment=comment))
         db.add(
@@ -308,11 +309,13 @@ def add_connection_materials_and_transactions(
                 quantity=-quantity,
                 provider_id=connection.client.provider_id,
                 comment=comment,
+                created_at=operation_at,
             )
         )
 
 
 def reverse_connection_materials(db: Session, *, connection: Connection, user: User) -> None:
+    operation_at = datetime.combine(connection.connection_date, time.min)
     transactions = list(
         db.scalars(
             select(InventoryTransaction).where(
@@ -331,7 +334,9 @@ def reverse_connection_materials(db: Session, *, connection: Connection, user: U
                 user_id=user.id,
                 operation_type=InventoryTransactionType.ADJUSTMENT,
                 quantity=abs(transaction.quantity),
+                provider_id=connection.client.provider_id,
                 comment="Возврат списания при редактировании подключения",
+                created_at=operation_at,
             )
         )
     db.execute(delete(ConnectionMaterial).where(ConnectionMaterial.connection_id == connection.id))
@@ -345,6 +350,7 @@ def replace_finance_transaction(
     installer_amount: Decimal,
     office_amount: Decimal,
 ) -> None:
+    operation_at = datetime.combine(connection.connection_date, time.min)
     db.execute(delete(FinanceTransaction).where(FinanceTransaction.connection_id == connection.id))
     if installer_amount != 0:
         db.add(
@@ -356,6 +362,7 @@ def replace_finance_transaction(
                 accrual_to=PaidBy.INSTALLER,
                 provider_id=connection.client.provider_id,
                 comment="Начисление монтажнику",
+                created_at=operation_at,
             )
         )
     if office_amount != 0:
@@ -368,6 +375,7 @@ def replace_finance_transaction(
                 accrual_to=PaidBy.OFFICE,
                 provider_id=connection.client.provider_id,
                 comment="Начисление офису",
+                created_at=operation_at,
             )
         )
 

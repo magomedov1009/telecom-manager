@@ -188,6 +188,14 @@ def get_money_received_query(start: datetime | None = None, end: datetime | None
     return apply_finance_scope(apply_period(query, start, end), scope)
 
 
+def get_customer_received_query(start: datetime | None = None, end: datetime | None = None, scope: AccessScope | None = None):
+    query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
+        FinanceTransaction.amount > 0,
+    )
+    return apply_finance_scope(apply_period(query, start, end), scope)
+
+
 def get_income_query(start: datetime | None = None, end: datetime | None = None, scope: AccessScope | None = None):
     query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type.in_([
@@ -223,8 +231,13 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     provider_id = filters.get("provider_id") if filters else None
     scope = get_access_scope(db, user) if user is not None else None
 
-    today_received = Decimal(db.scalar(get_money_received_query(today_start, today_end, scope)) or 0)
-    month_received = Decimal(db.scalar(get_money_received_query(month_start, None, scope)) or 0)
+    today_received_query = get_money_received_query(today_start, today_end, scope)
+    month_received_query = get_money_received_query(month_start, None, scope)
+    if provider_id:
+        today_received_query = today_received_query.where(FinanceTransaction.provider_id == int(provider_id))
+        month_received_query = month_received_query.where(FinanceTransaction.provider_id == int(provider_id))
+    today_received = Decimal(db.scalar(today_received_query) or 0)
+    month_received = Decimal(db.scalar(month_received_query) or 0)
 
     installer_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type.in_([FinanceTransactionType.CONNECTION, FinanceTransactionType.EXTRA_WORK]),
@@ -263,13 +276,18 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     installer_expenses_query = apply_expense_scope(installer_expenses_query, scope)
     installer_expenses = Decimal(db.scalar(apply_period(installer_expenses_query, period_start, period_end, Expense.created_at)) or 0)
 
+    # Debt is a running balance as of the selected end date. Applying the
+    # period start would hide older unpaid amounts and make a monthly view
+    # report an incorrect current debt.
+    debt_start = None
+
     paid_from_office_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_FROM_OFFICE,
     )
     paid_from_office_query = apply_finance_scope(paid_from_office_query, scope)
     if provider_id:
         paid_from_office_query = paid_from_office_query.where(FinanceTransaction.provider_id == int(provider_id))
-    paid_from_office = Decimal(db.scalar(apply_period(paid_from_office_query, period_start, period_end)) or 0)
+    paid_from_office_balance = Decimal(db.scalar(apply_period(paid_from_office_query, debt_start, period_end)) or 0)
 
     paid_to_office_query = select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
@@ -277,7 +295,18 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     paid_to_office_query = apply_finance_scope(paid_to_office_query, scope)
     if provider_id:
         paid_to_office_query = paid_to_office_query.where(FinanceTransaction.provider_id == int(provider_id))
-    paid_to_office = Decimal(db.scalar(apply_period(paid_to_office_query, period_start, period_end)) or 0)
+    paid_to_office_balance = Decimal(db.scalar(apply_period(paid_to_office_query, debt_start, period_end)) or 0)
+    paid_to_office_period_query = select(func.coalesce(func.sum(func.abs(FinanceTransaction.amount)), 0)).where(
+        FinanceTransaction.transaction_type == FinanceTransactionType.PAYMENT_TO_OFFICE,
+    )
+    paid_to_office_period_query = apply_finance_scope(paid_to_office_period_query, scope)
+    if provider_id:
+        paid_to_office_period_query = paid_to_office_period_query.where(
+            FinanceTransaction.provider_id == int(provider_id)
+        )
+    paid_to_office = Decimal(
+        db.scalar(apply_period(paid_to_office_period_query, period_start, period_end)) or 0
+    )
 
     office_money_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.CONNECTION,
@@ -287,7 +316,7 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     office_money_query = apply_finance_scope(office_money_query, scope)
     if provider_id:
         office_money_query = office_money_query.where(FinanceTransaction.provider_id == int(provider_id))
-    office_money = Decimal(db.scalar(apply_period(office_money_query, period_start, period_end)) or 0)
+    office_money = Decimal(db.scalar(apply_period(office_money_query, debt_start, period_end)) or 0)
 
     adjustments_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.ADJUSTMENT,
@@ -295,7 +324,7 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     adjustments_query = apply_finance_scope(adjustments_query, scope)
     if provider_id:
         adjustments_query = adjustments_query.where(FinanceTransaction.provider_id == int(provider_id))
-    adjustments = Decimal(db.scalar(apply_period(adjustments_query, period_start, period_end)) or 0)
+    adjustments = Decimal(db.scalar(apply_period(adjustments_query, debt_start, period_end)) or 0)
 
     extra_work_installer_accrued_query = select(func.coalesce(func.sum(FinanceTransaction.amount), 0)).where(
         FinanceTransaction.transaction_type == FinanceTransactionType.EXTRA_WORK,
@@ -305,21 +334,38 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
     extra_work_installer_accrued_query = apply_finance_scope(extra_work_installer_accrued_query, scope)
     if provider_id:
         extra_work_installer_accrued_query = extra_work_installer_accrued_query.where(FinanceTransaction.provider_id == int(provider_id))
-    extra_work_installer_accrued = Decimal(db.scalar(apply_period(extra_work_installer_accrued_query, period_start, period_end)) or 0)
+    extra_work_installer_accrued = Decimal(db.scalar(apply_period(extra_work_installer_accrued_query, debt_start, period_end)) or 0)
 
-    office_owes_me_raw = extra_work_installer_accrued + installer_expenses - paid_from_office + adjustments
-    office_owes_me = office_owes_me_raw if office_owes_me_raw > 0 else Decimal("0")
+    debt_installer_expenses_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(
+        Expense.paid_by == PaidBy.INSTALLER,
+    )
+    debt_installer_expenses_query = apply_expense_scope(debt_installer_expenses_query, scope)
+    if provider_id:
+        debt_installer_expenses_query = debt_installer_expenses_query.where(Expense.provider_id == int(provider_id))
+    debt_installer_expenses = Decimal(
+        db.scalar(apply_period(debt_installer_expenses_query, debt_start, period_end, Expense.created_at)) or 0
+    )
 
-    i_owe_office_raw = office_money - paid_to_office
-    i_owe_office = i_owe_office_raw if i_owe_office_raw > 0 else Decimal("0")
+    balance = (
+        extra_work_installer_accrued
+        + debt_installer_expenses
+        - paid_from_office_balance
+        + adjustments
+        - office_money
+        + paid_to_office_balance
+    )
+    office_owes_me = balance if balance > 0 else Decimal("0")
+    i_owe_office = -balance if balance < 0 else Decimal("0")
 
-    balance = office_owes_me - i_owe_office
-
-    customer_received_query = get_money_received_query(period_start, period_end, scope)
+    customer_received_query = get_customer_received_query(period_start, period_end, scope)
     if provider_id:
         customer_received_query = customer_received_query.where(FinanceTransaction.provider_id == int(provider_id))
     customer_received = Decimal(db.scalar(customer_received_query) or 0)
-    available_installer_cash = customer_received - paid_to_office - installer_expenses
+    cash_received_query = get_money_received_query(period_start, period_end, scope)
+    if provider_id:
+        cash_received_query = cash_received_query.where(FinanceTransaction.provider_id == int(provider_id))
+    cash_received = Decimal(db.scalar(cash_received_query) or 0)
+    available_installer_cash = cash_received - paid_to_office - installer_expenses
 
     return FinanceStats(
         today_received=today_received,
@@ -396,6 +442,8 @@ def finance_items_query(filters: dict, transaction_types: list[FinanceTransactio
         query = query.where(FinanceTransaction.created_at >= datetime.combine(filters["date_from"], time.min))
     if filters.get("date_to"):
         query = query.where(FinanceTransaction.created_at <= datetime.combine(filters["date_to"], time.max))
+    if filters.get("provider_id"):
+        query = query.where(FinanceTransaction.provider_id == int(filters["provider_id"]))
     if filters.get("search"):
         pattern = f"%{filters['search']}%"
         query = query.outerjoin(FinanceTransaction.user).where(
@@ -437,6 +485,13 @@ def get_expense_summary(db: Session, filters: dict, user: User | None = None) ->
     office_query = apply_expense_scope(office_query, scope)
     count_query = apply_expense_scope(count_query, scope)
     top_query = apply_expense_scope(top_query, scope)
+    if filters.get("provider_id"):
+        provider_id = int(filters["provider_id"])
+        total_query = total_query.where(Expense.provider_id == provider_id)
+        installer_query = installer_query.where(Expense.provider_id == provider_id)
+        office_query = office_query.where(Expense.provider_id == provider_id)
+        count_query = count_query.where(Expense.provider_id == provider_id)
+        top_query = top_query.where(Expense.provider_id == provider_id)
     total = Decimal(db.scalar(apply_period(total_query, start, end, Expense.created_at)) or 0)
     installer = Decimal(db.scalar(apply_period(installer_query, start, end, Expense.created_at)) or 0)
     office = Decimal(db.scalar(apply_period(office_query, start, end, Expense.created_at)) or 0)
