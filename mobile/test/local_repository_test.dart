@@ -787,6 +787,86 @@ void main() {
     },
   );
 
+  test(
+    'provider and work type updates preserve history and active lists',
+    () async {
+      await repository.addProvider('Новый провайдер', description: 'Описание');
+      var provider = (await repository.providerCatalog()).singleWhere(
+        (item) => item.name == 'Новый провайдер',
+      );
+      await repository.updateProvider(
+        providerId: provider.id,
+        name: 'Обновлённый провайдер',
+        description: 'Новое описание',
+      );
+      await repository.toggleProvider(provider.id);
+      provider = (await repository.providerCatalog()).singleWhere(
+        (item) => item.id == provider.id,
+      );
+      expect(provider.name, 'Обновлённый провайдер');
+      expect(provider.description, 'Новое описание');
+      expect(provider.isActive, isFalse);
+      expect(
+        (await repository.providers()).any((item) => item.id == provider.id),
+        isFalse,
+      );
+
+      await repository.addExtraWorkType(
+        name: 'Настройка',
+        description: 'Первичное описание',
+        defaultPrice: 100,
+        defaultOfficeAmount: 20,
+        requiresMaterials: true,
+      );
+      var workType = (await repository.extraWorkTypeCatalog()).singleWhere(
+        (item) => item.name == 'Настройка',
+      );
+      await repository.updateExtraWorkType(
+        workTypeId: workType.id,
+        name: 'Точная настройка',
+        description: 'Обновлено',
+        defaultPrice: 200,
+        defaultOfficeAmount: 50,
+        requiresMaterials: false,
+        requiresEquipment: true,
+      );
+      await repository.toggleExtraWorkType(workType.id);
+      workType = (await repository.extraWorkTypeCatalog()).singleWhere(
+        (item) => item.id == workType.id,
+      );
+      expect(workType.defaultPrice, 200);
+      expect(workType.defaultOfficeAmount, 50);
+      expect(workType.requiresEquipment, isTrue);
+      expect(workType.isActive, isFalse);
+      expect(
+        (await repository.extraWorkTypes()).any(
+          (item) => item.id == workType.id,
+        ),
+        isFalse,
+      );
+      final queued = await repository.syncQueue();
+      expect(
+        queued
+            .singleWhere(
+              (item) =>
+                  item.entityType == 'provider' && item.entityId == provider.id,
+            )
+            .version,
+        3,
+      );
+      expect(
+        queued
+            .singleWhere(
+              (item) =>
+                  item.entityType == 'extra_work_type' &&
+                  item.entityId == workType.id,
+            )
+            .version,
+        3,
+      );
+    },
+  );
+
   test('inventory history contains receipts and transfers', () async {
     final warehouses = await repository.warehouses();
     final material = (await repository.materials()).first;

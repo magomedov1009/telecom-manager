@@ -9,7 +9,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
-  test('version 8 database gains client comment without losing rows', () async {
+  test('version 8 database gains new columns without losing rows', () async {
     final databasePath = path.join(
       Directory.systemTemp.path,
       'telecom-manager-migration-${DateTime.now().microsecondsSinceEpoch}.db',
@@ -19,6 +19,36 @@ void main() {
       options: OpenDatabaseOptions(
         version: 8,
         onCreate: (db, version) async {
+          await db.execute('''
+            CREATE TABLE providers (
+              id TEXT PRIMARY KEY,
+              organization_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              deleted_at TEXT,
+              version INTEGER NOT NULL DEFAULT 1,
+              sync_state TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
+          await db.execute('''
+            CREATE TABLE extra_work_types (
+              id TEXT PRIMARY KEY,
+              organization_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              description TEXT,
+              default_price REAL,
+              requires_materials INTEGER NOT NULL DEFAULT 0,
+              requires_equipment INTEGER NOT NULL DEFAULT 0,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              deleted_at TEXT,
+              version INTEGER NOT NULL DEFAULT 1,
+              sync_state TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
           await db.execute('''
             CREATE TABLE clients (
               id TEXT PRIMARY KEY,
@@ -56,9 +86,20 @@ void main() {
     );
     final upgraded = await appDatabase.instance;
     final columns = await upgraded.rawQuery('PRAGMA table_info(clients)');
+    final providerColumns = await upgraded.rawQuery(
+      'PRAGMA table_info(providers)',
+    );
+    final workTypeColumns = await upgraded.rawQuery(
+      'PRAGMA table_info(extra_work_types)',
+    );
     final rows = await upgraded.query('clients');
 
     expect(columns.map((row) => row['name']), contains('comment'));
+    expect(providerColumns.map((row) => row['name']), contains('description'));
+    expect(
+      workTypeColumns.map((row) => row['name']),
+      contains('default_office_amount'),
+    );
     expect(rows.single['id'], 'client-1');
     expect(rows.single['comment'], isNull);
 

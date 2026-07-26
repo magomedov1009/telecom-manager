@@ -65,6 +65,28 @@ class LookupItem {
   final String name;
 }
 
+class CatalogItem {
+  const CatalogItem({
+    required this.id,
+    required this.name,
+    required this.isActive,
+    this.description,
+    this.defaultPrice,
+    this.defaultOfficeAmount,
+    this.requiresMaterials = false,
+    this.requiresEquipment = false,
+  });
+
+  final String id;
+  final String name;
+  final bool isActive;
+  final String? description;
+  final double? defaultPrice;
+  final double? defaultOfficeAmount;
+  final bool requiresMaterials;
+  final bool requiresEquipment;
+}
+
 class UserItem {
   const UserItem({
     required this.id,
@@ -848,6 +870,27 @@ class LocalRepository {
         .toList();
   }
 
+  Future<List<CatalogItem>> providerCatalog() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'providers',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'name',
+    );
+    return rows
+        .map(
+          (row) => CatalogItem(
+            id: row['id']! as String,
+            name: row['name']! as String,
+            description: row['description'] as String?,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
   Future<List<LookupItem>> extraWorkTypes() async {
     final db = await database.instance;
     final orgId = await organizationId;
@@ -863,9 +906,38 @@ class LocalRepository {
         .toList();
   }
 
-  Future<void> addProvider(String name) async {
+  Future<List<CatalogItem>> extraWorkTypeCatalog() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'extra_work_types',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'name',
+    );
+    return rows
+        .map(
+          (row) => CatalogItem(
+            id: row['id']! as String,
+            name: row['name']! as String,
+            description: row['description'] as String?,
+            defaultPrice: (row['default_price'] as num?)?.toDouble(),
+            defaultOfficeAmount: (row['default_office_amount'] as num?)
+                ?.toDouble(),
+            requiresMaterials: row['requires_materials'] == 1,
+            requiresEquipment: row['requires_equipment'] == 1,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> addProvider(String name, {String? description}) async {
     await _addCatalogRow('providers', {
       'name': _requiredName(name),
+      'description': description?.trim().isEmpty == true
+          ? null
+          : description?.trim(),
       'is_active': 1,
     }, 'provider');
   }
@@ -901,18 +973,153 @@ class LocalRepository {
 
   Future<void> addExtraWorkType({
     required String name,
+    String? description,
     double defaultPrice = 0,
+    double defaultOfficeAmount = 0,
     bool requiresMaterials = false,
+    bool requiresEquipment = false,
   }) async {
-    if (defaultPrice < 0) {
-      throw ArgumentError('Цена не может быть отрицательной');
+    if (defaultPrice < 0 || defaultOfficeAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
     }
     await _addCatalogRow('extra_work_types', {
       'name': _requiredName(name),
+      'description': description?.trim().isEmpty == true
+          ? null
+          : description?.trim(),
       'default_price': defaultPrice,
+      'default_office_amount': defaultOfficeAmount,
       'requires_materials': requiresMaterials ? 1 : 0,
+      'requires_equipment': requiresEquipment ? 1 : 0,
       'is_active': 1,
     }, 'extra_work_type');
+  }
+
+  Future<void> updateProvider({
+    required String providerId,
+    required String name,
+    String? description,
+  }) {
+    return _updateCatalogRow(
+      table: 'providers',
+      entityType: 'provider',
+      id: providerId,
+      values: {
+        'name': _requiredName(name),
+        'description': description?.trim().isEmpty == true
+            ? null
+            : description?.trim(),
+      },
+    );
+  }
+
+  Future<void> toggleProvider(String providerId) {
+    return _toggleCatalogRow(
+      table: 'providers',
+      entityType: 'provider',
+      id: providerId,
+    );
+  }
+
+  Future<void> updateExtraWorkType({
+    required String workTypeId,
+    required String name,
+    String? description,
+    required double defaultPrice,
+    required double defaultOfficeAmount,
+    required bool requiresMaterials,
+    required bool requiresEquipment,
+  }) {
+    if (defaultPrice < 0 || defaultOfficeAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
+    }
+    return _updateCatalogRow(
+      table: 'extra_work_types',
+      entityType: 'extra_work_type',
+      id: workTypeId,
+      values: {
+        'name': _requiredName(name),
+        'description': description?.trim().isEmpty == true
+            ? null
+            : description?.trim(),
+        'default_price': defaultPrice,
+        'default_office_amount': defaultOfficeAmount,
+        'requires_materials': requiresMaterials ? 1 : 0,
+        'requires_equipment': requiresEquipment ? 1 : 0,
+      },
+    );
+  }
+
+  Future<void> toggleExtraWorkType(String workTypeId) {
+    return _toggleCatalogRow(
+      table: 'extra_work_types',
+      entityType: 'extra_work_type',
+      id: workTypeId,
+    );
+  }
+
+  Future<void> _updateCatalogRow({
+    required String table,
+    required String entityType,
+    required String id,
+    required Map<String, Object?> values,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        table,
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Запись не найдена');
+      final row = <String, Object?>{
+        ...rows.single,
+        ...values,
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      try {
+        await transaction.update(table, row, where: 'id = ?', whereArgs: [id]);
+      } on DatabaseException catch (error) {
+        if (error.isUniqueConstraintError()) {
+          throw ArgumentError('Запись с таким названием уже существует');
+        }
+        rethrow;
+      }
+      await _queueRow(transaction, orgId, entityType, row, now);
+    });
+  }
+
+  Future<void> _toggleCatalogRow({
+    required String table,
+    required String entityType,
+    required String id,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        table,
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Запись не найдена');
+      final row = <String, Object?>{
+        ...rows.single,
+        'is_active': rows.single['is_active'] == 1 ? 0 : 1,
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(table, row, where: 'id = ?', whereArgs: [id]);
+      await _queueRow(transaction, orgId, entityType, row, now);
+    });
   }
 
   Future<void> _addCatalogRow(

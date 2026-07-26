@@ -19,11 +19,13 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _section(
+          _managedSection(
             'Провайдеры',
             Icons.business_outlined,
-            widget.repository.providers(),
+            widget.repository.providerCatalog(),
             () => _addProvider(),
+            _editProvider,
+            (item) => _run(() => widget.repository.toggleProvider(item.id)),
           ),
           _section(
             'Склады',
@@ -37,11 +39,14 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
             widget.repository.materials(),
             () => _addMaterial(),
           ),
-          _section(
+          _managedSection(
             'Виды допработ',
             Icons.build_outlined,
-            widget.repository.extraWorkTypes(),
+            widget.repository.extraWorkTypeCatalog(),
             () => _addWorkType(),
+            _editWorkType,
+            (item) =>
+                _run(() => widget.repository.toggleExtraWorkType(item.id)),
           ),
         ],
       ),
@@ -86,31 +91,79 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
     );
   }
 
-  Future<String?> _nameDialog(String title) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Название'),
+  Widget _managedSection(
+    String title,
+    IconData icon,
+    Future<List<CatalogItem>> future,
+    VoidCallback add,
+    ValueChanged<CatalogItem> edit,
+    ValueChanged<CatalogItem> toggle,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        key: ValueKey('$title-$refresh'),
+        child: ExpansionTile(
+          leading: Icon(icon),
+          title: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            onPressed: add,
+          ),
+          children: [
+            FutureBuilder<List<CatalogItem>>(
+              future: future,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const LinearProgressIndicator();
+                return Column(
+                  children: snapshot.data!
+                      .map(
+                        (item) => ListTile(
+                          title: Text(item.name),
+                          subtitle: Text(
+                            [
+                              if (item.description?.isNotEmpty == true)
+                                item.description!,
+                              item.isActive ? 'Активен' : 'Отключён',
+                            ].join(' · '),
+                          ),
+                          leading: Icon(
+                            item.isActive
+                                ? Icons.check_circle_outline
+                                : Icons.pause_circle_outline,
+                            color: item.isActive ? Colors.green : Colors.grey,
+                          ),
+                          trailing: PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') edit(item);
+                              if (value == 'toggle') toggle(item);
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Редактировать'),
+                              ),
+                              PopupMenuItem(
+                                value: 'toggle',
+                                child: Text(
+                                  item.isActive ? 'Отключить' : 'Включить',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                );
+              },
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Сохранить'),
-          ),
-        ],
       ),
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -131,8 +184,66 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
   }
 
   Future<void> _addProvider() async {
-    final name = await _nameDialog('Новый провайдер');
-    if (name != null) await _run(() => widget.repository.addProvider(name));
+    await _providerDialog();
+  }
+
+  Future<void> _editProvider(CatalogItem item) async {
+    await _providerDialog(item);
+  }
+
+  Future<void> _providerDialog([CatalogItem? initial]) async {
+    final name = TextEditingController(text: initial?.name ?? '');
+    final description = TextEditingController(text: initial?.description ?? '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          initial == null ? 'Новый провайдер' : 'Редактирование провайдера',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: name,
+              decoration: const InputDecoration(labelText: 'Название'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: description,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: 'Описание'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    final cleanName = name.text;
+    final cleanDescription = description.text;
+    name.dispose();
+    description.dispose();
+    if (saved != true) return;
+    await _run(
+      () => initial == null
+          ? widget.repository.addProvider(
+              cleanName,
+              description: cleanDescription,
+            )
+          : widget.repository.updateProvider(
+              providerId: initial.id,
+              name: cleanName,
+              description: cleanDescription,
+            ),
+    );
   }
 
   Future<void> _addWarehouse() async {
@@ -256,21 +367,38 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
     }
   }
 
-  Future<void> _addWorkType() async {
-    final name = TextEditingController();
-    final price = TextEditingController(text: '0');
-    bool requiresMaterials = false;
+  Future<void> _editWorkType(CatalogItem item) => _addWorkType(item);
+
+  Future<void> _addWorkType([CatalogItem? initial]) async {
+    final name = TextEditingController(text: initial?.name ?? '');
+    final description = TextEditingController(text: initial?.description ?? '');
+    final price = TextEditingController(
+      text: (initial?.defaultPrice ?? 0).toString(),
+    );
+    final officeAmount = TextEditingController(
+      text: (initial?.defaultOfficeAmount ?? 0).toString(),
+    );
+    bool requiresMaterials = initial?.requiresMaterials ?? false;
+    bool requiresEquipment = initial?.requiresEquipment ?? false;
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Новый вид допработы'),
+          title: Text(
+            initial == null
+                ? 'Новый вид допработы'
+                : 'Редактирование вида допработы',
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: name,
                 decoration: const InputDecoration(labelText: 'Название'),
+              ),
+              TextField(
+                controller: description,
+                decoration: const InputDecoration(labelText: 'Описание'),
               ),
               TextField(
                 controller: price,
@@ -281,11 +409,26 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
                   labelText: 'Цена по умолчанию',
                 ),
               ),
+              TextField(
+                controller: officeAmount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Доля офиса по умолчанию',
+                ),
+              ),
               CheckboxListTile(
                 value: requiresMaterials,
                 title: const Text('Использует материалы'),
                 onChanged: (value) =>
                     setDialogState(() => requiresMaterials = value ?? false),
+              ),
+              CheckboxListTile(
+                value: requiresEquipment,
+                title: const Text('Использует оборудование'),
+                onChanged: (value) =>
+                    setDialogState(() => requiresEquipment = value ?? false),
               ),
             ],
           ),
@@ -303,16 +446,34 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
       ),
     );
     final cleanName = name.text;
+    final cleanDescription = description.text;
     final defaultPrice = double.tryParse(price.text.replaceAll(',', '.')) ?? 0;
+    final defaultOfficeAmount =
+        double.tryParse(officeAmount.text.replaceAll(',', '.')) ?? 0;
     name.dispose();
+    description.dispose();
     price.dispose();
+    officeAmount.dispose();
     if (saved == true) {
       await _run(
-        () => widget.repository.addExtraWorkType(
-          name: cleanName,
-          defaultPrice: defaultPrice,
-          requiresMaterials: requiresMaterials,
-        ),
+        () => initial == null
+            ? widget.repository.addExtraWorkType(
+                name: cleanName,
+                description: cleanDescription,
+                defaultPrice: defaultPrice,
+                defaultOfficeAmount: defaultOfficeAmount,
+                requiresMaterials: requiresMaterials,
+                requiresEquipment: requiresEquipment,
+              )
+            : widget.repository.updateExtraWorkType(
+                workTypeId: initial.id,
+                name: cleanName,
+                description: cleanDescription,
+                defaultPrice: defaultPrice,
+                defaultOfficeAmount: defaultOfficeAmount,
+                requiresMaterials: requiresMaterials,
+                requiresEquipment: requiresEquipment,
+              ),
       );
     }
   }

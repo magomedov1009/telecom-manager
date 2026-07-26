@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 9,
+        version: 10,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -49,6 +49,7 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL REFERENCES organizations(id),
         name TEXT NOT NULL,
+        description TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -231,6 +232,12 @@ class AppDatabase {
     if (oldVersion < 9) {
       await db.execute('ALTER TABLE clients ADD COLUMN comment TEXT');
     }
+    if (oldVersion < 10) {
+      await db.execute('ALTER TABLE providers ADD COLUMN description TEXT');
+      await db.execute(
+        'ALTER TABLE extra_work_types ADD COLUMN default_office_amount REAL',
+      );
+    }
   }
 
   Future<void> _createConnectionMaterials(Database db) async {
@@ -291,6 +298,7 @@ class AppDatabase {
         name TEXT NOT NULL,
         description TEXT,
         default_price REAL,
+        default_office_amount REAL,
         requires_materials INTEGER NOT NULL DEFAULT 0,
         requires_equipment INTEGER NOT NULL DEFAULT 0,
         is_active INTEGER NOT NULL DEFAULT 1,
