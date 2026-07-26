@@ -74,6 +74,28 @@ class _SyncScreenState extends State<SyncScreen> {
               ),
             ),
           ),
+        if (widget.role == 'admin')
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.add_business_outlined),
+                  title: const Text('Создать организацию на сервере'),
+                  subtitle: const Text('Отдельное пространство для города'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: busy ? null : createServerOrganization,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.group_add_outlined),
+                  title: const Text('Участники серверной организации'),
+                  subtitle: const Text('Приглашение, роли и удаление доступа'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: busy ? null : showMembers,
+                ),
+              ],
+            ),
+          ),
         if (widget.role != 'installer')
           Card(
             child: ListTile(
@@ -237,11 +259,25 @@ class _SyncScreenState extends State<SyncScreen> {
     try {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setString('server_url', serverController.text.trim());
-      await service().connect(
+      var connection = await service().connect(
         username: usernameController.text,
         password: passwordController.text,
         deviceName: 'Android Telecom Manager',
       );
+      if (connection.organizations.length > 1 && mounted) {
+        final selected = await selectOrganization(
+          connection.organizations,
+          connection.organizationId,
+        );
+        if (selected != null && selected != connection.organizationId) {
+          connection = await service().connect(
+            username: usernameController.text,
+            password: passwordController.text,
+            deviceName: 'Android Telecom Manager',
+            organizationId: selected,
+          );
+        }
+      }
       widget.onChanged();
       setState(() {
         statusMessage =
@@ -257,6 +293,246 @@ class _SyncScreenState extends State<SyncScreen> {
       if (mounted) setState(() => busy = false);
     }
   }
+
+  Future<int?> selectOrganization(
+    List<ServerOrganization> organizations,
+    int current,
+  ) async {
+    var selected = current;
+    return showDialog<int>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Выберите организацию'),
+          content: DropdownButtonFormField<int>(
+            initialValue: selected,
+            decoration: const InputDecoration(labelText: 'Организация'),
+            items: organizations
+                .map(
+                  (item) => DropdownMenuItem(
+                    value: item.id,
+                    child: Text('${item.name} · ${roleLabel(item.role)}'),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) =>
+                setDialogState(() => selected = value ?? selected),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, selected),
+              child: const Text('Подключить'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> createServerOrganization() async {
+    final controller = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Новая серверная организация'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Название или город'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
+    );
+    final name = controller.text;
+    controller.dispose();
+    if (saved != true) return;
+    setState(() => busy = true);
+    try {
+      final created = await service().createOrganization(name);
+      await service().connect(
+        username: usernameController.text,
+        password: passwordController.text,
+        deviceName: 'Android Telecom Manager',
+        organizationId: created.id,
+      );
+      widget.onChanged();
+      if (mounted) {
+        setState(() {
+          statusMessage = 'Создана и выбрана организация «${created.name}»';
+          pending = widget.repository.pendingChanges();
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> showMembers() async {
+    try {
+      final members = await service().members();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Участники'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final member in members)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(member.fullName),
+                    subtitle: Text(
+                      '${member.username} · ${roleLabel(member.role)}',
+                    ),
+                    trailing: IconButton(
+                      tooltip: 'Удалить доступ',
+                      onPressed: () async {
+                        try {
+                          await service().removeMember(member.userId);
+                          if (context.mounted) Navigator.pop(context);
+                          if (mounted) {
+                            setState(
+                              () =>
+                                  statusMessage = 'Доступ пользователя удалён',
+                            );
+                          }
+                        } catch (error) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(error.toString())),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.person_remove_outlined),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                inviteMember();
+              },
+              icon: const Icon(Icons.person_add),
+              label: const Text('Пригласить'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Закрыть'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    }
+  }
+
+  Future<void> inviteMember() async {
+    final username = TextEditingController();
+    var role = 'installer';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Пригласить пользователя сайта'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: username,
+                decoration: const InputDecoration(labelText: 'Логин'),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: role,
+                decoration: const InputDecoration(labelText: 'Роль'),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'admin',
+                    child: Text('Администратор'),
+                  ),
+                  DropdownMenuItem(value: 'manager', child: Text('Менеджер')),
+                  DropdownMenuItem(
+                    value: 'installer',
+                    child: Text('Монтажник'),
+                  ),
+                ],
+                onChanged: (value) =>
+                    setDialogState(() => role = value ?? role),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Пригласить'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final login = username.text;
+    username.dispose();
+    if (saved != true) return;
+    try {
+      final member = await service().addMember(username: login, role: role);
+      if (mounted) {
+        setState(
+          () => statusMessage =
+              '${member.fullName} добавлен: ${roleLabel(member.role)}',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    }
+  }
+
+  String roleLabel(String role) =>
+      const {
+        'admin': 'Администратор',
+        'manager': 'Менеджер',
+        'installer': 'Монтажник',
+      }[role] ??
+      role;
 
   Future<void> synchronize() async {
     setState(() {
