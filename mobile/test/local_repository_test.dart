@@ -28,7 +28,7 @@ void main() {
     expect(summary.providers, 2);
     expect(summary.warehouses, 2);
     expect(summary.materials, 2);
-    expect(summary.pendingChanges, 9);
+    expect(summary.pendingChanges, 10);
   });
 
   test('receipt updates stock and sync queue atomically', () async {
@@ -393,5 +393,19 @@ void main() {
       ),
       hasLength(1),
     );
+  });
+
+  test('organizations isolate business data and users', () async {
+    final originalId = await repository.organizationId;
+    final newId = await repository.addOrganization('Другой город');
+    expect(newId, isNot(originalId));
+    expect((await repository.dashboardSummary()).providers, 0);
+    expect((await repository.users()).single.role, 'admin');
+    await repository.addProvider('Городской провайдер');
+    expect((await repository.providers()).single.name, 'Городской провайдер');
+
+    await repository.switchOrganization(originalId);
+    expect((await repository.providers()).length, 2);
+    expect((await repository.users()).single.username, 'admin');
   });
 }

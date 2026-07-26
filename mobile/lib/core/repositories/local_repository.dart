@@ -64,6 +64,21 @@ class LookupItem {
   final String name;
 }
 
+class UserItem {
+  const UserItem({
+    required this.id,
+    required this.username,
+    required this.fullName,
+    required this.role,
+    required this.isActive,
+  });
+  final String id;
+  final String username;
+  final String fullName;
+  final String role;
+  final bool isActive;
+}
+
 class ClientListItem {
   const ClientListItem({
     required this.id,
@@ -239,12 +254,165 @@ class LocalRepository {
         ) ??
         0;
     if (count == 0) await _seedLocalWorkspace(db);
+    final orgId = await organizationId;
+    await db.insert('app_settings', {
+      'key': 'current_organization_id',
+      'value': orgId,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    final users =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM users WHERE organization_id = ?',
+            [orgId],
+          ),
+        ) ??
+        0;
+    if (users == 0) {
+      await _insertUser(
+        db,
+        organizationId: orgId,
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+      );
+    }
   }
 
   Future<String> get organizationId async {
     final db = await database.instance;
+    final setting = await db.query(
+      'app_settings',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: ['current_organization_id'],
+      limit: 1,
+    );
+    if (setting.isNotEmpty) return setting.single['value']! as String;
     final rows = await db.query('organizations', limit: 1);
     return rows.single['id']! as String;
+  }
+
+  Future<List<LookupItem>> organizations() async {
+    final db = await database.instance;
+    final rows = await db.query(
+      'organizations',
+      columns: ['id', 'name'],
+      where: 'deleted_at IS NULL',
+      orderBy: 'name',
+    );
+    return rows
+        .map((row) => LookupItem(row['id']! as String, row['name']! as String))
+        .toList();
+  }
+
+  Future<void> switchOrganization(String id) async {
+    final db = await database.instance;
+    final exists =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM organizations WHERE id = ? AND deleted_at IS NULL',
+            [id],
+          ),
+        ) ??
+        0;
+    if (exists != 1) throw ArgumentError('Организация не найдена');
+    await db.insert('app_settings', {
+      'key': 'current_organization_id',
+      'value': id,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String> addOrganization(String name) async {
+    final clean = _requiredName(name);
+    final db = await database.instance;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id = _uuid.v7();
+    final row = <String, Object?>{
+      'id': id,
+      'name': clean,
+      'mode': 'local',
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('organizations', row);
+      await _queueRow(transaction, id, 'organization', row, now);
+      await _insertUser(
+        transaction,
+        organizationId: id,
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+      );
+    });
+    await switchOrganization(id);
+    return id;
+  }
+
+  Future<List<UserItem>> users() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'users',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'full_name',
+    );
+    return rows
+        .map(
+          (row) => UserItem(
+            id: row['id']! as String,
+            username: row['username']! as String,
+            fullName: row['full_name']! as String,
+            role: row['role']! as String,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> addUser({
+    required String username,
+    required String fullName,
+    required String role,
+  }) async {
+    if (!{'admin', 'manager', 'installer'}.contains(role)) {
+      throw ArgumentError('Неизвестная роль');
+    }
+    final db = await database.instance;
+    await _insertUser(
+      db,
+      organizationId: await organizationId,
+      username: _requiredName(username),
+      fullName: _requiredName(fullName),
+      role: role,
+    );
+  }
+
+  Future<void> _insertUser(
+    DatabaseExecutor db, {
+    required String organizationId,
+    required String username,
+    required String fullName,
+    required String role,
+  }) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': organizationId,
+      'username': username,
+      'full_name': fullName,
+      'role': role,
+      'is_active': 1,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.insert('users', row);
+    await _queueRow(db, organizationId, 'user', row, now);
   }
 
   Future<DashboardSummary> dashboardSummary() async {
