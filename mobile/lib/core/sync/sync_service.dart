@@ -71,11 +71,29 @@ class SyncService {
     }
     final body = jsonDecode(response.body) as Map<String, Object?>;
     await tokenStore.write(body['token']! as String);
+    await repository.bindRemoteOrganization(
+      serverUrl: serverUrl,
+      remoteOrganizationId: '${body['organization_id']}',
+      organizationName: body['organization_name']! as String,
+      username: (body['username'] as String?) ?? username.trim(),
+      fullName:
+          (body['full_name'] as String?) ??
+          (body['username'] as String?) ??
+          username.trim(),
+      role: body['role']! as String,
+      password: password,
+    );
   }
 
   Future<SyncResult> synchronize() async {
     final token = await tokenStore.read();
     if (token == null) throw StateError('Сначала подключитесь к серверу');
+    if (!await repository.syncTargetMatches(serverUrl)) {
+      throw StateError(
+        'Выбранная организация не связана с этим подключением. '
+        'Подключите устройство заново.',
+      );
+    }
     final headers = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',

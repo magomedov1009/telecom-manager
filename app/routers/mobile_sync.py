@@ -34,6 +34,8 @@ class LoginResponse(BaseModel):
     organization_id: int
     organization_name: str
     user_id: int
+    username: str
+    full_name: str
     role: str
 
 
@@ -127,6 +129,8 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         organization_id=organization.id,
         organization_name=organization.name,
         user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
         role=membership.role,
     )
 

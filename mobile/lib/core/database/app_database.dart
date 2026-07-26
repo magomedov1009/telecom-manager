@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 11,
+        version: 12,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -37,6 +37,8 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'local',
+        remote_server_url TEXT,
+        remote_organization_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -184,6 +186,10 @@ class AppDatabase {
     await db.execute(
       'CREATE INDEX ix_sync_queue_created ON sync_queue(created_at)',
     );
+    await db.execute(
+      'CREATE UNIQUE INDEX ix_organizations_remote '
+      'ON organizations(remote_server_url, remote_organization_id)',
+    );
   }
 
   Future<void> _upgradeSchema(
@@ -242,6 +248,18 @@ class AppDatabase {
       await db.execute('ALTER TABLE users ADD COLUMN manager_id TEXT');
       await db.execute('ALTER TABLE users ADD COLUMN comment TEXT');
       await db.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT');
+    }
+    if (oldVersion < 12) {
+      await db.execute(
+        'ALTER TABLE organizations ADD COLUMN remote_server_url TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE organizations ADD COLUMN remote_organization_id TEXT',
+      );
+      await db.execute(
+        'CREATE UNIQUE INDEX ix_organizations_remote '
+        'ON organizations(remote_server_url, remote_organization_id)',
+      );
     }
   }
 

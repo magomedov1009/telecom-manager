@@ -22,70 +22,77 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
 
-  test('connect securely stores token and sync acknowledges queue', () async {
-    final database = AppDatabase(
-      factory: databaseFactoryFfi,
-      overridePath: inMemoryDatabasePath,
-    );
-    final repository = LocalRepository(database);
-    await repository.initialize();
-    final tokenStore = MemoryTokenStore();
-    final client = MockClient((request) async {
-      if (request.url.path.endsWith('/login')) {
-        return http.Response(
-          jsonEncode({
-            'token': 'secret-device-token',
-            'organization_id': 1,
-            'organization_name': 'Test',
-            'user_id': 1,
-            'role': 'admin',
-          }),
-          200,
-        );
-      }
-      if (request.url.path.endsWith('/sync/push')) {
-        final changes =
-            (jsonDecode(request.body) as Map<String, Object?>)['changes']!
-                as List;
-        return http.Response(
-          jsonEncode(
-            changes
-                .map(
-                  (raw) => {
-                    'entity_type': (raw as Map)['entity_type'],
-                    'entity_id': raw['entity_id'],
-                    'status': 'accepted',
-                    'server_version': 1,
-                  },
-                )
-                .toList(),
-          ),
-          200,
-        );
-      }
-      return http.Response(
-        jsonEncode({'cursor': 0, 'has_more': false, 'changes': []}),
-        200,
+  test(
+    'connect creates isolated server workspace and acknowledges queue',
+    () async {
+      final database = AppDatabase(
+        factory: databaseFactoryFfi,
+        overridePath: inMemoryDatabasePath,
       );
-    });
-    final service = SyncService(
-      repository: repository,
-      serverUrl: 'https://example.test',
-      client: client,
-      tokenStore: tokenStore,
-    );
+      final repository = LocalRepository(database);
+      await repository.initialize();
+      final tokenStore = MemoryTokenStore();
+      final client = MockClient((request) async {
+        if (request.url.path.endsWith('/login')) {
+          return http.Response(
+            jsonEncode({
+              'token': 'secret-device-token',
+              'organization_id': 1,
+              'organization_name': 'Test',
+              'user_id': 1,
+              'username': 'admin',
+              'full_name': 'Administrator',
+              'role': 'admin',
+            }),
+            200,
+          );
+        }
+        if (request.url.path.endsWith('/sync/push')) {
+          final changes =
+              (jsonDecode(request.body) as Map<String, Object?>)['changes']!
+                  as List;
+          return http.Response(
+            jsonEncode(
+              changes
+                  .map(
+                    (raw) => {
+                      'entity_type': (raw as Map)['entity_type'],
+                      'entity_id': raw['entity_id'],
+                      'status': 'accepted',
+                      'server_version': 1,
+                    },
+                  )
+                  .toList(),
+            ),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({'cursor': 0, 'has_more': false, 'changes': []}),
+          200,
+        );
+      });
+      final service = SyncService(
+        repository: repository,
+        serverUrl: 'https://example.test',
+        client: client,
+        tokenStore: tokenStore,
+      );
 
-    await service.connect(
-      username: 'admin',
-      password: 'secret',
-      deviceName: 'test',
-    );
-    expect(tokenStore.token, 'secret-device-token');
-    final result = await service.synchronize();
-    expect(result.sent, 10);
-    expect(await repository.pendingChanges(), 0);
-    await database.close();
-  });
+      await service.connect(
+        username: 'admin',
+        password: 'secret',
+        deviceName: 'test',
+      );
+      expect(tokenStore.token, 'secret-device-token');
+      expect((await repository.dashboardSummary()).organizationName, 'Test');
+      await repository.addProvider('После подключения');
+      final result = await service.synchronize();
+      expect(result.sent, 1);
+      expect(await repository.pendingChanges(), 0);
+      await database.close();
+    },
+  );
 
   test('remote changes are applied in dependency order', () async {
     final database = AppDatabase(

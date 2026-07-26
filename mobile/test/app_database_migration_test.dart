@@ -20,6 +20,18 @@ void main() {
         version: 8,
         onCreate: (db, version) async {
           await db.execute('''
+            CREATE TABLE organizations (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              mode TEXT NOT NULL DEFAULT 'local',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              deleted_at TEXT,
+              version INTEGER NOT NULL DEFAULT 1,
+              sync_state TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
+          await db.execute('''
             CREATE TABLE providers (
               id TEXT PRIMARY KEY,
               organization_id TEXT NOT NULL,
@@ -110,6 +122,9 @@ void main() {
       'PRAGMA table_info(extra_work_types)',
     );
     final userColumns = await upgraded.rawQuery('PRAGMA table_info(users)');
+    final organizationColumns = await upgraded.rawQuery(
+      'PRAGMA table_info(organizations)',
+    );
     final rows = await upgraded.query('clients');
 
     expect(columns.map((row) => row['name']), contains('comment'));
@@ -121,6 +136,14 @@ void main() {
     expect(userColumns.map((row) => row['name']), contains('manager_id'));
     expect(userColumns.map((row) => row['name']), contains('comment'));
     expect(userColumns.map((row) => row['name']), contains('last_login_at'));
+    expect(
+      organizationColumns.map((row) => row['name']),
+      contains('remote_server_url'),
+    );
+    expect(
+      organizationColumns.map((row) => row['name']),
+      contains('remote_organization_id'),
+    );
     expect(rows.single['id'], 'client-1');
     expect(rows.single['comment'], isNull);
 

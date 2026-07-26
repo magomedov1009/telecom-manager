@@ -13,10 +13,12 @@ class SyncScreen extends StatefulWidget {
     required this.repository,
     required this.role,
     required this.onLogout,
+    required this.onChanged,
   });
   final LocalRepository repository;
   final String role;
   final VoidCallback onLogout;
+  final VoidCallback onChanged;
 
   @override
   State<SyncScreen> createState() => _SyncScreenState();
@@ -240,7 +242,13 @@ class _SyncScreenState extends State<SyncScreen> {
         password: passwordController.text,
         deviceName: 'Android Telecom Manager',
       );
-      setState(() => statusMessage = 'Устройство подключено');
+      widget.onChanged();
+      setState(() {
+        statusMessage =
+            'Устройство подключено. Создано отдельное серверное '
+            'рабочее пространство.';
+        pending = widget.repository.pendingChanges();
+      });
     } catch (error) {
       setState(
         () => statusMessage = error.toString().replaceFirst('Bad state: ', ''),
@@ -257,6 +265,7 @@ class _SyncScreenState extends State<SyncScreen> {
     });
     try {
       final result = await service().synchronize();
+      widget.onChanged();
       setState(() {
         statusMessage =
             'Отправлено: ${result.sent}, получено: ${result.received}, конфликтов: ${result.conflicts}';

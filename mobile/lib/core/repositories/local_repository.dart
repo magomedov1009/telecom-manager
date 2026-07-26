@@ -133,6 +133,16 @@ class LookupItem {
   final String name;
 }
 
+class RemoteOrganizationBinding {
+  const RemoteOrganizationBinding({
+    required this.serverUrl,
+    required this.remoteOrganizationId,
+  });
+
+  final String serverUrl;
+  final String remoteOrganizationId;
+}
+
 class CatalogItem {
   const CatalogItem({
     required this.id,
@@ -546,6 +556,103 @@ class LocalRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<RemoteOrganizationBinding?> remoteOrganizationBinding() async {
+    final db = await database.instance;
+    final rows = await db.query(
+      'organizations',
+      columns: ['remote_server_url', 'remote_organization_id'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [await organizationId],
+      limit: 1,
+    );
+    if (rows.isEmpty ||
+        rows.single['remote_server_url'] == null ||
+        rows.single['remote_organization_id'] == null) {
+      return null;
+    }
+    return RemoteOrganizationBinding(
+      serverUrl: rows.single['remote_server_url']! as String,
+      remoteOrganizationId: rows.single['remote_organization_id']! as String,
+    );
+  }
+
+  Future<String> bindRemoteOrganization({
+    required String serverUrl,
+    required String remoteOrganizationId,
+    required String organizationName,
+    required String username,
+    required String fullName,
+    required String role,
+    required String password,
+  }) async {
+    final normalizedServer = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final db = await database.instance;
+    final existing = await db.query(
+      'organizations',
+      columns: ['id'],
+      where:
+          'remote_server_url = ? AND remote_organization_id = ? '
+          'AND deleted_at IS NULL',
+      whereArgs: [normalizedServer, remoteOrganizationId],
+      limit: 1,
+    );
+    final id = existing.isEmpty ? _uuid.v7() : existing.single['id']! as String;
+    if (existing.isEmpty) {
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.transaction((transaction) async {
+        await transaction.insert('organizations', {
+          'id': id,
+          'name': _requiredName(organizationName),
+          'mode': 'server',
+          'remote_server_url': normalizedServer,
+          'remote_organization_id': remoteOrganizationId,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'synced',
+        });
+        await _insertUser(
+          transaction,
+          organizationId: id,
+          username: _requiredName(username),
+          fullName: _requiredName(fullName),
+          role: role,
+          password: password,
+          queueChange: false,
+        );
+      });
+    }
+    await switchOrganization(id);
+    await db.insert('app_settings', {
+      'key': 'active_sync_server_url',
+      'value': normalizedServer,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('app_settings', {
+      'key': 'active_sync_remote_id',
+      'value': remoteOrganizationId,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return id;
+  }
+
+  Future<bool> syncTargetMatches(String serverUrl) async {
+    final binding = await remoteOrganizationBinding();
+    if (binding == null) return false;
+    final db = await database.instance;
+    final settings = await db.query(
+      'app_settings',
+      where: 'key IN (?, ?)',
+      whereArgs: ['active_sync_server_url', 'active_sync_remote_id'],
+    );
+    final values = {
+      for (final row in settings)
+        row['key']! as String: row['value']! as String,
+    };
+    return binding.serverUrl ==
+            serverUrl.trim().replaceAll(RegExp(r'/+$'), '') &&
+        values['active_sync_server_url'] == binding.serverUrl &&
+        values['active_sync_remote_id'] == binding.remoteOrganizationId;
+  }
+
   Future<String> addOrganization(String name) async {
     final clean = _requiredName(name);
     final db = await database.instance;
@@ -640,6 +747,7 @@ class LocalRepository {
     String? managerId,
     String? comment,
     bool isActive = true,
+    bool queueChange = true,
   }) async {
     if (password.length < 4) {
       throw ArgumentError('Пароль должен содержать минимум 4 символа');
@@ -663,7 +771,7 @@ class LocalRepository {
       'created_at': now,
       'updated_at': now,
       'version': 1,
-      'sync_state': 'pending',
+      'sync_state': queueChange ? 'pending' : 'synced',
     };
     await db.insert('users', row);
     await _setPassword(db, row['id']! as String, password);
@@ -675,7 +783,9 @@ class LocalRepository {
     )).single;
     row['password_hash'] = stored['password_hash'];
     row['password_salt'] = stored['password_salt'];
-    await _queueRow(db, organizationId, 'user', row, now);
+    if (queueChange) {
+      await _queueRow(db, organizationId, 'user', row, now);
+    }
   }
 
   Future<String?> _validatedManagerId(
@@ -4076,8 +4186,12 @@ class LocalRepository {
 
   Future<int> pendingChanges() async {
     final db = await database.instance;
+    final orgId = await organizationId;
     return Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) FROM sync_queue'),
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM sync_queue WHERE organization_id = ?',
+            [orgId],
+          ),
         ) ??
         0;
   }
@@ -4132,11 +4246,12 @@ class LocalRepository {
 
   Future<int> syncCursor() async {
     final db = await database.instance;
+    final key = 'sync_cursor_${await organizationId}';
     final row = await db.query(
       'app_settings',
       columns: ['value'],
       where: 'key = ?',
-      whereArgs: ['sync_cursor'],
+      whereArgs: [key],
       limit: 1,
     );
     return row.isEmpty ? 0 : int.tryParse(row.single['value']! as String) ?? 0;
@@ -4245,7 +4360,7 @@ class LocalRepository {
         }
       }
       await transaction.insert('app_settings', {
-        'key': 'sync_cursor',
+        'key': 'sync_cursor_$orgId',
         'value': cursor.toString(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
