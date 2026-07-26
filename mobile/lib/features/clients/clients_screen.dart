@@ -116,35 +116,12 @@ class _ClientsScreenState extends State<ClientsScreen> {
     if (saved == true) reload();
   }
 
-  Future<void> addClientOnly() async {
-    final created = await showModalBottomSheet<Object?>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _ClientSheet(repository: widget.repository),
-    );
-    if (created != null) reload();
-  }
-
   Future<void> addNewConnection() async {
-    final clientId = await showModalBottomSheet<Object?>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) => _ClientSheet(repository: widget.repository),
-    );
-    if (clientId is! String || !mounted) return;
-    final allClients = await widget.repository.clients();
-    final client = allClients.firstWhere((item) => item.id == clientId);
-    if (!mounted) return;
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => ConnectionSheet(
-        repository: widget.repository,
-        client: client,
-      ),
+      builder: (_) => ConnectionSheet(repository: widget.repository),
     );
     if (saved == true) reload();
   }
@@ -160,11 +137,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Добавить только клиента',
-            icon: const Icon(Icons.person_add_alt),
-            onPressed: addClientOnly,
-          ),
           IconButton(
             tooltip: 'Все подключения',
             icon: const Icon(Icons.router_outlined),
@@ -443,29 +415,33 @@ class _ClientSheetState extends State<_ClientSheet> {
 }
 
 class ConnectionSheet extends StatefulWidget {
-  const ConnectionSheet({
-    super.key,
-    required this.repository,
-    required this.client,
-  });
+  const ConnectionSheet({super.key, required this.repository, this.client});
 
   final LocalRepository repository;
-  final ClientListItem client;
+  final ClientListItem? client;
 
   @override
   State<ConnectionSheet> createState() => _ConnectionSheetState();
 }
 
 class _ConnectionSheetState extends State<ConnectionSheet> {
+  final contract = TextEditingController();
+  final login = TextEditingController();
+  final address = TextEditingController();
+  final phone = TextEditingController();
+  final clientComment = TextEditingController();
   final price = TextEditingController(text: '0');
   final office = TextEditingController(text: '0');
   final installer = TextEditingController(text: '0');
   final comment = TextEditingController();
   late Future<List<LookupItem>> warehouses;
+  late Future<List<LookupItem>> providers;
   List<MaterialBalance> balances = [];
   final quantities = <String, TextEditingController>{};
   String? warehouseId;
+  String? providerId;
   String connectionType = 'NEW';
+  DateTime connectionDate = DateTime.now();
   bool loadingMaterials = false;
   bool saving = false;
   String? error;
@@ -483,11 +459,17 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
   void initState() {
     super.initState();
     warehouses = widget.repository.warehouses();
+    providers = widget.repository.providers();
   }
 
   @override
   void dispose() {
     price.dispose();
+    contract.dispose();
+    login.dispose();
+    address.dispose();
+    phone.dispose();
+    clientComment.dispose();
     office.dispose();
     installer.dispose();
     comment.dispose();
@@ -533,10 +515,81 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              'Подключение: ${widget.client.login}',
+              widget.client == null
+                  ? 'Новое подключение'
+                  : 'Подключение: ${widget.client!.login}',
               style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 16),
+            if (widget.client == null) ...[
+              FutureBuilder<List<LookupItem>>(
+                future: providers,
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const LinearProgressIndicator();
+                  providerId ??= snapshot.data!.firstOrNull?.id;
+                  return DropdownButtonFormField<String>(
+                    initialValue: providerId,
+                    decoration: const InputDecoration(
+                      labelText: 'Провайдер клиента',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: snapshot.data!
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item.id,
+                            child: Text(item.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) => setState(() => providerId = value),
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: contract,
+                decoration: const InputDecoration(
+                  labelText: 'Номер договора *',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: login,
+                decoration: const InputDecoration(
+                  labelText: 'Логин *',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: address,
+                decoration: const InputDecoration(
+                  labelText: 'Адрес *',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Телефон',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: clientComment,
+                decoration: const InputDecoration(
+                  labelText: 'Комментарий к клиенту',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 18),
+              const Divider(),
+              const SizedBox(height: 12),
+            ],
             DropdownButtonFormField<String>(
               initialValue: connectionType,
               decoration: const InputDecoration(
@@ -552,6 +605,28 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                   )
                   .toList(),
               onChanged: (value) => setState(() => connectionType = value!),
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Дата подключения'),
+              subtitle: Text(
+                '${connectionDate.day.toString().padLeft(2, '0')}.'
+                '${connectionDate.month.toString().padLeft(2, '0')}.'
+                '${connectionDate.year}',
+              ),
+              trailing: const Icon(Icons.calendar_month_outlined),
+              onTap: () async {
+                final selected = await showDatePicker(
+                  context: context,
+                  initialDate: connectionDate,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                );
+                if (selected != null) {
+                  setState(() => connectionDate = selected);
+                }
+              },
             ),
             const SizedBox(height: 12),
             FutureBuilder<List<LookupItem>>(
@@ -629,7 +704,12 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
             ],
             const SizedBox(height: 20),
             FilledButton.icon(
-              onPressed: saving || warehouseId == null ? null : save,
+              onPressed:
+                  saving ||
+                      warehouseId == null ||
+                      (widget.client == null && providerId == null)
+                  ? null
+                  : save,
               icon: const Icon(Icons.check),
               label: Text(saving ? 'Сохранение…' : 'Оформить подключение'),
             ),
@@ -660,6 +740,15 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
       error = null;
     });
     try {
+      var clientId = widget.client?.id;
+      clientId ??= await widget.repository.addClient(
+        providerId: providerId!,
+        contractNumber: contract.text,
+        login: login.text,
+        address: address.text,
+        phone: phone.text,
+        comment: clientComment.text,
+      );
       final usedMaterials = connectionType == 'WITHOUT_MATERIALS'
           ? <ConnectionMaterialInput>[]
           : balances
@@ -672,10 +761,10 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 .where((item) => item.quantity > 0)
                 .toList();
       await widget.repository.addConnection(
-        clientId: widget.client.id,
+        clientId: clientId,
         warehouseId: warehouseId!,
         connectionType: connectionType,
-        connectionDate: DateTime.now(),
+        connectionDate: connectionDate,
         price: number(price.text),
         officeAmount: number(office.text),
         installerAmount: number(installer.text),
