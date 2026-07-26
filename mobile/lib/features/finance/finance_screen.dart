@@ -23,6 +23,7 @@ class _FinanceScreenState extends State<FinanceScreen> {
   DateTime? dateFrom;
   DateTime? dateTo;
   final search = TextEditingController();
+  String journalView = 'all';
 
   static const labels = {
     'CONNECTION': 'Подключение',
@@ -239,6 +240,24 @@ class _FinanceScreenState extends State<FinanceScreen> {
           }
           final summary = snapshot.data!.$1;
           final journal = snapshot.data!.$2;
+          final visibleJournal = switch (journalView) {
+            'income' =>
+              journal
+                  .where(
+                    (item) =>
+                        item.type == 'CONNECTION' || item.type == 'EXTRA_WORK',
+                  )
+                  .toList(),
+            'settlements' =>
+              journal
+                  .where(
+                    (item) =>
+                        item.type == 'PAYMENT_TO_OFFICE' ||
+                        item.type == 'PAYMENT_FROM_OFFICE',
+                  )
+                  .toList(),
+            _ => journal,
+          };
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
             children: [
@@ -350,14 +369,38 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 ],
               ),
               const SizedBox(height: 20),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'all',
+                    label: Text('Все'),
+                    icon: Icon(Icons.swap_vert),
+                  ),
+                  ButtonSegment(
+                    value: 'income',
+                    label: Text('Доходы'),
+                    icon: Icon(Icons.trending_up),
+                  ),
+                  ButtonSegment(
+                    value: 'settlements',
+                    label: Text('Расчёты'),
+                    icon: Icon(Icons.handshake_outlined),
+                  ),
+                ],
+                selected: {journalView},
+                onSelectionChanged: (value) {
+                  setState(() => journalView = value.first);
+                },
+              ),
+              const SizedBox(height: 16),
               const Text(
                 'Журнал операций',
                 style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 10),
-              if (journal.isEmpty)
+              if (visibleJournal.isEmpty)
                 const Card(child: ListTile(title: Text('Операций пока нет'))),
-              ...journal.map(
+              ...visibleJournal.map(
                 (item) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Card(
