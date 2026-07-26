@@ -424,12 +424,33 @@ void main() {
         transactionType: 'PAYMENT_TO_OFFICE',
         amount: 300,
         providerId: provider.id,
+        comment: 'Оплата офиса',
       );
       summary = await repository.financeSummary();
       expect(summary.paidToOffice, 300);
       expect(summary.iOweOffice, 200);
       expect(summary.availableCash, 1200);
       expect((await repository.financeJournal()).length, 3);
+
+      final today = DateTime.now();
+      final period = await repository.financeSummary(
+        providerId: provider.id,
+        dateFrom: today,
+        dateTo: today,
+      );
+      expect(period.customerReceived, 0);
+      expect(period.paidToOffice, 300);
+      expect(period.iOweOffice, 200);
+      expect(period.availableCash, -300);
+      final filteredJournal = await repository.financeJournal(
+        providerId: provider.id,
+        transactionType: 'PAYMENT_TO_OFFICE',
+        dateFrom: today,
+        dateTo: today,
+        search: 'оплата',
+      );
+      expect(filteredJournal, hasLength(1));
+      expect(filteredJournal.single.amount, -300);
     },
   );
 

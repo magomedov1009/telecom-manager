@@ -2114,16 +2114,45 @@ class LocalRepository {
     }).toList()..sort((a, b) => a.debtorName.compareTo(b.debtorName));
   }
 
-  Future<FinanceSummary> financeSummary({String? providerId}) async {
+  Future<FinanceSummary> financeSummary({
+    String? providerId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
-    final providerClause = providerId == null ? '' : ' AND provider_id = ?';
-    final arguments = <Object?>[orgId, ?providerId];
-    Future<double> sum(String condition) async {
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
+    Future<double> sum(String condition, {bool cumulative = false}) async {
+      final where = [
+        'organization_id = ?',
+        'deleted_at IS NULL',
+        if (providerId != null) 'provider_id = ?',
+        if (!cumulative && from != null) 'occurred_at >= ?',
+        if (toExclusive != null) 'occurred_at < ?',
+      ].join(' AND ');
+      final arguments = <Object?>[
+        orgId,
+        ?providerId,
+        if (!cumulative) ?from,
+        ?toExclusive,
+      ];
       final rows = await db.rawQuery('''
         SELECT COALESCE(SUM($condition), 0) AS amount
         FROM finance_transactions
-        WHERE organization_id = ? AND deleted_at IS NULL$providerClause
+        WHERE $where
         ''', arguments);
       return (rows.single['amount']! as num).toDouble();
     }
@@ -2140,25 +2169,67 @@ class LocalRepository {
     final paidToOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
     );
+    final paidFromOfficeBalance = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
+      cumulative: true,
+    );
+    final paidToOfficeBalance = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
+      cumulative: true,
+    );
     final adjustments = await sum(
       "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
+      cumulative: true,
     );
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
+      cumulative: true,
     );
-    final expenseRows = await db.rawQuery('''
+    final officeAccruedBalance = await sum(
+      "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
+      cumulative: true,
+    );
+    final expenseFrom = dateFrom?.toIso8601String().substring(0, 10);
+    final expenseTo = dateTo?.toIso8601String().substring(0, 10);
+    final expenseWhere = [
+      'organization_id = ?',
+      "paid_by = 'INSTALLER'",
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseFrom != null) 'expense_date >= ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final expenseRows = await db.rawQuery(
+      '''
       SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
-      WHERE organization_id = ? AND paid_by = 'INSTALLER'
-        AND deleted_at IS NULL$providerClause
-      ''', arguments);
+      WHERE $expenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseFrom, ?expenseTo],
+    );
     final installerExpenses = (expenseRows.single['amount']! as num).toDouble();
+    final debtExpenseWhere = [
+      'organization_id = ?',
+      "paid_by = 'INSTALLER'",
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final debtExpenseRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE $debtExpenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseTo],
+    );
+    final debtInstallerExpenses = (debtExpenseRows.single['amount']! as num)
+        .toDouble();
     final balance =
         extraWorkInstaller +
-        installerExpenses -
-        paidFromOffice +
+        debtInstallerExpenses -
+        paidFromOfficeBalance +
         adjustments -
-        officeAccrued +
-        paidToOffice;
+        officeAccruedBalance +
+        paidToOfficeBalance;
     return FinanceSummary(
       customerReceived: customerReceived,
       officeAccrued: officeAccrued,
@@ -2170,9 +2241,29 @@ class LocalRepository {
     );
   }
 
-  Future<List<FinanceJournalItem>> financeJournal({String? providerId}) async {
+  Future<List<FinanceJournalItem>> financeJournal({
+    String? providerId,
+    String? transactionType,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String search = '',
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final rows = await db.rawQuery(
       '''
       SELECT transaction_row.transaction_type, transaction_row.amount,
@@ -2183,11 +2274,14 @@ class LocalRepository {
       WHERE transaction_row.organization_id = ?
         AND transaction_row.deleted_at IS NULL
         ${providerId == null ? '' : 'AND transaction_row.provider_id = ?'}
+        ${transactionType == null ? '' : 'AND transaction_row.transaction_type = ?'}
+        ${from == null ? '' : 'AND transaction_row.occurred_at >= ?'}
+        ${toExclusive == null ? '' : 'AND transaction_row.occurred_at < ?'}
       ORDER BY transaction_row.occurred_at DESC, transaction_row.created_at DESC
       ''',
-      [orgId, ?providerId],
+      [orgId, ?providerId, ?transactionType, ?from, ?toExclusive],
     );
-    return rows
+    final result = rows
         .map(
           (row) => FinanceJournalItem(
             type: row['transaction_type']! as String,
@@ -2196,6 +2290,17 @@ class LocalRepository {
             comment: row['comment'] as String?,
             occurredAt: DateTime.parse(row['occurred_at']! as String),
           ),
+        )
+        .toList();
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (item) =>
+              item.type.toLowerCase().contains(normalized) ||
+              (item.providerName?.toLowerCase().contains(normalized) ??
+                  false) ||
+              (item.comment?.toLowerCase().contains(normalized) ?? false),
         )
         .toList();
   }
