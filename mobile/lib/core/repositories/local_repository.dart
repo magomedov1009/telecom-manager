@@ -1118,7 +1118,7 @@ class LocalRepository {
         .toList();
   }
 
-  Future<List<ClientListItem>> clients() async {
+  Future<List<ClientListItem>> clients({String query = ''}) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
@@ -1137,7 +1137,7 @@ class LocalRepository {
       ''',
       [orgId],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ClientListItem(
             id: row['id']! as String,
@@ -1150,9 +1150,21 @@ class LocalRepository {
           ),
         )
         .toList();
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (client) =>
+              client.login.toLowerCase().contains(normalized) ||
+              client.contractNumber.toLowerCase().contains(normalized) ||
+              client.address.toLowerCase().contains(normalized) ||
+              (client.phone?.toLowerCase().contains(normalized) ?? false) ||
+              client.providerName.toLowerCase().contains(normalized),
+        )
+        .toList();
   }
 
-  Future<List<ConnectionListItem>> connections() async {
+  Future<List<ConnectionListItem>> connections({String? clientId}) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
@@ -1164,9 +1176,10 @@ class LocalRepository {
       JOIN clients client ON client.id = connection.client_id
       JOIN providers provider ON provider.id = client.provider_id
       WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+        ${clientId == null ? '' : 'AND connection.client_id = ?'}
       ORDER BY connection.connection_date DESC, connection.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?clientId],
     );
     return rows
         .map(

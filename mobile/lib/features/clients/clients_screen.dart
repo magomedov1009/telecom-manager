@@ -19,6 +19,7 @@ class ClientsScreen extends StatefulWidget {
 
 class _ClientsScreenState extends State<ClientsScreen> {
   late Future<List<ClientListItem>> clients;
+  final search = TextEditingController();
 
   @override
   void initState() {
@@ -27,8 +28,68 @@ class _ClientsScreenState extends State<ClientsScreen> {
   }
 
   void reload() {
-    setState(() => clients = widget.repository.clients());
+    setState(() => clients = widget.repository.clients(query: search.text));
     widget.onChanged();
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  Future<void> showClient(ClientListItem client) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: FutureBuilder<List<ConnectionListItem>>(
+          future: widget.repository.connections(clientId: client.id),
+          builder: (context, snapshot) => ListView(
+            shrinkWrap: true,
+            children: [
+              Text(
+                client.login,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('Провайдер: ${client.providerName}'),
+              Text('Договор: ${client.contractNumber}'),
+              Text('Адрес: ${client.address}'),
+              if (client.phone?.isNotEmpty == true)
+                Text('Телефон: ${client.phone}'),
+              const SizedBox(height: 20),
+              const Text(
+                'История подключений',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              if (!snapshot.hasData)
+                const Center(child: CircularProgressIndicator())
+              else if (snapshot.data!.isEmpty)
+                const Text('Подключений пока нет')
+              else
+                ...snapshot.data!.map(
+                  (item) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.router_outlined),
+                    title: Text(item.connectionType),
+                    subtitle: Text(
+                      '${item.connectionDate.day}.${item.connectionDate.month}.${item.connectionDate.year}',
+                    ),
+                    trailing: Text('${item.price.toStringAsFixed(0)} ₽'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -57,57 +118,80 @@ class _ClientsScreenState extends State<ClientsScreen> {
           ),
         ],
       ),
-      body: FutureBuilder<List<ClientListItem>>(
-        future: clients,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.data!.isEmpty) {
-            return const Center(child: Text('Добавьте первого клиента'));
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-            itemCount: snapshot.data!.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final client = snapshot.data![index];
-              return Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(16),
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.person_outline),
-                  ),
-                  title: Text(
-                    client.login,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    '${client.providerName} · договор ${client.contractNumber}\n'
-                    '${client.address} · подключений: ${client.connections}',
-                  ),
-                  isThreeLine: true,
-                  trailing: IconButton.filledTonal(
-                    tooltip: 'Оформить подключение',
-                    icon: const Icon(Icons.add_link),
-                    onPressed: () async {
-                      final saved = await showModalBottomSheet<bool>(
-                        context: context,
-                        isScrollControlled: true,
-                        useSafeArea: true,
-                        builder: (_) => _ConnectionSheet(
-                          repository: widget.repository,
-                          client: client,
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: TextField(
+              controller: search,
+              decoration: const InputDecoration(
+                hintText: 'Логин, договор, адрес, телефон или провайдер',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) {
+                setState(
+                  () => clients = widget.repository.clients(query: value),
+                );
+              },
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<ClientListItem>>(
+              future: clients,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.data!.isEmpty) {
+                  return const Center(child: Text('Добавьте первого клиента'));
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                  itemCount: snapshot.data!.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final client = snapshot.data![index];
+                    return Card(
+                      child: ListTile(
+                        onTap: () => showClient(client),
+                        contentPadding: const EdgeInsets.all(16),
+                        leading: const CircleAvatar(
+                          child: Icon(Icons.person_outline),
                         ),
-                      );
-                      if (saved == true) reload();
-                    },
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                        title: Text(
+                          client.login,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          '${client.providerName} · договор ${client.contractNumber}\n'
+                          '${client.address} · подключений: ${client.connections}',
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton.filledTonal(
+                          tooltip: 'Оформить подключение',
+                          icon: const Icon(Icons.add_link),
+                          onPressed: () async {
+                            final saved = await showModalBottomSheet<bool>(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              builder: (_) => _ConnectionSheet(
+                                repository: widget.repository,
+                                client: client,
+                              ),
+                            );
+                            if (saved == true) reload();
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {

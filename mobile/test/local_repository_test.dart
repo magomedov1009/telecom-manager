@@ -87,8 +87,30 @@ void main() {
     final client = (await repository.clients()).single;
     expect(balance.quantity, 7);
     expect(client.connections, 1);
+    expect(await repository.connections(clientId: clientId), hasLength(1));
     expect(await repository.pendingChanges(), pendingBefore + 5);
   });
+
+  test(
+    'client search covers login contract address phone and provider',
+    () async {
+      final provider = (await repository.providers()).first;
+      await repository.addClient(
+        providerId: provider.id,
+        contractNumber: 'CN-7788',
+        login: 'needle-login',
+        address: 'Улица Поисковая 10',
+        phone: '+79991234567',
+      );
+
+      expect(await repository.clients(query: 'needle'), hasLength(1));
+      expect(await repository.clients(query: '7788'), hasLength(1));
+      expect(await repository.clients(query: 'поисковая'), hasLength(1));
+      expect(await repository.clients(query: '999123'), hasLength(1));
+      expect(await repository.clients(query: provider.name), hasLength(1));
+      expect(await repository.clients(query: 'не существует'), isEmpty);
+    },
+  );
 
   test('insufficient stock rolls back the whole connection', () async {
     final provider = (await repository.providers()).first;
