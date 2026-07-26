@@ -137,34 +137,183 @@ class _CatalogsScreenState extends State<CatalogsScreen> {
 
   Future<void> _addWarehouse() async {
     final providers = await widget.repository.providers();
-    if (!mounted) return;
-    final name = await _nameDialog('Новый склад');
-    if (name == null || providers.isEmpty || !mounted) return;
-    await _run(
-      () => widget.repository.addWarehouse(
-        name: name,
-        providerId: providers.first.id,
+    if (!mounted || providers.isEmpty) return;
+    final name = TextEditingController();
+    String providerId = providers.first.id;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Новый склад'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Название'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: providerId,
+                decoration: const InputDecoration(labelText: 'Провайдер'),
+                items: providers
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item.id,
+                        child: Text(item.name),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) => setDialogState(() => providerId = value!),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
       ),
+    );
+    final value = name.text;
+    name.dispose();
+    if (saved != true) return;
+    await _run(
+      () => widget.repository.addWarehouse(name: value, providerId: providerId),
     );
   }
 
   Future<void> _addMaterial() async {
-    final name = await _nameDialog('Новая позиция');
-    if (name != null) {
+    final name = TextEditingController();
+    String itemType = 'MATERIAL';
+    String unit = 'шт.';
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Новая позиция'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Название'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: itemType,
+                decoration: const InputDecoration(labelText: 'Тип'),
+                items: const [
+                  DropdownMenuItem(value: 'MATERIAL', child: Text('Материал')),
+                  DropdownMenuItem(
+                    value: 'EQUIPMENT',
+                    child: Text('Оборудование'),
+                  ),
+                ],
+                onChanged: (value) => setDialogState(() => itemType = value!),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: unit,
+                decoration: const InputDecoration(labelText: 'Единица'),
+                items: const [
+                  DropdownMenuItem(value: 'шт.', child: Text('Штуки')),
+                  DropdownMenuItem(value: 'м', child: Text('Метры')),
+                ],
+                onChanged: (value) => setDialogState(() => unit = value!),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final value = name.text;
+    name.dispose();
+    if (saved == true) {
       await _run(
         () => widget.repository.addMaterial(
-          name: name,
-          itemType: 'MATERIAL',
-          unitName: 'шт.',
+          name: value,
+          itemType: itemType,
+          unitName: unit,
         ),
       );
     }
   }
 
   Future<void> _addWorkType() async {
-    final name = await _nameDialog('Новый вид допработы');
-    if (name != null) {
-      await _run(() => widget.repository.addExtraWorkType(name: name));
+    final name = TextEditingController();
+    final price = TextEditingController(text: '0');
+    bool requiresMaterials = false;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Новый вид допработы'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: name,
+                decoration: const InputDecoration(labelText: 'Название'),
+              ),
+              TextField(
+                controller: price,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: const InputDecoration(
+                  labelText: 'Цена по умолчанию',
+                ),
+              ),
+              CheckboxListTile(
+                value: requiresMaterials,
+                title: const Text('Использует материалы'),
+                onChanged: (value) =>
+                    setDialogState(() => requiresMaterials = value ?? false),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Сохранить'),
+            ),
+          ],
+        ),
+      ),
+    );
+    final cleanName = name.text;
+    final defaultPrice = double.tryParse(price.text.replaceAll(',', '.')) ?? 0;
+    name.dispose();
+    price.dispose();
+    if (saved == true) {
+      await _run(
+        () => widget.repository.addExtraWorkType(
+          name: cleanName,
+          defaultPrice: defaultPrice,
+          requiresMaterials: requiresMaterials,
+        ),
+      );
     }
   }
 }
