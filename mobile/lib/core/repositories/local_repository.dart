@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+import 'package:cryptography/cryptography.dart';
 
 import '../database/app_database.dart';
 
@@ -274,7 +275,17 @@ class LocalRepository {
         username: 'admin',
         fullName: 'Администратор',
         role: 'admin',
+        password: '0000',
       );
+    }
+    final withoutPassword = await db.query(
+      'users',
+      columns: ['id'],
+      where: 'organization_id = ? AND password_hash IS NULL',
+      whereArgs: [orgId],
+    );
+    for (final user in withoutPassword) {
+      await _setPassword(db, user['id']! as String, '0000');
     }
   }
 
@@ -345,6 +356,7 @@ class LocalRepository {
         username: 'admin',
         fullName: 'Администратор',
         role: 'admin',
+        password: '0000',
       );
     });
     await switchOrganization(id);
@@ -377,6 +389,7 @@ class LocalRepository {
     required String username,
     required String fullName,
     required String role,
+    required String password,
   }) async {
     if (!{'admin', 'manager', 'installer'}.contains(role)) {
       throw ArgumentError('Неизвестная роль');
@@ -388,6 +401,7 @@ class LocalRepository {
       username: _requiredName(username),
       fullName: _requiredName(fullName),
       role: role,
+      password: password,
     );
   }
 
@@ -397,7 +411,11 @@ class LocalRepository {
     required String username,
     required String fullName,
     required String role,
+    required String password,
   }) async {
+    if (password.length < 4) {
+      throw ArgumentError('Пароль должен содержать минимум 4 символа');
+    }
     final now = DateTime.now().toUtc().toIso8601String();
     final row = <String, Object?>{
       'id': _uuid.v7(),
@@ -412,7 +430,80 @@ class LocalRepository {
       'sync_state': 'pending',
     };
     await db.insert('users', row);
+    await _setPassword(db, row['id']! as String, password);
+    final stored = (await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [row['id']],
+      limit: 1,
+    )).single;
+    row['password_hash'] = stored['password_hash'];
+    row['password_salt'] = stored['password_salt'];
     await _queueRow(db, organizationId, 'user', row, now);
+  }
+
+  Future<void> _setPassword(
+    DatabaseExecutor db,
+    String userId,
+    String password,
+  ) async {
+    final algorithm = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 100000,
+      bits: 256,
+    );
+    final salt = SecretKeyData.random(length: 16).bytes;
+    final key = await algorithm.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: salt,
+    );
+    await db.update(
+      'users',
+      {
+        'password_hash': base64Encode(await key.extractBytes()),
+        'password_salt': base64Encode(salt),
+      },
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+  }
+
+  Future<UserItem?> authenticate(String username, String password) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'users',
+      where:
+          'organization_id = ? AND username = ? AND is_active = 1 AND deleted_at IS NULL',
+      whereArgs: [orgId, username.trim()],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.single;
+    final salt = base64Decode(row['password_salt']! as String);
+    final algorithm = Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 100000,
+      bits: 256,
+    );
+    final key = await algorithm.deriveKey(
+      secretKey: SecretKey(utf8.encode(password)),
+      nonce: salt,
+    );
+    if (base64Encode(await key.extractBytes()) != row['password_hash']) {
+      return null;
+    }
+    await db.insert('app_settings', {
+      'key': 'current_user_id',
+      'value': row['id']! as String,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return UserItem(
+      id: row['id']! as String,
+      username: row['username']! as String,
+      fullName: row['full_name']! as String,
+      role: row['role']! as String,
+      isActive: true,
+    );
   }
 
   Future<DashboardSummary> dashboardSummary() async {

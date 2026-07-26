@@ -144,7 +144,8 @@ class _OrganizationUsersScreenState extends State<OrganizationUsersScreen> {
 
   Future<void> addUser() async {
     final username = TextEditingController(),
-        fullName = TextEditingController();
+        fullName = TextEditingController(),
+        password = TextEditingController();
     String role = 'installer';
     final saved = await showDialog<bool>(
       context: context,
@@ -161,6 +162,11 @@ class _OrganizationUsersScreenState extends State<OrganizationUsersScreen> {
               TextField(
                 controller: username,
                 decoration: const InputDecoration(labelText: 'Логин'),
+              ),
+              TextField(
+                controller: password,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Пароль'),
               ),
               DropdownButtonFormField<String>(
                 initialValue: role,
@@ -192,14 +198,16 @@ class _OrganizationUsersScreenState extends State<OrganizationUsersScreen> {
         ),
       ),
     );
-    final login = username.text, name = fullName.text;
+    final login = username.text, name = fullName.text, secret = password.text;
     username.dispose();
     fullName.dispose();
+    password.dispose();
     if (saved == true) {
       await widget.repository.addUser(
         username: login,
         fullName: name,
         role: role,
+        password: secret,
       );
       reload();
     }

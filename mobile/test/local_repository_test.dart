@@ -407,5 +407,17 @@ void main() {
     await repository.switchOrganization(originalId);
     expect((await repository.providers()).length, 2);
     expect((await repository.users()).single.username, 'admin');
+    expect(await repository.authenticate('admin', 'wrong'), isNull);
+    expect((await repository.authenticate('admin', '0000'))?.role, 'admin');
+    await repository.addUser(
+      username: 'installer1',
+      fullName: 'Монтажник Один',
+      role: 'installer',
+      password: '1234',
+    );
+    expect(
+      (await repository.authenticate('installer1', '1234'))?.role,
+      'installer',
+    );
   });
 }

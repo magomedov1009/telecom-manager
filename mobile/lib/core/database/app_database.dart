@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 6,
+        version: 7,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -211,6 +211,10 @@ class AppDatabase {
     if (oldVersion < 6) {
       await _createUsersTable(db);
     }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE users ADD COLUMN password_hash TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN password_salt TEXT');
+    }
   }
 
   Future<void> _createConnectionMaterials(Database db) async {
@@ -350,6 +354,8 @@ class AppDatabase {
         username TEXT NOT NULL,
         full_name TEXT NOT NULL,
         role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'installer')),
+        password_hash TEXT,
+        password_salt TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
