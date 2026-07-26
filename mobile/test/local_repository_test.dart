@@ -294,4 +294,40 @@ void main() {
       expect((await repository.financeSummary()).officeOwesMe, 700);
     },
   );
+
+  test(
+    'catalog additions are queued and duplicate names are rejected',
+    () async {
+      final before = await repository.pendingChanges();
+      await repository.addProvider('Новый провайдер');
+      expect(
+        (await repository.providers()).any(
+          (item) => item.name == 'Новый провайдер',
+        ),
+        isTrue,
+      );
+      expect(await repository.pendingChanges(), before + 1);
+      await expectLater(
+        repository.addProvider('Новый провайдер'),
+        throwsArgumentError,
+      );
+    },
+  );
+
+  test('inventory history contains receipts and transfers', () async {
+    final warehouses = await repository.warehouses();
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouses.first.id,
+      materialId: material.id,
+      quantity: 4,
+    );
+    await repository.addTransfer(
+      sourceWarehouseId: warehouses.first.id,
+      destinationWarehouseId: warehouses.last.id,
+      materialId: material.id,
+      quantity: 1,
+    );
+    expect(await repository.inventoryHistory(), hasLength(3));
+  });
 }

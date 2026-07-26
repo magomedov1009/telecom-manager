@@ -41,6 +41,23 @@ class InventoryBalance {
   final double quantity;
 }
 
+class InventoryHistoryItem {
+  const InventoryHistoryItem({
+    required this.operationType,
+    required this.warehouseName,
+    required this.materialName,
+    required this.quantity,
+    required this.occurredAt,
+    required this.comment,
+  });
+  final String operationType;
+  final String warehouseName;
+  final String materialName;
+  final double quantity;
+  final DateTime occurredAt;
+  final String? comment;
+}
+
 class LookupItem {
   const LookupItem(this.id, this.name);
   final String id;
@@ -324,6 +341,124 @@ class LocalRepository {
     );
     return rows
         .map((row) => LookupItem(row['id']! as String, row['name']! as String))
+        .toList();
+  }
+
+  Future<void> addProvider(String name) async {
+    await _addCatalogRow('providers', {
+      'name': _requiredName(name),
+      'is_active': 1,
+    }, 'provider');
+  }
+
+  Future<void> addWarehouse({
+    required String name,
+    required String providerId,
+  }) async {
+    await _addCatalogRow('warehouses', {
+      'name': _requiredName(name),
+      'provider_id': providerId,
+      'is_active': 1,
+    }, 'warehouse');
+  }
+
+  Future<void> addMaterial({
+    required String name,
+    required String itemType,
+    required String unitName,
+    String? category,
+  }) async {
+    if (!{'MATERIAL', 'EQUIPMENT'}.contains(itemType)) {
+      throw ArgumentError('Неизвестный тип позиции');
+    }
+    await _addCatalogRow('materials', {
+      'name': _requiredName(name),
+      'item_type': itemType,
+      'unit_name': _requiredName(unitName),
+      'category': category?.trim().isEmpty == true ? null : category?.trim(),
+      'is_active': 1,
+    }, 'material');
+  }
+
+  Future<void> addExtraWorkType({
+    required String name,
+    double defaultPrice = 0,
+    bool requiresMaterials = false,
+  }) async {
+    if (defaultPrice < 0) {
+      throw ArgumentError('Цена не может быть отрицательной');
+    }
+    await _addCatalogRow('extra_work_types', {
+      'name': _requiredName(name),
+      'default_price': defaultPrice,
+      'requires_materials': requiresMaterials ? 1 : 0,
+      'is_active': 1,
+    }, 'extra_work_type');
+  }
+
+  Future<void> _addCatalogRow(
+    String table,
+    Map<String, Object?> values,
+    String entityType,
+  ) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      ...values,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      try {
+        await transaction.insert(table, row);
+      } on DatabaseException catch (error) {
+        if (error.isUniqueConstraintError()) {
+          throw ArgumentError('Запись с таким названием уже существует');
+        }
+        rethrow;
+      }
+      await _queueRow(transaction, orgId, entityType, row, now);
+    });
+  }
+
+  String _requiredName(String value) {
+    final clean = value.trim();
+    if (clean.isEmpty) throw ArgumentError('Название обязательно');
+    return clean;
+  }
+
+  Future<List<InventoryHistoryItem>> inventoryHistory() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT movement.operation_type, movement.quantity, movement.occurred_at,
+             movement.comment, warehouse.name warehouse_name,
+             material.name material_name
+      FROM inventory_transactions movement
+      JOIN warehouses warehouse ON warehouse.id = movement.warehouse_id
+      JOIN materials material ON material.id = movement.material_id
+      WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
+      ORDER BY movement.occurred_at DESC, movement.created_at DESC
+      ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => InventoryHistoryItem(
+            operationType: row['operation_type']! as String,
+            warehouseName: row['warehouse_name']! as String,
+            materialName: row['material_name']! as String,
+            quantity: (row['quantity']! as num).toDouble(),
+            occurredAt: DateTime.parse(row['occurred_at']! as String),
+            comment: row['comment'] as String?,
+          ),
+        )
         .toList();
   }
 

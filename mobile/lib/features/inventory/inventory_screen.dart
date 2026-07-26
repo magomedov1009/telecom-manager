@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
 import 'settlements_screen.dart';
+import 'inventory_history_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({
@@ -45,6 +46,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          IconButton(
+            tooltip: 'История операций',
+            icon: const Icon(Icons.history),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) =>
+                    InventoryHistoryScreen(repository: widget.repository),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Переместить между складами',
             icon: const Icon(Icons.swap_horiz),
