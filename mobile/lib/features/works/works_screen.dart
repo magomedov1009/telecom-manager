@@ -42,6 +42,63 @@ class _WorksScreenState extends State<WorksScreen> {
     if (notify) widget.onChanged();
   }
 
+  Future<bool> confirmDelete(String title) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(title),
+            content: const Text(
+              'Связанные начисления будут отменены. Списанные материалы вернутся на склад.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Удалить'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> deleteExtraWork(ExtraWorkItem item) async {
+    if (!await confirmDelete('Удалить дополнительную работу?')) return;
+    try {
+      await widget.repository.deleteExtraWork(item.id);
+      if (!mounted) return;
+      reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Дополнительная работа удалена')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
+  Future<void> deleteExpense(ExpenseItem item) async {
+    if (!await confirmDelete('Удалить расход?')) return;
+    try {
+      await widget.repository.deleteExpense(item.id);
+      if (!mounted) return;
+      reload();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Расход удалён')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -103,9 +160,30 @@ class _WorksScreenState extends State<WorksScreen> {
                           subtitle: Text(
                             '${item.providerName} · ${item.workDate.day}.${item.workDate.month}.${item.workDate.year}',
                           ),
-                          trailing: Text(
-                            '${item.amount.toStringAsFixed(0)} ₽',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${item.amount.toStringAsFixed(0)} ₽',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                tooltip: 'Действия',
+                                onSelected: (value) {
+                                  if (value == 'delete') {
+                                    deleteExtraWork(item);
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Удалить'),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -120,9 +198,28 @@ class _WorksScreenState extends State<WorksScreen> {
                         subtitle: Text(
                           '${item.providerName} · ${item.paidBy == 'INSTALLER' ? 'Монтажник' : 'Офис'}',
                         ),
-                        trailing: Text(
-                          '${item.amount.toStringAsFixed(0)} ₽',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${item.amount.toStringAsFixed(0)} ₽',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            PopupMenuButton<String>(
+                              tooltip: 'Действия',
+                              onSelected: (value) {
+                                if (value == 'delete') deleteExpense(item);
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Удалить'),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     );

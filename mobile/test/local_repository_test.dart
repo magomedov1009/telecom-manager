@@ -368,6 +368,26 @@ void main() {
     expect((await repository.expenses()).single.description, 'Бензин');
   });
 
+  test('deleting expense reverses installer debt and cash impact', () async {
+    final provider = (await repository.providers()).first;
+    await repository.addExpense(
+      providerId: provider.id,
+      category: 'fuel',
+      description: 'Бензин',
+      amount: 500,
+      paidBy: 'INSTALLER',
+      expenseDate: DateTime(2026, 7, 26),
+    );
+    final expense = (await repository.expenses()).single;
+
+    await repository.deleteExpense(expense.id);
+
+    final summary = await repository.financeSummary();
+    expect(summary.officeOwesMe, 0);
+    expect(summary.availableCash, 0);
+    expect(await repository.expenses(), isEmpty);
+  });
+
   test(
     'extra work atomically writes off stock and accrues installer income',
     () async {
@@ -398,6 +418,41 @@ void main() {
       expect(balance.quantity, 5);
       expect((await repository.extraWorks()).single.amount, 700);
       expect((await repository.financeSummary()).officeOwesMe, 700);
+    },
+  );
+
+  test(
+    'deleting extra work restores stock and reverses installer income',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final material = (await repository.materials()).first;
+      final workType = (await repository.extraWorkTypes()).first;
+      await repository.addReceipt(
+        warehouseId: warehouse.id,
+        materialId: material.id,
+        quantity: 8,
+      );
+      await repository.addExtraWork(
+        providerId: provider.id,
+        workTypeId: workType.id,
+        workDate: DateTime(2026, 7, 27),
+        amount: 700,
+        warehouseId: warehouse.id,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 3),
+        ],
+      );
+      final work = (await repository.extraWorks()).single;
+
+      await repository.deleteExtraWork(work.id);
+
+      final balance = (await repository.materialBalancesForWarehouse(
+        warehouse.id,
+      )).singleWhere((item) => item.materialId == material.id);
+      expect(balance.quantity, 8);
+      expect((await repository.financeSummary()).officeOwesMe, 0);
+      expect(await repository.extraWorks(), isEmpty);
     },
   );
 

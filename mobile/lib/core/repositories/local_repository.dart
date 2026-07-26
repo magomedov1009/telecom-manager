@@ -219,6 +219,7 @@ class FinanceJournalItem {
 
 class ExpenseItem {
   const ExpenseItem({
+    required this.id,
     required this.category,
     required this.description,
     required this.amount,
@@ -227,6 +228,7 @@ class ExpenseItem {
     required this.expenseDate,
   });
 
+  final String id;
   final String category;
   final String description;
   final double amount;
@@ -237,6 +239,7 @@ class ExpenseItem {
 
 class ExtraWorkItem {
   const ExtraWorkItem({
+    required this.id,
     required this.typeName,
     required this.providerName,
     required this.amount,
@@ -244,6 +247,7 @@ class ExtraWorkItem {
     required this.comment,
   });
 
+  final String id;
   final String typeName;
   final String providerName;
   final double amount;
@@ -2144,6 +2148,7 @@ class LocalRepository {
           'warehouse_id': warehouseId,
           'provider_id': providerId,
           'material_id': material.materialId,
+          'extra_work_id': workId,
           'operation_type': 'WRITE_OFF',
           'quantity': -material.quantity,
           'comment': 'Допработа',
@@ -2203,7 +2208,7 @@ class LocalRepository {
     final orgId = await organizationId;
     final rows = await db.rawQuery(
       '''
-      SELECT work.amount, work.work_date, work.comment,
+      SELECT work.id, work.amount, work.work_date, work.comment,
              type.name type_name, provider.name provider_name
       FROM extra_works work
       JOIN extra_work_types type ON type.id = work.work_type_id
@@ -2216,6 +2221,7 @@ class LocalRepository {
     return rows
         .map(
           (row) => ExtraWorkItem(
+            id: row['id']! as String,
             typeName: row['type_name']! as String,
             providerName: row['provider_name']! as String,
             amount: (row['amount']! as num).toDouble(),
@@ -2231,7 +2237,7 @@ class LocalRepository {
     final orgId = await organizationId;
     final rows = await db.rawQuery(
       '''
-      SELECT expense.category, expense.description, expense.amount,
+      SELECT expense.id, expense.category, expense.description, expense.amount,
              expense.paid_by, expense.expense_date, provider.name provider_name
       FROM expenses expense
       JOIN providers provider ON provider.id = expense.provider_id
@@ -2243,6 +2249,7 @@ class LocalRepository {
     return rows
         .map(
           (row) => ExpenseItem(
+            id: row['id']! as String,
             category: row['category']! as String,
             description: row['description']! as String,
             amount: (row['amount']! as num).toDouble(),
@@ -2252,6 +2259,167 @@ class LocalRepository {
           ),
         )
         .toList();
+  }
+
+  Future<void> deleteExtraWork(String extraWorkId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final works = await transaction.query(
+        'extra_works',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId, orgId],
+        limit: 1,
+      );
+      if (works.isEmpty) {
+        throw ArgumentError('Дополнительная работа не найдена');
+      }
+      final work = works.single;
+      final warehouseId = work['warehouse_id'] as String?;
+      final usages = await transaction.query(
+        'extra_work_materials',
+        where: 'extra_work_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId],
+      );
+      if (usages.isNotEmpty && warehouseId == null) {
+        throw StateError('У дополнительной работы не указан склад');
+      }
+      for (final usage in usages) {
+        final returnRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': work['provider_id'],
+          'material_id': usage['material_id'],
+          'extra_work_id': extraWorkId,
+          'operation_type': 'RETURN',
+          'quantity': (usage['quantity']! as num).toDouble(),
+          'comment': 'Отмена дополнительной работы',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', returnRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          returnRow,
+          now,
+        );
+      }
+
+      Future<void> softDelete(
+        String table,
+        String entityType,
+        String foreignKey,
+      ) async {
+        final rows = await transaction.query(
+          table,
+          where: '$foreignKey = ? AND deleted_at IS NULL',
+          whereArgs: [extraWorkId],
+        );
+        for (final row in rows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: entityType,
+            entityId: row['id']! as String,
+            operation: 'delete',
+            payload: {...row, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+
+      await softDelete(
+        'extra_work_materials',
+        'extra_work_material',
+        'extra_work_id',
+      );
+      await softDelete(
+        'finance_transactions',
+        'finance_transaction',
+        'extra_work_id',
+      );
+      await transaction.update(
+        'extra_works',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ?',
+        whereArgs: [extraWorkId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'extra_work',
+        entityId: extraWorkId,
+        operation: 'delete',
+        payload: {...work, 'deleted_at': now},
+        now: now,
+      );
+    });
+  }
+
+  Future<void> deleteExpense(String expenseId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final expenses = await transaction.query(
+        'expenses',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId, orgId],
+        limit: 1,
+      );
+      if (expenses.isEmpty) throw ArgumentError('Расход не найден');
+      final expense = expenses.single;
+      final financeRows = await transaction.query(
+        'finance_transactions',
+        where: 'expense_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId],
+      );
+      for (final row in financeRows) {
+        await transaction.update(
+          'finance_transactions',
+          {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: row['id']! as String,
+          operation: 'delete',
+          payload: {...row, 'deleted_at': now},
+          now: now,
+        );
+      }
+      await transaction.update(
+        'expenses',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ?',
+        whereArgs: [expenseId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'expense',
+        entityId: expenseId,
+        operation: 'delete',
+        payload: {...expense, 'deleted_at': now},
+        now: now,
+      );
+    });
   }
 
   Future<double> _balanceInTransaction(
