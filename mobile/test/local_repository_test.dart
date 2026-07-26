@@ -330,4 +330,50 @@ void main() {
     );
     expect(await repository.inventoryHistory(), hasLength(3));
   });
+
+  test('report period includes boundary dates and provider filter', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final workType = (await repository.extraWorkTypes()).first;
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: '4001',
+      login: 'report-client',
+      address: 'Отчёт',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'WITHOUT_MATERIALS',
+      connectionDate: DateTime(2026, 7, 1),
+      price: 1500,
+      officeAmount: 500,
+      installerAmount: 1000,
+      materials: const [],
+    );
+    await repository.addExtraWork(
+      providerId: provider.id,
+      workTypeId: workType.id,
+      workDate: DateTime(2026, 7, 31),
+      amount: 700,
+    );
+    await repository.addExpense(
+      providerId: provider.id,
+      category: 'fuel',
+      description: 'Топливо',
+      amount: 200,
+      paidBy: 'OFFICE',
+      expenseDate: DateTime(2026, 7, 31),
+    );
+    final report = await repository.reportSummary(
+      dateFrom: DateTime(2026, 7, 1),
+      dateTo: DateTime(2026, 7, 31),
+      providerId: provider.id,
+    );
+    expect(report.connections, 1);
+    expect(report.extraWorks, 1);
+    expect(report.income, 2200);
+    expect(report.expenses, 200);
+    expect(report.profit, 2000);
+  });
 }

@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/repositories/local_repository.dart';
 import '../catalogs/catalogs_screen.dart';
+import '../reports/reports_screen.dart';
 
 class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key, required this.repository});
@@ -49,6 +50,20 @@ class _SyncScreenState extends State<SyncScreen> {
               context,
               MaterialPageRoute<void>(
                 builder: (_) => CatalogsScreen(repository: widget.repository),
+              ),
+            ),
+          ),
+        ),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.bar_chart_outlined),
+            title: const Text('Отчёты'),
+            subtitle: const Text('Периоды, провайдеры и экспорт CSV'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => ReportsScreen(repository: widget.repository),
               ),
             ),
           ),

@@ -195,6 +195,25 @@ class ExtraWorkItem {
   final String? comment;
 }
 
+class ReportSummary {
+  const ReportSummary({
+    required this.connections,
+    required this.connectionAmount,
+    required this.extraWorks,
+    required this.extraWorkAmount,
+    required this.expenses,
+    required this.materialSpent,
+  });
+  final int connections;
+  final double connectionAmount;
+  final int extraWorks;
+  final double extraWorkAmount;
+  final double expenses;
+  final double materialSpent;
+  double get income => connectionAmount + extraWorkAmount;
+  double get profit => income - expenses;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -460,6 +479,81 @@ class LocalRepository {
           ),
         )
         .toList();
+  }
+
+  Future<ReportSummary> reportSummary({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? providerId,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
+    String conditions(String dateColumn, String providerColumn) {
+      return [
+        'organization_id = ?',
+        'deleted_at IS NULL',
+        if (from != null) '$dateColumn >= ?',
+        if (to != null) '$dateColumn <= ?',
+        if (providerId != null) '$providerColumn = ?',
+      ].join(' AND ');
+    }
+
+    List<Object?> args() => [orgId, ?from, ?to, ?providerId];
+    Future<Map<String, Object?>> aggregate(
+      String table,
+      String dateColumn,
+      String providerColumn,
+      String amountColumn,
+    ) async {
+      return (await db.rawQuery('''
+        SELECT COUNT(*) item_count, COALESCE(SUM($amountColumn), 0) amount
+        FROM $table WHERE ${conditions(dateColumn, providerColumn)}
+        ''', args())).single;
+    }
+
+    // Connection provider is reached through the client, so use a dedicated query.
+    final connectionRows = await db.rawQuery('''
+      SELECT COUNT(*) item_count, COALESCE(SUM(connection.price), 0) amount
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+        ${from == null ? '' : 'AND connection.connection_date >= ?'}
+        ${to == null ? '' : 'AND connection.connection_date <= ?'}
+        ${providerId == null ? '' : 'AND client.provider_id = ?'}
+      ''', args());
+    final works = await aggregate(
+      'extra_works',
+      'work_date',
+      'provider_id',
+      'amount',
+    );
+    final expenseRows = await aggregate(
+      'expenses',
+      'expense_date',
+      'provider_id',
+      'amount',
+    );
+    final materialRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(ABS(quantity)), 0) amount
+      FROM inventory_transactions
+      WHERE organization_id = ? AND deleted_at IS NULL
+        AND quantity < 0
+        AND operation_type IN ('CONNECTION', 'WRITE_OFF')
+        ${from == null ? '' : 'AND substr(occurred_at, 1, 10) >= ?'}
+        ${to == null ? '' : 'AND substr(occurred_at, 1, 10) <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      ''', args());
+    final connection = connectionRows.single;
+    return ReportSummary(
+      connections: (connection['item_count']! as num).toInt(),
+      connectionAmount: (connection['amount']! as num).toDouble(),
+      extraWorks: (works['item_count']! as num).toInt(),
+      extraWorkAmount: (works['amount']! as num).toDouble(),
+      expenses: (expenseRows['amount']! as num).toDouble(),
+      materialSpent: (materialRows.single['amount']! as num).toDouble(),
+    );
   }
 
   Future<List<ClientListItem>> clients() async {
