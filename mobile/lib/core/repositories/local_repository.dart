@@ -119,6 +119,27 @@ class ConnectionListItem {
   final double price;
 }
 
+class ConnectionEditData {
+  const ConnectionEditData({
+    required this.warehouseId,
+    required this.connectionType,
+    required this.connectionDate,
+    required this.price,
+    required this.officeAmount,
+    required this.installerAmount,
+    required this.comment,
+    required this.materials,
+  });
+  final String warehouseId;
+  final String connectionType;
+  final DateTime connectionDate;
+  final double price;
+  final double officeAmount;
+  final double installerAmount;
+  final String? comment;
+  final Map<String, double> materials;
+}
+
 class MaterialBalance {
   const MaterialBalance({
     required this.materialId,
@@ -1116,6 +1137,38 @@ class LocalRepository {
           ),
         )
         .toList();
+  }
+
+  Future<ConnectionEditData> connectionEditData(String connectionId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'connections',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [connectionId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Подключение не найдено');
+    final row = rows.single;
+    final usage = await db.query(
+      'connection_materials',
+      columns: ['material_id', 'quantity'],
+      where: 'connection_id = ? AND deleted_at IS NULL',
+      whereArgs: [connectionId],
+    );
+    return ConnectionEditData(
+      warehouseId: row['warehouse_id']! as String,
+      connectionType: row['connection_type']! as String,
+      connectionDate: DateTime.parse(row['connection_date']! as String),
+      price: (row['price']! as num).toDouble(),
+      officeAmount: (row['office_amount']! as num).toDouble(),
+      installerAmount: (row['installer_amount']! as num).toDouble(),
+      comment: row['comment'] as String?,
+      materials: {
+        for (final item in usage)
+          item['material_id']! as String: (item['quantity']! as num).toDouble(),
+      },
+    );
   }
 
   Future<void> deleteConnection(String connectionId) async {
