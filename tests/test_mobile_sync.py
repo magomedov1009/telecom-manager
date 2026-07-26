@@ -107,6 +107,17 @@ class MobileSyncTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             push(request, self.db, self.token)
         self.assertEqual(error.exception.status_code, 403)
+        operational = PushRequest(changes=[PushItem(
+            entity_type="client",
+            entity_id="018f0000-0000-7000-8000-000000000003",
+            operation="upsert",
+            version=1,
+            payload={"login": "allowed"},
+        )])
+        self.assertEqual(
+            push(operational, self.db, self.token)[0].status,
+            "accepted",
+        )
 
     def test_admin_creates_organization_and_invites_member(self) -> None:
         created = create_organization(
@@ -153,6 +164,19 @@ class MobileSyncTest(unittest.TestCase):
         )
         self.assertEqual(installer_login.role, "installer")
         self.assertEqual(installer_login.organization_id, created.id)
+        installer_token = self.db.scalar(
+            select(MobileDeviceToken).where(
+                MobileDeviceToken.organization_id == created.id,
+                MobileDeviceToken.user_id == invited.user_id,
+            )
+        )
+        with self.assertRaises(HTTPException) as forbidden:
+            create_organization(
+                CreateOrganizationRequest(name="Запрещено"),
+                self.db,
+                installer_token,
+            )
+        self.assertEqual(forbidden.exception.status_code, 403)
 
         remove_organization_member(
             created.id,
@@ -161,6 +185,9 @@ class MobileSyncTest(unittest.TestCase):
             selected_token,
         )
         self.assertEqual(len(organization_members(created.id, self.db, selected_token)), 1)
+        with self.assertRaises(HTTPException) as revoked:
+            pull(self.db, installer_token, cursor=0, limit=200)
+        self.assertEqual(revoked.exception.status_code, 403)
 
 
 if __name__ == "__main__":

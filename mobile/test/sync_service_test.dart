@@ -361,11 +361,50 @@ void main() {
     );
 
     await firstRepository.addProvider('Городская сеть');
+    var localProvider = (await firstRepository.providerCatalog()).single;
+    await firstRepository.addWarehouse(
+      name: 'Главный склад',
+      providerId: localProvider.id,
+    );
+    await firstRepository.addMaterial(
+      name: 'ONU Test',
+      itemType: 'EQUIPMENT',
+      unitName: 'шт.',
+    );
+    final warehouse = (await firstRepository.warehouses()).single;
+    final material = (await firstRepository.materials()).single;
+    await firstRepository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 10,
+    );
+    final clientId = await firstRepository.addClient(
+      providerId: localProvider.id,
+      contractNumber: 'SYNC-1',
+      login: 'sync-client',
+      address: 'Синхронная 1',
+    );
+    await firstRepository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 7, 27),
+      price: 1500,
+      officeAmount: 500,
+      installerAmount: 1000,
+      materials: [
+        ConnectionMaterialInput(materialId: material.id, quantity: 2),
+      ],
+    );
     await firstService.synchronize();
     final received = await secondService.synchronize();
-    expect(received.received, 1);
+    expect(received.received, greaterThanOrEqualTo(10));
     var remoteProvider = (await secondRepository.providerCatalog()).single;
     expect(remoteProvider.name, 'Городская сеть');
+    expect((await secondRepository.clients()).single.login, 'sync-client');
+    expect((await secondRepository.connections()).single.price, 1500);
+    expect((await secondRepository.inventoryBalances()).single.quantity, 8);
+    expect((await secondRepository.financeSummary()).customerReceived, 1500);
 
     await secondRepository.updateProvider(
       providerId: remoteProvider.id,
@@ -373,7 +412,8 @@ void main() {
     );
     await secondService.synchronize();
     await firstService.synchronize();
-    remoteProvider = (await firstRepository.providerCatalog()).single;
+    localProvider = (await firstRepository.providerCatalog()).single;
+    remoteProvider = localProvider;
     expect(remoteProvider.name, 'Городская сеть 2');
 
     await firstDatabase.close();

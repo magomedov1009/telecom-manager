@@ -29,6 +29,7 @@ class _SyncScreenState extends State<SyncScreen> {
   final usernameController = TextEditingController();
   final passwordController = TextEditingController();
   late Future<int> pending;
+  late String effectiveRole;
   bool busy = false;
   String? statusMessage;
 
@@ -36,6 +37,7 @@ class _SyncScreenState extends State<SyncScreen> {
   void initState() {
     super.initState();
     pending = widget.repository.pendingChanges();
+    effectiveRole = widget.role;
     _loadSettings();
   }
 
@@ -57,7 +59,7 @@ class _SyncScreenState extends State<SyncScreen> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        if (widget.role == 'admin')
+        if (effectiveRole == 'admin')
           Card(
             child: ListTile(
               leading: const Icon(Icons.settings_outlined),
@@ -74,7 +76,7 @@ class _SyncScreenState extends State<SyncScreen> {
               ),
             ),
           ),
-        if (widget.role == 'admin')
+        if (effectiveRole == 'admin')
           Card(
             child: Column(
               children: [
@@ -96,7 +98,7 @@ class _SyncScreenState extends State<SyncScreen> {
               ],
             ),
           ),
-        if (widget.role != 'installer')
+        if (effectiveRole != 'installer')
           Card(
             child: ListTile(
               leading: const Icon(Icons.bar_chart_outlined),
@@ -111,7 +113,7 @@ class _SyncScreenState extends State<SyncScreen> {
               ),
             ),
           ),
-        if (widget.role == 'admin')
+        if (effectiveRole == 'admin')
           Card(
             child: ListTile(
               leading: const Icon(Icons.manage_accounts_outlined),
@@ -279,7 +281,9 @@ class _SyncScreenState extends State<SyncScreen> {
         }
       }
       widget.onChanged();
+      final localUser = await widget.repository.currentUser();
       setState(() {
+        effectiveRole = localUser?.role ?? effectiveRole;
         statusMessage =
             'Устройство подключено. Создано отдельное серверное '
             'рабочее пространство.';
@@ -368,8 +372,10 @@ class _SyncScreenState extends State<SyncScreen> {
         organizationId: created.id,
       );
       widget.onChanged();
+      final localUser = await widget.repository.currentUser();
       if (mounted) {
         setState(() {
+          effectiveRole = localUser?.role ?? effectiveRole;
           statusMessage = 'Создана и выбрана организация «${created.name}»';
           pending = widget.repository.pendingChanges();
         });

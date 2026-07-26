@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
@@ -376,6 +376,12 @@ def remove_organization_member(
                 "В организации должен остаться администратор",
             )
     db.delete(membership)
+    db.execute(
+        delete(MobileDeviceToken).where(
+            MobileDeviceToken.organization_id == organization_id,
+            MobileDeviceToken.user_id == user_id,
+        )
+    )
     db.commit()
 
 
@@ -385,19 +391,12 @@ def push(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> list[PushResult]:
-    membership = db.scalar(
-        select(MobileMembership).where(
-            MobileMembership.organization_id == token.organization_id,
-            MobileMembership.user_id == token.user_id,
-        )
-    )
+    membership = current_membership(db, token)
     operational_types = {
         "client", "connection", "connection_material",
         "inventory_transaction", "finance_transaction",
         "extra_work", "extra_work_material", "expense",
     }
-    if membership is None:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к организации")
     if membership.role != "admin" and any(item.entity_type not in operational_types for item in payload.changes):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Роль не разрешает изменение справочников")
     results: list[PushResult] = []
@@ -450,6 +449,7 @@ def pull(
     cursor: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> PullResponse:
+    current_membership(db, token)
     changes = list(db.scalars(
         select(MobileSyncChange)
         .where(MobileSyncChange.organization_id == token.organization_id, MobileSyncChange.id > cursor)

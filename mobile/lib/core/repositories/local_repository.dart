@@ -622,7 +622,54 @@ class LocalRepository {
         );
       });
     }
+    var localUsers = await db.query(
+      'users',
+      columns: ['id'],
+      where: 'organization_id = ? AND username = ? AND deleted_at IS NULL',
+      whereArgs: [id, username.trim()],
+      limit: 1,
+    );
+    if (localUsers.isEmpty) {
+      await _insertUser(
+        db,
+        organizationId: id,
+        username: _requiredName(username),
+        fullName: _requiredName(fullName),
+        role: role,
+        password: password,
+        queueChange: false,
+      );
+      localUsers = await db.query(
+        'users',
+        columns: ['id'],
+        where: 'organization_id = ? AND username = ? AND deleted_at IS NULL',
+        whereArgs: [id, username.trim()],
+        limit: 1,
+      );
+    } else {
+      final userId = localUsers.single['id']! as String;
+      await db.transaction((transaction) async {
+        await _setPassword(transaction, userId, password);
+        await transaction.update(
+          'users',
+          {
+            'full_name': _requiredName(fullName),
+            'role': role,
+            'manager_id': null,
+            'is_active': 1,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+            'sync_state': 'synced',
+          },
+          where: 'id = ?',
+          whereArgs: [userId],
+        );
+      });
+    }
     await switchOrganization(id);
+    await db.insert('app_settings', {
+      'key': 'current_user_id',
+      'value': localUsers.single['id']! as String,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     await db.insert('app_settings', {
       'key': 'active_sync_server_url',
       'value': normalizedServer,
