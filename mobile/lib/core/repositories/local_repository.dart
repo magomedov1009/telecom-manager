@@ -144,6 +144,40 @@ class FinanceJournalItem {
   final DateTime occurredAt;
 }
 
+class ExpenseItem {
+  const ExpenseItem({
+    required this.category,
+    required this.description,
+    required this.amount,
+    required this.paidBy,
+    required this.providerName,
+    required this.expenseDate,
+  });
+
+  final String category;
+  final String description;
+  final double amount;
+  final String paidBy;
+  final String providerName;
+  final DateTime expenseDate;
+}
+
+class ExtraWorkItem {
+  const ExtraWorkItem({
+    required this.typeName,
+    required this.providerName,
+    required this.amount,
+    required this.workDate,
+    required this.comment,
+  });
+
+  final String typeName;
+  final String providerName;
+  final double amount;
+  final DateTime workDate;
+  final String? comment;
+}
+
 class LocalRepository {
   LocalRepository(this.database);
 
@@ -268,6 +302,21 @@ class LocalRepository {
     final orgId = await organizationId;
     final rows = await db.query(
       'providers',
+      columns: ['id', 'name'],
+      where: 'organization_id = ? AND deleted_at IS NULL AND is_active = 1',
+      whereArgs: [orgId],
+      orderBy: 'name',
+    );
+    return rows
+        .map((row) => LookupItem(row['id']! as String, row['name']! as String))
+        .toList();
+  }
+
+  Future<List<LookupItem>> extraWorkTypes() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'extra_work_types',
       columns: ['id', 'name'],
       where: 'organization_id = ? AND deleted_at IS NULL AND is_active = 1',
       whereArgs: [orgId],
@@ -765,9 +814,12 @@ class LocalRepository {
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
     );
-    final installerExpenses = await sum(
-      "CASE WHEN transaction_type = 'EXPENSE' AND accrual_to = 'INSTALLER' THEN ABS(amount) ELSE 0 END",
-    );
+    final expenseRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE organization_id = ? AND paid_by = 'INSTALLER'
+        AND deleted_at IS NULL$providerClause
+      ''', arguments);
+    final installerExpenses = (expenseRows.single['amount']! as num).toDouble();
     final balance =
         extraWorkInstaller +
         installerExpenses -
@@ -862,6 +914,256 @@ class LocalRepository {
     });
   }
 
+  Future<void> addExpense({
+    required String providerId,
+    required String category,
+    required String description,
+    required double amount,
+    required String paidBy,
+    required DateTime expenseDate,
+    String? comment,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Сумма должна быть больше нуля');
+    if (description.trim().isEmpty) {
+      throw ArgumentError('Описание обязательно');
+    }
+    if (!{'INSTALLER', 'OFFICE'}.contains(paidBy)) {
+      throw ArgumentError('Укажите, кто оплатил расход');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final expenseId = _uuid.v7();
+    final expenseRow = <String, Object?>{
+      'id': expenseId,
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'category': category,
+      'description': description.trim(),
+      'amount': amount,
+      'paid_by': paidBy,
+      'expense_date': expenseDate.toIso8601String().substring(0, 10),
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    final financeRow = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'expense_id': expenseId,
+      'transaction_type': 'EXPENSE',
+      'amount': -amount,
+      'comment': description.trim(),
+      'occurred_at': expenseDate.toUtc().toIso8601String(),
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('expenses', expenseRow);
+      await transaction.insert('finance_transactions', financeRow);
+      for (final item in [
+        ('expense', expenseRow),
+        ('finance_transaction', financeRow),
+      ]) {
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: item.$1,
+          entityId: item.$2['id']! as String,
+          operation: 'upsert',
+          payload: item.$2,
+          now: now,
+        );
+      }
+    });
+  }
+
+  Future<void> addExtraWork({
+    required String providerId,
+    required String workTypeId,
+    required DateTime workDate,
+    required double amount,
+    String? warehouseId,
+    List<ConnectionMaterialInput> materials = const [],
+    String? comment,
+  }) async {
+    if (amount < 0) {
+      throw ArgumentError('Стоимость не может быть отрицательной');
+    }
+    if (materials.any((item) => item.quantity <= 0)) {
+      throw ArgumentError('Количество материала должно быть больше нуля');
+    }
+    if (materials.isNotEmpty && warehouseId == null) {
+      throw ArgumentError('Выберите склад для списания');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final workId = _uuid.v7();
+    final workRow = <String, Object?>{
+      'id': workId,
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'work_type_id': workTypeId,
+      'warehouse_id': warehouseId,
+      'work_date': workDate.toIso8601String().substring(0, 10),
+      'amount': amount,
+      'office_amount': 0,
+      'installer_amount': amount,
+      'status': 'completed',
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      for (final material in materials) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId!,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
+          throw StateError('Недостаточно материала на выбранном складе');
+        }
+      }
+      await transaction.insert('extra_works', workRow);
+      await _queueRow(transaction, orgId, 'extra_work', workRow, now);
+      for (final material in materials) {
+        final usageRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'extra_work_id': workId,
+          'material_id': material.materialId,
+          'quantity': material.quantity,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        final inventoryRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': providerId,
+          'material_id': material.materialId,
+          'operation_type': 'WRITE_OFF',
+          'quantity': -material.quantity,
+          'comment': 'Допработа',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('extra_work_materials', usageRow);
+        await transaction.insert('inventory_transactions', inventoryRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'extra_work_material',
+          usageRow,
+          now,
+        );
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          inventoryRow,
+          now,
+        );
+      }
+      if (amount > 0) {
+        final financeRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'extra_work_id': workId,
+          'transaction_type': 'EXTRA_WORK',
+          'accrual_to': 'INSTALLER',
+          'amount': amount,
+          'comment': 'Допработа: офис должен монтажнику',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', financeRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'finance_transaction',
+          financeRow,
+          now,
+        );
+      }
+    });
+  }
+
+  Future<List<ExtraWorkItem>> extraWorks() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT work.amount, work.work_date, work.comment,
+             type.name type_name, provider.name provider_name
+      FROM extra_works work
+      JOIN extra_work_types type ON type.id = work.work_type_id
+      JOIN providers provider ON provider.id = work.provider_id
+      WHERE work.organization_id = ? AND work.deleted_at IS NULL
+      ORDER BY work.work_date DESC, work.created_at DESC
+      ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => ExtraWorkItem(
+            typeName: row['type_name']! as String,
+            providerName: row['provider_name']! as String,
+            amount: (row['amount']! as num).toDouble(),
+            workDate: DateTime.parse(row['work_date']! as String),
+            comment: row['comment'] as String?,
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<ExpenseItem>> expenses() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT expense.category, expense.description, expense.amount,
+             expense.paid_by, expense.expense_date, provider.name provider_name
+      FROM expenses expense
+      JOIN providers provider ON provider.id = expense.provider_id
+      WHERE expense.organization_id = ? AND expense.deleted_at IS NULL
+      ORDER BY expense.expense_date DESC, expense.created_at DESC
+      ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => ExpenseItem(
+            category: row['category']! as String,
+            description: row['description']! as String,
+            amount: (row['amount']! as num).toDouble(),
+            paidBy: row['paid_by']! as String,
+            providerName: row['provider_name']! as String,
+            expenseDate: DateTime.parse(row['expense_date']! as String),
+          ),
+        )
+        .toList();
+  }
+
   Future<double> _balanceInTransaction(
     DatabaseExecutor transaction, {
     required String organizationId,
@@ -878,6 +1180,24 @@ class LocalRepository {
       [organizationId, warehouseId, materialId],
     );
     return (rows.single['quantity']! as num).toDouble();
+  }
+
+  Future<void> _queueRow(
+    DatabaseExecutor transaction,
+    String organizationId,
+    String entityType,
+    Map<String, Object?> row,
+    String now,
+  ) {
+    return _enqueue(
+      transaction,
+      organizationId: organizationId,
+      entityType: entityType,
+      entityId: row['id']! as String,
+      operation: 'upsert',
+      payload: row,
+      now: now,
+    );
   }
 
   Future<int> pendingChanges() async {
@@ -968,6 +1288,29 @@ class LocalRepository {
           'item_type': 'MATERIAL',
           'unit_name': 'м',
           'category': 'Кабель',
+          'created_at': now,
+          'updated_at': now,
+        },
+      ),
+      (
+        'extra_work_types',
+        {
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'name': 'Ремонт линии',
+          'default_price': 0,
+          'requires_materials': 1,
+          'created_at': now,
+          'updated_at': now,
+        },
+      ),
+      (
+        'extra_work_types',
+        {
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'name': 'Настройка оборудования',
+          'default_price': 0,
           'created_at': now,
           'updated_at': now,
         },

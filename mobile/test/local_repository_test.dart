@@ -28,7 +28,7 @@ void main() {
     expect(summary.providers, 2);
     expect(summary.warehouses, 2);
     expect(summary.materials, 2);
-    expect(summary.pendingChanges, 7);
+    expect(summary.pendingChanges, 9);
   });
 
   test('receipt updates stock and sync queue atomically', () async {
@@ -242,6 +242,56 @@ void main() {
       expect(summary.iOweOffice, 200);
       expect(summary.availableCash, 1200);
       expect((await repository.financeJournal()).length, 3);
+    },
+  );
+
+  test('installer expense increases office debt and reduces cash', () async {
+    final provider = (await repository.providers()).first;
+    await repository.addExpense(
+      providerId: provider.id,
+      category: 'fuel',
+      description: 'Бензин',
+      amount: 500,
+      paidBy: 'INSTALLER',
+      expenseDate: DateTime(2026, 7, 26),
+    );
+
+    final summary = await repository.financeSummary();
+    expect(summary.officeOwesMe, 500);
+    expect(summary.availableCash, -500);
+    expect((await repository.expenses()).single.description, 'Бензин');
+  });
+
+  test(
+    'extra work atomically writes off stock and accrues installer income',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final material = (await repository.materials()).first;
+      final workType = (await repository.extraWorkTypes()).first;
+      await repository.addReceipt(
+        warehouseId: warehouse.id,
+        materialId: material.id,
+        quantity: 8,
+      );
+
+      await repository.addExtraWork(
+        providerId: provider.id,
+        workTypeId: workType.id,
+        workDate: DateTime(2026, 7, 27),
+        amount: 700,
+        warehouseId: warehouse.id,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 3),
+        ],
+      );
+
+      final balance = (await repository.materialBalancesForWarehouse(
+        warehouse.id,
+      )).singleWhere((item) => item.materialId == material.id);
+      expect(balance.quantity, 5);
+      expect((await repository.extraWorks()).single.amount, 700);
+      expect((await repository.financeSummary()).officeOwesMe, 700);
     },
   );
 }

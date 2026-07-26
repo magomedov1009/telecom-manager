@@ -6,6 +6,7 @@ import 'features/finance/finance_screen.dart';
 import 'features/inventory/inventory_screen.dart';
 import 'features/clients/clients_screen.dart';
 import 'features/sync/sync_screen.dart';
+import 'features/works/works_screen.dart';
 
 class TelecomManagerApp extends StatelessWidget {
   const TelecomManagerApp({super.key, required this.repository});
@@ -76,6 +77,11 @@ class _AppShellState extends State<AppShell> {
         repository: widget.repository,
         onChanged: refresh,
       ),
+      WorksScreen(
+        key: ValueKey('works-$refreshKey'),
+        repository: widget.repository,
+        onChanged: refresh,
+      ),
       SyncScreen(
         key: ValueKey('sync-$refreshKey'),
         repository: widget.repository,
@@ -106,6 +112,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.account_balance_wallet_outlined),
             selectedIcon: Icon(Icons.account_balance_wallet),
             label: 'Финансы',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.build_outlined),
+            selectedIcon: Icon(Icons.build),
+            label: 'Работы',
           ),
           NavigationDestination(
             icon: Icon(Icons.sync_outlined),
