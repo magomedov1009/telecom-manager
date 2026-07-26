@@ -990,11 +990,33 @@ void main() {
     expect((await repository.users()).single.username, 'admin');
     expect(await repository.authenticate('admin', 'wrong'), isNull);
     expect((await repository.authenticate('admin', '0000'))?.role, 'admin');
+    final admin = (await repository.users()).single;
+    await expectLater(
+      repository.updateUser(
+        userId: admin.id,
+        fullName: admin.fullName,
+        role: 'manager',
+        isActive: true,
+      ),
+      throwsArgumentError,
+    );
+    await repository.addUser(
+      username: 'manager1',
+      fullName: 'Менеджер Один',
+      role: 'manager',
+      password: '1234',
+      comment: 'Руководитель группы',
+    );
+    final manager = (await repository.users()).singleWhere(
+      (user) => user.username == 'manager1',
+    );
     await repository.addUser(
       username: 'installer1',
       fullName: 'Монтажник Один',
       role: 'installer',
       password: '1234',
+      managerId: manager.id,
+      comment: 'Выездная бригада',
     );
     expect(
       (await repository.authenticate('installer1', '1234'))?.role,
@@ -1003,6 +1025,22 @@ void main() {
     final installer = (await repository.users()).singleWhere(
       (user) => user.username == 'installer1',
     );
+    expect(installer.managerId, manager.id);
+    expect(installer.comment, 'Выездная бригада');
+    await repository.updateUser(
+      userId: installer.id,
+      fullName: 'Монтажник Первый',
+      role: 'installer',
+      managerId: manager.id,
+      comment: 'Обновлён',
+      isActive: true,
+    );
+    final updatedInstaller = (await repository.users()).singleWhere(
+      (user) => user.id == installer.id,
+    );
+    expect(updatedInstaller.fullName, 'Монтажник Первый');
+    expect(updatedInstaller.managerId, manager.id);
+    expect(updatedInstaller.comment, 'Обновлён');
     await repository.authenticate('admin', '0000');
     await repository.toggleUser(installer.id);
     expect(await repository.authenticate('installer1', '1234'), isNull);
@@ -1012,6 +1050,12 @@ void main() {
     expect(
       (await repository.authenticate('installer1', '5678'))?.role,
       'installer',
+    );
+    expect(
+      (await repository.users())
+          .singleWhere((user) => user.id == installer.id)
+          .lastLoginAt,
+      isNotNull,
     );
   });
 }

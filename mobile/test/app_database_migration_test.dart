@@ -50,6 +50,23 @@ void main() {
             )
           ''');
           await db.execute('''
+            CREATE TABLE users (
+              id TEXT PRIMARY KEY,
+              organization_id TEXT NOT NULL,
+              username TEXT NOT NULL,
+              full_name TEXT NOT NULL,
+              role TEXT NOT NULL,
+              password_hash TEXT,
+              password_salt TEXT,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              deleted_at TEXT,
+              version INTEGER NOT NULL DEFAULT 1,
+              sync_state TEXT NOT NULL DEFAULT 'pending'
+            )
+          ''');
+          await db.execute('''
             CREATE TABLE clients (
               id TEXT PRIMARY KEY,
               organization_id TEXT NOT NULL,
@@ -92,6 +109,7 @@ void main() {
     final workTypeColumns = await upgraded.rawQuery(
       'PRAGMA table_info(extra_work_types)',
     );
+    final userColumns = await upgraded.rawQuery('PRAGMA table_info(users)');
     final rows = await upgraded.query('clients');
 
     expect(columns.map((row) => row['name']), contains('comment'));
@@ -100,6 +118,9 @@ void main() {
       workTypeColumns.map((row) => row['name']),
       contains('default_office_amount'),
     );
+    expect(userColumns.map((row) => row['name']), contains('manager_id'));
+    expect(userColumns.map((row) => row['name']), contains('comment'));
+    expect(userColumns.map((row) => row['name']), contains('last_login_at'));
     expect(rows.single['id'], 'client-1');
     expect(rows.single['comment'], isNull);
 

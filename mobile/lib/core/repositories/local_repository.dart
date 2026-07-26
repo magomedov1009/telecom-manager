@@ -94,12 +94,20 @@ class UserItem {
     required this.fullName,
     required this.role,
     required this.isActive,
+    required this.managerId,
+    required this.comment,
+    required this.createdAt,
+    required this.lastLoginAt,
   });
   final String id;
   final String username;
   final String fullName;
   final String role;
   final bool isActive;
+  final String? managerId;
+  final String? comment;
+  final DateTime createdAt;
+  final DateTime? lastLoginAt;
 }
 
 class ClientListItem {
@@ -515,6 +523,12 @@ class LocalRepository {
             fullName: row['full_name']! as String,
             role: row['role']! as String,
             isActive: row['is_active'] == 1,
+            managerId: row['manager_id'] as String?,
+            comment: row['comment'] as String?,
+            createdAt: DateTime.parse(row['created_at']! as String),
+            lastLoginAt: row['last_login_at'] == null
+                ? null
+                : DateTime.parse(row['last_login_at']! as String),
           ),
         )
         .toList();
@@ -525,6 +539,9 @@ class LocalRepository {
     required String fullName,
     required String role,
     required String password,
+    String? managerId,
+    String? comment,
+    bool isActive = true,
   }) async {
     if (!{'admin', 'manager', 'installer'}.contains(role)) {
       throw ArgumentError('Неизвестная роль');
@@ -537,6 +554,9 @@ class LocalRepository {
       fullName: _requiredName(fullName),
       role: role,
       password: password,
+      managerId: managerId,
+      comment: comment,
+      isActive: isActive,
     );
   }
 
@@ -547,10 +567,19 @@ class LocalRepository {
     required String fullName,
     required String role,
     required String password,
+    String? managerId,
+    String? comment,
+    bool isActive = true,
   }) async {
     if (password.length < 4) {
       throw ArgumentError('Пароль должен содержать минимум 4 символа');
     }
+    final validatedManagerId = await _validatedManagerId(
+      db,
+      organizationId: organizationId,
+      role: role,
+      managerId: managerId,
+    );
     final now = DateTime.now().toUtc().toIso8601String();
     final row = <String, Object?>{
       'id': _uuid.v7(),
@@ -558,7 +587,9 @@ class LocalRepository {
       'username': username,
       'full_name': fullName,
       'role': role,
-      'is_active': 1,
+      'manager_id': validatedManagerId,
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'is_active': isActive ? 1 : 0,
       'created_at': now,
       'updated_at': now,
       'version': 1,
@@ -575,6 +606,117 @@ class LocalRepository {
     row['password_hash'] = stored['password_hash'];
     row['password_salt'] = stored['password_salt'];
     await _queueRow(db, organizationId, 'user', row, now);
+  }
+
+  Future<String?> _validatedManagerId(
+    DatabaseExecutor db, {
+    required String organizationId,
+    required String role,
+    String? managerId,
+  }) async {
+    if (role != 'installer' || managerId == null || managerId.isEmpty) {
+      return null;
+    }
+    final rows = await db.query(
+      'users',
+      columns: ['id'],
+      where:
+          'id = ? AND organization_id = ? AND role = ? '
+          'AND is_active = 1 AND deleted_at IS NULL',
+      whereArgs: [managerId, organizationId, 'manager'],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw ArgumentError('Выбранный менеджер не найден или отключён');
+    }
+    return managerId;
+  }
+
+  Future<void> updateUser({
+    required String userId,
+    required String fullName,
+    required String role,
+    String? managerId,
+    String? comment,
+    required bool isActive,
+  }) async {
+    if (!{'admin', 'manager', 'installer'}.contains(role)) {
+      throw ArgumentError('Неизвестная роль');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final current = await currentUser();
+    if (current?.id == userId && !isActive) {
+      throw ArgumentError('Нельзя отключить текущего пользователя');
+    }
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'users',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [userId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+      final old = rows.single;
+      if (old['role'] == 'admin' &&
+          old['is_active'] == 1 &&
+          (role != 'admin' || !isActive)) {
+        await _ensureAnotherActiveAdmin(transaction, orgId, userId);
+      }
+      final validatedManagerId = await _validatedManagerId(
+        transaction,
+        organizationId: orgId,
+        role: role,
+        managerId: managerId,
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      await transaction.update(
+        'users',
+        {
+          'full_name': _requiredName(fullName),
+          'role': role,
+          'manager_id': validatedManagerId,
+          'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+          'is_active': isActive ? 1 : 0,
+          'updated_at': now,
+          'version': (old['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+        limit: 1,
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
+  }
+
+  Future<void> _ensureAnotherActiveAdmin(
+    DatabaseExecutor db,
+    String organizationId,
+    String excludedUserId,
+  ) async {
+    final count =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            '''
+            SELECT COUNT(*) FROM users
+            WHERE organization_id = ? AND id <> ? AND role = 'admin'
+              AND is_active = 1 AND deleted_at IS NULL
+            ''',
+            [organizationId, excludedUserId],
+          ),
+        ) ??
+        0;
+    if (count == 0) {
+      throw ArgumentError(
+        'В организации должен остаться активный администратор',
+      );
+    }
   }
 
   Future<void> _setPassword(
@@ -628,6 +770,13 @@ class LocalRepository {
     if (base64Encode(await key.extractBytes()) != row['password_hash']) {
       return null;
     }
+    final loginAt = DateTime.now().toUtc();
+    await db.update(
+      'users',
+      {'last_login_at': loginAt.toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [row['id']],
+    );
     await db.insert('app_settings', {
       'key': 'current_user_id',
       'value': row['id']! as String,
@@ -638,6 +787,10 @@ class LocalRepository {
       fullName: row['full_name']! as String,
       role: row['role']! as String,
       isActive: true,
+      managerId: row['manager_id'] as String?,
+      comment: row['comment'] as String?,
+      createdAt: DateTime.parse(row['created_at']! as String),
+      lastLoginAt: loginAt,
     );
   }
 
@@ -665,6 +818,12 @@ class LocalRepository {
       fullName: row['full_name']! as String,
       role: row['role']! as String,
       isActive: true,
+      managerId: row['manager_id'] as String?,
+      comment: row['comment'] as String?,
+      createdAt: DateTime.parse(row['created_at']! as String),
+      lastLoginAt: row['last_login_at'] == null
+          ? null
+          : DateTime.parse(row['last_login_at']! as String),
     );
   }
 
@@ -683,31 +842,34 @@ class LocalRepository {
     }
     final db = await database.instance;
     final orgId = await organizationId;
-    final belongs =
-        Sqflite.firstIntValue(
-          await db.rawQuery(
-            'SELECT COUNT(*) FROM users WHERE id = ? AND organization_id = ?',
-            [userId, orgId],
-          ),
-        ) ??
-        0;
-    if (belongs != 1) throw ArgumentError('Пользователь не найден');
-    await _setPassword(db, userId, password);
-    final row = (await db.query(
-      'users',
-      where: 'id = ?',
-      whereArgs: [userId],
-      limit: 1,
-    )).single;
-    await _enqueue(
-      db,
-      organizationId: orgId,
-      entityType: 'user',
-      entityId: userId,
-      operation: 'upsert',
-      payload: row,
-      now: DateTime.now().toUtc().toIso8601String(),
-    );
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'users',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [userId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _setPassword(transaction, userId, password);
+      await transaction.update(
+        'users',
+        {
+          'updated_at': now,
+          'version': (rows.single['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+        limit: 1,
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
   }
 
   Future<void> toggleUser(String userId) async {
@@ -724,28 +886,31 @@ class LocalRepository {
       limit: 1,
     );
     if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
-    final now = DateTime.now().toUtc().toIso8601String();
-    final active = rows.single['is_active'] == 1 ? 0 : 1;
-    await db.update(
-      'users',
-      {'is_active': active, 'updated_at': now, 'sync_state': 'pending'},
-      where: 'id = ?',
-      whereArgs: [userId],
-    );
-    final row = (await db.query(
-      'users',
-      where: 'id = ?',
-      whereArgs: [userId],
-    )).single;
-    await _enqueue(
-      db,
-      organizationId: orgId,
-      entityType: 'user',
-      entityId: userId,
-      operation: 'upsert',
-      payload: row,
-      now: now,
-    );
+    await db.transaction((transaction) async {
+      final old = rows.single;
+      final active = old['is_active'] == 1 ? 0 : 1;
+      if (old['role'] == 'admin' && old['is_active'] == 1) {
+        await _ensureAnotherActiveAdmin(transaction, orgId, userId);
+      }
+      final now = DateTime.now().toUtc().toIso8601String();
+      await transaction.update(
+        'users',
+        {
+          'is_active': active,
+          'updated_at': now,
+          'version': (old['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
   }
 
   Future<DashboardSummary> dashboardSummary() async {

@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 10,
+        version: 11,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -238,6 +238,11 @@ class AppDatabase {
         'ALTER TABLE extra_work_types ADD COLUMN default_office_amount REAL',
       );
     }
+    if (oldVersion < 11) {
+      await db.execute('ALTER TABLE users ADD COLUMN manager_id TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN comment TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT');
+    }
   }
 
   Future<void> _createConnectionMaterials(Database db) async {
@@ -380,6 +385,9 @@ class AppDatabase {
         role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'installer')),
         password_hash TEXT,
         password_salt TEXT,
+        manager_id TEXT,
+        comment TEXT,
+        last_login_at TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
