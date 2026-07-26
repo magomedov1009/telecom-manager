@@ -187,7 +187,12 @@ class MaterialSettlement {
 class FinanceSummary {
   const FinanceSummary({
     required this.customerReceived,
+    required this.installerAccrued,
     required this.officeAccrued,
+    required this.extraWorkIncome,
+    required this.incomeTotal,
+    required this.expensesTotal,
+    required this.profit,
     required this.paidToOffice,
     required this.paidFromOffice,
     required this.balance,
@@ -195,7 +200,12 @@ class FinanceSummary {
   });
 
   final double customerReceived;
+  final double installerAccrued;
   final double officeAccrued;
+  final double extraWorkIncome;
+  final double incomeTotal;
+  final double expensesTotal;
+  final double profit;
   final double paidToOffice;
   final double paidFromOffice;
   final double balance;
@@ -2160,8 +2170,15 @@ class LocalRepository {
     final customerReceived = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND amount > 0 THEN amount ELSE 0 END",
     );
+    final installerAccrued = await sum(
+      "CASE WHEN transaction_type IN ('CONNECTION', 'EXTRA_WORK') "
+      "AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
+    );
     final officeAccrued = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
+    );
+    final extraWorkIncome = await sum(
+      "CASE WHEN transaction_type = 'EXTRA_WORK' AND amount > 0 THEN amount ELSE 0 END",
     );
     final paidFromOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
@@ -2207,6 +2224,21 @@ class LocalRepository {
       [orgId, ?providerId, ?expenseFrom, ?expenseTo],
     );
     final installerExpenses = (expenseRows.single['amount']! as num).toDouble();
+    final allExpenseWhere = [
+      'organization_id = ?',
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseFrom != null) 'expense_date >= ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final allExpenseRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE $allExpenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseFrom, ?expenseTo],
+    );
+    final expensesTotal = (allExpenseRows.single['amount']! as num).toDouble();
     final debtExpenseWhere = [
       'organization_id = ?',
       "paid_by = 'INSTALLER'",
@@ -2230,9 +2262,15 @@ class LocalRepository {
         adjustments -
         officeAccruedBalance +
         paidToOfficeBalance;
+    final incomeTotal = customerReceived + extraWorkIncome;
     return FinanceSummary(
       customerReceived: customerReceived,
+      installerAccrued: installerAccrued,
       officeAccrued: officeAccrued,
+      extraWorkIncome: extraWorkIncome,
+      incomeTotal: incomeTotal,
+      expensesTotal: expensesTotal,
+      profit: incomeTotal - expensesTotal,
       paidToOffice: paidToOffice,
       paidFromOffice: paidFromOffice,
       balance: balance,

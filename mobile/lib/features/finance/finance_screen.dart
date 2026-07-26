@@ -273,6 +273,35 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   ),
                 ),
               ),
+              if (providerId != null ||
+                  transactionType != null ||
+                  dateFrom != null ||
+                  dateTo != null ||
+                  search.text.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.filter_alt_outlined),
+                    title: const Text('Фильтры применены'),
+                    subtitle: Text(
+                      [
+                        if (dateFrom != null)
+                          'с ${dateFrom!.day}.${dateFrom!.month}.${dateFrom!.year}',
+                        if (dateTo != null)
+                          'по ${dateTo!.day}.${dateTo!.month}.${dateTo!.year}',
+                        if (transactionType != null)
+                          labels[transactionType] ?? transactionType!,
+                        if (search.text.isNotEmpty) '«${search.text}»',
+                      ].join(' · '),
+                    ),
+                    trailing: IconButton(
+                      tooltip: 'Изменить',
+                      onPressed: showFilters,
+                      icon: const Icon(Icons.tune),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               GridView.count(
                 shrinkWrap: true,
@@ -289,6 +318,26 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   _FinanceMetric(
                     label: 'Начислено офису',
                     value: money(summary.officeAccrued),
+                  ),
+                  _FinanceMetric(
+                    label: 'Начислено монтажнику',
+                    value: money(summary.installerAccrued),
+                  ),
+                  _FinanceMetric(
+                    label: 'Доход от допработ',
+                    value: money(summary.extraWorkIncome),
+                  ),
+                  _FinanceMetric(
+                    label: 'Общий доход',
+                    value: money(summary.incomeTotal),
+                  ),
+                  _FinanceMetric(
+                    label: 'Расходы',
+                    value: money(summary.expensesTotal),
+                  ),
+                  _FinanceMetric(
+                    label: 'Чистая прибыль',
+                    value: money(summary.profit),
                   ),
                   _FinanceMetric(
                     label: 'Передано в офис',

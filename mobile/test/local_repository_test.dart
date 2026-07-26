@@ -416,7 +416,11 @@ void main() {
 
       var summary = await repository.financeSummary();
       expect(summary.customerReceived, 1500);
+      expect(summary.installerAccrued, 1000);
       expect(summary.officeAccrued, 500);
+      expect(summary.incomeTotal, 1500);
+      expect(summary.expensesTotal, 0);
+      expect(summary.profit, 1500);
       expect(summary.iOweOffice, 500);
       expect(summary.availableCash, 1500);
 
@@ -574,6 +578,8 @@ void main() {
     final summary = await repository.financeSummary();
     expect(summary.officeOwesMe, 500);
     expect(summary.availableCash, -500);
+    expect(summary.expensesTotal, 500);
+    expect(summary.profit, -500);
     expect((await repository.expenses()).single.description, 'Бензин');
   });
 
@@ -656,7 +662,11 @@ void main() {
       )).singleWhere((item) => item.materialId == material.id);
       expect(balance.quantity, 5);
       expect((await repository.extraWorks()).single.amount, 700);
-      expect((await repository.financeSummary()).officeOwesMe, 700);
+      final summary = await repository.financeSummary();
+      expect(summary.officeOwesMe, 700);
+      expect(summary.extraWorkIncome, 700);
+      expect(summary.incomeTotal, 700);
+      expect(summary.profit, 700);
     },
   );
 
