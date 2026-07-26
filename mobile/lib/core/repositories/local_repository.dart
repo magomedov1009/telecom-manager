@@ -15,6 +15,24 @@ class DashboardSummary {
     required this.clients,
     required this.connections,
     required this.pendingChanges,
+    required this.newClients,
+    required this.reconnects,
+    required this.equipmentReplacements,
+    required this.finance,
+    required this.extraWorks,
+    required this.extraWorkAmount,
+    required this.expensesInstaller,
+    required this.expensesOffice,
+    required this.expenseOperations,
+    required this.topExpenseCategory,
+    required this.topExpenseAmount,
+    required this.averageCheck,
+    required this.averageProfit,
+    required this.averageExpense,
+    required this.averageMaterialSpent,
+    required this.stock,
+    required this.attention,
+    required this.events,
   });
 
   final String organizationName;
@@ -24,6 +42,56 @@ class DashboardSummary {
   final int clients;
   final int connections;
   final int pendingChanges;
+  final int newClients;
+  final int reconnects;
+  final int equipmentReplacements;
+  final FinanceSummary finance;
+  final int extraWorks;
+  final double extraWorkAmount;
+  final double expensesInstaller;
+  final double expensesOffice;
+  final int expenseOperations;
+  final String? topExpenseCategory;
+  final double topExpenseAmount;
+  final double? averageCheck;
+  final double? averageProfit;
+  final double? averageExpense;
+  final double? averageMaterialSpent;
+  final List<DashboardStockItem> stock;
+  final List<String> attention;
+  final List<DashboardEvent> events;
+}
+
+class DashboardStockItem {
+  const DashboardStockItem({
+    required this.name,
+    required this.itemType,
+    required this.unitName,
+    required this.balance,
+    required this.spent,
+  });
+
+  final String name;
+  final String itemType;
+  final String unitName;
+  final double balance;
+  final double spent;
+}
+
+class DashboardEvent {
+  const DashboardEvent({
+    required this.kind,
+    required this.type,
+    required this.title,
+    required this.amount,
+    required this.occurredAt,
+  });
+
+  final String kind;
+  final String type;
+  final String title;
+  final double amount;
+  final DateTime occurredAt;
 }
 
 class InventoryBalance {
@@ -65,6 +133,38 @@ class LookupItem {
   final String name;
 }
 
+class RemoteOrganizationBinding {
+  const RemoteOrganizationBinding({
+    required this.serverUrl,
+    required this.remoteOrganizationId,
+  });
+
+  final String serverUrl;
+  final String remoteOrganizationId;
+}
+
+class CatalogItem {
+  const CatalogItem({
+    required this.id,
+    required this.name,
+    required this.isActive,
+    this.description,
+    this.defaultPrice,
+    this.defaultOfficeAmount,
+    this.requiresMaterials = false,
+    this.requiresEquipment = false,
+  });
+
+  final String id;
+  final String name;
+  final bool isActive;
+  final String? description;
+  final double? defaultPrice;
+  final double? defaultOfficeAmount;
+  final bool requiresMaterials;
+  final bool requiresEquipment;
+}
+
 class UserItem {
   const UserItem({
     required this.id,
@@ -72,32 +172,84 @@ class UserItem {
     required this.fullName,
     required this.role,
     required this.isActive,
+    required this.managerId,
+    required this.comment,
+    required this.createdAt,
+    required this.lastLoginAt,
   });
   final String id;
   final String username;
   final String fullName;
   final String role;
   final bool isActive;
+  final String? managerId;
+  final String? comment;
+  final DateTime createdAt;
+  final DateTime? lastLoginAt;
 }
 
 class ClientListItem {
   const ClientListItem({
     required this.id,
+    required this.providerId,
     required this.providerName,
     required this.login,
     required this.contractNumber,
     required this.address,
     required this.phone,
+    required this.comment,
     required this.connections,
   });
 
   final String id;
+  final String providerId;
   final String providerName;
   final String login;
   final String contractNumber;
   final String address;
   final String? phone;
+  final String? comment;
   final int connections;
+}
+
+class ConnectionListItem {
+  const ConnectionListItem({
+    required this.id,
+    required this.clientLogin,
+    required this.address,
+    required this.providerName,
+    required this.connectionType,
+    required this.connectionDate,
+    required this.price,
+  });
+  final String id;
+  final String clientLogin;
+  final String address;
+  final String providerName;
+  final String connectionType;
+  final DateTime connectionDate;
+  final double price;
+}
+
+class ConnectionEditData {
+  const ConnectionEditData({
+    required this.warehouseId,
+    required this.connectionType,
+    required this.connectionDate,
+    required this.price,
+    required this.officeAmount,
+    required this.installerAmount,
+    required this.comment,
+    required this.materials,
+  });
+  final String warehouseId;
+  final String connectionType;
+  final DateTime connectionDate;
+  final double price;
+  final double officeAmount;
+  final double installerAmount;
+  final String? comment;
+  final Map<String, double> materials;
 }
 
 class MaterialBalance {
@@ -143,7 +295,12 @@ class MaterialSettlement {
 class FinanceSummary {
   const FinanceSummary({
     required this.customerReceived,
+    required this.installerAccrued,
     required this.officeAccrued,
+    required this.extraWorkIncome,
+    required this.incomeTotal,
+    required this.expensesTotal,
+    required this.profit,
     required this.paidToOffice,
     required this.paidFromOffice,
     required this.balance,
@@ -151,7 +308,12 @@ class FinanceSummary {
   });
 
   final double customerReceived;
+  final double installerAccrued;
   final double officeAccrued;
+  final double extraWorkIncome;
+  final double incomeTotal;
+  final double expensesTotal;
+  final double profit;
   final double paidToOffice;
   final double paidFromOffice;
   final double balance;
@@ -179,24 +341,29 @@ class FinanceJournalItem {
 
 class ExpenseItem {
   const ExpenseItem({
+    required this.id,
     required this.category,
     required this.description,
     required this.amount,
     required this.paidBy,
     required this.providerName,
     required this.expenseDate,
+    required this.comment,
   });
 
+  final String id;
   final String category;
   final String description;
   final double amount;
   final String paidBy;
   final String providerName;
   final DateTime expenseDate;
+  final String? comment;
 }
 
 class ExtraWorkItem {
   const ExtraWorkItem({
+    required this.id,
     required this.typeName,
     required this.providerName,
     required this.amount,
@@ -204,10 +371,51 @@ class ExtraWorkItem {
     required this.comment,
   });
 
+  final String id;
   final String typeName;
   final String providerName;
   final double amount;
   final DateTime workDate;
+  final String? comment;
+}
+
+class ExtraWorkEditData {
+  const ExtraWorkEditData({
+    required this.providerId,
+    required this.workTypeId,
+    required this.workDate,
+    required this.amount,
+    required this.warehouseId,
+    required this.materials,
+    required this.comment,
+  });
+
+  final String providerId;
+  final String workTypeId;
+  final DateTime workDate;
+  final double amount;
+  final String? warehouseId;
+  final Map<String, double> materials;
+  final String? comment;
+}
+
+class ExpenseEditData {
+  const ExpenseEditData({
+    required this.providerId,
+    required this.category,
+    required this.description,
+    required this.amount,
+    required this.paidBy,
+    required this.expenseDate,
+    required this.comment,
+  });
+
+  final String providerId;
+  final String category;
+  final String description;
+  final double amount;
+  final String paidBy;
+  final DateTime expenseDate;
   final String? comment;
 }
 
@@ -348,6 +556,150 @@ class LocalRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<RemoteOrganizationBinding?> remoteOrganizationBinding() async {
+    final db = await database.instance;
+    final rows = await db.query(
+      'organizations',
+      columns: ['remote_server_url', 'remote_organization_id'],
+      where: 'id = ? AND deleted_at IS NULL',
+      whereArgs: [await organizationId],
+      limit: 1,
+    );
+    if (rows.isEmpty ||
+        rows.single['remote_server_url'] == null ||
+        rows.single['remote_organization_id'] == null) {
+      return null;
+    }
+    return RemoteOrganizationBinding(
+      serverUrl: rows.single['remote_server_url']! as String,
+      remoteOrganizationId: rows.single['remote_organization_id']! as String,
+    );
+  }
+
+  Future<String> bindRemoteOrganization({
+    required String serverUrl,
+    required String remoteOrganizationId,
+    required String organizationName,
+    required String username,
+    required String fullName,
+    required String role,
+    required String password,
+  }) async {
+    final normalizedServer = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final db = await database.instance;
+    final existing = await db.query(
+      'organizations',
+      columns: ['id'],
+      where:
+          'remote_server_url = ? AND remote_organization_id = ? '
+          'AND deleted_at IS NULL',
+      whereArgs: [normalizedServer, remoteOrganizationId],
+      limit: 1,
+    );
+    final id = existing.isEmpty ? _uuid.v7() : existing.single['id']! as String;
+    if (existing.isEmpty) {
+      final now = DateTime.now().toUtc().toIso8601String();
+      await db.transaction((transaction) async {
+        await transaction.insert('organizations', {
+          'id': id,
+          'name': _requiredName(organizationName),
+          'mode': 'server',
+          'remote_server_url': normalizedServer,
+          'remote_organization_id': remoteOrganizationId,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'synced',
+        });
+        await _insertUser(
+          transaction,
+          organizationId: id,
+          username: _requiredName(username),
+          fullName: _requiredName(fullName),
+          role: role,
+          password: password,
+          queueChange: false,
+        );
+      });
+    }
+    var localUsers = await db.query(
+      'users',
+      columns: ['id'],
+      where: 'organization_id = ? AND username = ? AND deleted_at IS NULL',
+      whereArgs: [id, username.trim()],
+      limit: 1,
+    );
+    if (localUsers.isEmpty) {
+      await _insertUser(
+        db,
+        organizationId: id,
+        username: _requiredName(username),
+        fullName: _requiredName(fullName),
+        role: role,
+        password: password,
+        queueChange: false,
+      );
+      localUsers = await db.query(
+        'users',
+        columns: ['id'],
+        where: 'organization_id = ? AND username = ? AND deleted_at IS NULL',
+        whereArgs: [id, username.trim()],
+        limit: 1,
+      );
+    } else {
+      final userId = localUsers.single['id']! as String;
+      await db.transaction((transaction) async {
+        await _setPassword(transaction, userId, password);
+        await transaction.update(
+          'users',
+          {
+            'full_name': _requiredName(fullName),
+            'role': role,
+            'manager_id': null,
+            'is_active': 1,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+            'sync_state': 'synced',
+          },
+          where: 'id = ?',
+          whereArgs: [userId],
+        );
+      });
+    }
+    await switchOrganization(id);
+    await db.insert('app_settings', {
+      'key': 'current_user_id',
+      'value': localUsers.single['id']! as String,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('app_settings', {
+      'key': 'active_sync_server_url',
+      'value': normalizedServer,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('app_settings', {
+      'key': 'active_sync_remote_id',
+      'value': remoteOrganizationId,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return id;
+  }
+
+  Future<bool> syncTargetMatches(String serverUrl) async {
+    final binding = await remoteOrganizationBinding();
+    if (binding == null) return false;
+    final db = await database.instance;
+    final settings = await db.query(
+      'app_settings',
+      where: 'key IN (?, ?)',
+      whereArgs: ['active_sync_server_url', 'active_sync_remote_id'],
+    );
+    final values = {
+      for (final row in settings)
+        row['key']! as String: row['value']! as String,
+    };
+    return binding.serverUrl ==
+            serverUrl.trim().replaceAll(RegExp(r'/+$'), '') &&
+        values['active_sync_server_url'] == binding.serverUrl &&
+        values['active_sync_remote_id'] == binding.remoteOrganizationId;
+  }
+
   Future<String> addOrganization(String name) async {
     final clean = _requiredName(name);
     final db = await database.instance;
@@ -395,6 +747,12 @@ class LocalRepository {
             fullName: row['full_name']! as String,
             role: row['role']! as String,
             isActive: row['is_active'] == 1,
+            managerId: row['manager_id'] as String?,
+            comment: row['comment'] as String?,
+            createdAt: DateTime.parse(row['created_at']! as String),
+            lastLoginAt: row['last_login_at'] == null
+                ? null
+                : DateTime.parse(row['last_login_at']! as String),
           ),
         )
         .toList();
@@ -405,6 +763,9 @@ class LocalRepository {
     required String fullName,
     required String role,
     required String password,
+    String? managerId,
+    String? comment,
+    bool isActive = true,
   }) async {
     if (!{'admin', 'manager', 'installer'}.contains(role)) {
       throw ArgumentError('Неизвестная роль');
@@ -417,6 +778,9 @@ class LocalRepository {
       fullName: _requiredName(fullName),
       role: role,
       password: password,
+      managerId: managerId,
+      comment: comment,
+      isActive: isActive,
     );
   }
 
@@ -427,10 +791,20 @@ class LocalRepository {
     required String fullName,
     required String role,
     required String password,
+    String? managerId,
+    String? comment,
+    bool isActive = true,
+    bool queueChange = true,
   }) async {
     if (password.length < 4) {
       throw ArgumentError('Пароль должен содержать минимум 4 символа');
     }
+    final validatedManagerId = await _validatedManagerId(
+      db,
+      organizationId: organizationId,
+      role: role,
+      managerId: managerId,
+    );
     final now = DateTime.now().toUtc().toIso8601String();
     final row = <String, Object?>{
       'id': _uuid.v7(),
@@ -438,11 +812,13 @@ class LocalRepository {
       'username': username,
       'full_name': fullName,
       'role': role,
-      'is_active': 1,
+      'manager_id': validatedManagerId,
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'is_active': isActive ? 1 : 0,
       'created_at': now,
       'updated_at': now,
       'version': 1,
-      'sync_state': 'pending',
+      'sync_state': queueChange ? 'pending' : 'synced',
     };
     await db.insert('users', row);
     await _setPassword(db, row['id']! as String, password);
@@ -454,7 +830,120 @@ class LocalRepository {
     )).single;
     row['password_hash'] = stored['password_hash'];
     row['password_salt'] = stored['password_salt'];
-    await _queueRow(db, organizationId, 'user', row, now);
+    if (queueChange) {
+      await _queueRow(db, organizationId, 'user', row, now);
+    }
+  }
+
+  Future<String?> _validatedManagerId(
+    DatabaseExecutor db, {
+    required String organizationId,
+    required String role,
+    String? managerId,
+  }) async {
+    if (role != 'installer' || managerId == null || managerId.isEmpty) {
+      return null;
+    }
+    final rows = await db.query(
+      'users',
+      columns: ['id'],
+      where:
+          'id = ? AND organization_id = ? AND role = ? '
+          'AND is_active = 1 AND deleted_at IS NULL',
+      whereArgs: [managerId, organizationId, 'manager'],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw ArgumentError('Выбранный менеджер не найден или отключён');
+    }
+    return managerId;
+  }
+
+  Future<void> updateUser({
+    required String userId,
+    required String fullName,
+    required String role,
+    String? managerId,
+    String? comment,
+    required bool isActive,
+  }) async {
+    if (!{'admin', 'manager', 'installer'}.contains(role)) {
+      throw ArgumentError('Неизвестная роль');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final current = await currentUser();
+    if (current?.id == userId && !isActive) {
+      throw ArgumentError('Нельзя отключить текущего пользователя');
+    }
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'users',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [userId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+      final old = rows.single;
+      if (old['role'] == 'admin' &&
+          old['is_active'] == 1 &&
+          (role != 'admin' || !isActive)) {
+        await _ensureAnotherActiveAdmin(transaction, orgId, userId);
+      }
+      final validatedManagerId = await _validatedManagerId(
+        transaction,
+        organizationId: orgId,
+        role: role,
+        managerId: managerId,
+      );
+      final now = DateTime.now().toUtc().toIso8601String();
+      await transaction.update(
+        'users',
+        {
+          'full_name': _requiredName(fullName),
+          'role': role,
+          'manager_id': validatedManagerId,
+          'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+          'is_active': isActive ? 1 : 0,
+          'updated_at': now,
+          'version': (old['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+        limit: 1,
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
+  }
+
+  Future<void> _ensureAnotherActiveAdmin(
+    DatabaseExecutor db,
+    String organizationId,
+    String excludedUserId,
+  ) async {
+    final count =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            '''
+            SELECT COUNT(*) FROM users
+            WHERE organization_id = ? AND id <> ? AND role = 'admin'
+              AND is_active = 1 AND deleted_at IS NULL
+            ''',
+            [organizationId, excludedUserId],
+          ),
+        ) ??
+        0;
+    if (count == 0) {
+      throw ArgumentError(
+        'В организации должен остаться активный администратор',
+      );
+    }
   }
 
   Future<void> _setPassword(
@@ -508,6 +997,13 @@ class LocalRepository {
     if (base64Encode(await key.extractBytes()) != row['password_hash']) {
       return null;
     }
+    final loginAt = DateTime.now().toUtc();
+    await db.update(
+      'users',
+      {'last_login_at': loginAt.toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [row['id']],
+    );
     await db.insert('app_settings', {
       'key': 'current_user_id',
       'value': row['id']! as String,
@@ -518,6 +1014,10 @@ class LocalRepository {
       fullName: row['full_name']! as String,
       role: row['role']! as String,
       isActive: true,
+      managerId: row['manager_id'] as String?,
+      comment: row['comment'] as String?,
+      createdAt: DateTime.parse(row['created_at']! as String),
+      lastLoginAt: loginAt,
     );
   }
 
@@ -545,6 +1045,12 @@ class LocalRepository {
       fullName: row['full_name']! as String,
       role: row['role']! as String,
       isActive: true,
+      managerId: row['manager_id'] as String?,
+      comment: row['comment'] as String?,
+      createdAt: DateTime.parse(row['created_at']! as String),
+      lastLoginAt: row['last_login_at'] == null
+          ? null
+          : DateTime.parse(row['last_login_at']! as String),
     );
   }
 
@@ -557,7 +1063,88 @@ class LocalRepository {
     );
   }
 
-  Future<DashboardSummary> dashboardSummary() async {
+  Future<void> changeUserPassword(String userId, String password) async {
+    if (password.length < 4) {
+      throw ArgumentError('Пароль должен содержать минимум 4 символа');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'users',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [userId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _setPassword(transaction, userId, password);
+      await transaction.update(
+        'users',
+        {
+          'updated_at': now,
+          'version': (rows.single['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+        limit: 1,
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
+  }
+
+  Future<void> toggleUser(String userId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final current = await currentUser();
+    if (current?.id == userId) {
+      throw ArgumentError('Нельзя отключить текущего пользователя');
+    }
+    final rows = await db.query(
+      'users',
+      where: 'id = ? AND organization_id = ?',
+      whereArgs: [userId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+    await db.transaction((transaction) async {
+      final old = rows.single;
+      final active = old['is_active'] == 1 ? 0 : 1;
+      if (old['role'] == 'admin' && old['is_active'] == 1) {
+        await _ensureAnotherActiveAdmin(transaction, orgId, userId);
+      }
+      final now = DateTime.now().toUtc().toIso8601String();
+      await transaction.update(
+        'users',
+        {
+          'is_active': active,
+          'updated_at': now,
+          'version': (old['version']! as int) + 1,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [userId],
+      );
+      final row = (await transaction.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [userId],
+      )).single;
+      await _queueRow(transaction, orgId, 'user', row, now);
+    });
+  }
+
+  Future<DashboardSummary> dashboardSummary({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? providerId,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final organization = (await db.query(
@@ -574,6 +1161,133 @@ class LocalRepository {
           ),
         ) ??
         0;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
+    final occurredFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final occurredTo = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
+    final connectionWhere = [
+      'connection.organization_id = ?',
+      'connection.deleted_at IS NULL',
+      'client.deleted_at IS NULL',
+      if (from != null) 'connection.connection_date >= ?',
+      if (to != null) 'connection.connection_date <= ?',
+      if (providerId != null) 'client.provider_id = ?',
+    ].join(' AND ');
+    final periodArgs = <Object?>[orgId, ?from, ?to, ?providerId];
+    final connectionMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS total,
+        COUNT(DISTINCT CASE WHEN connection.connection_type = 'NEW'
+          THEN connection.client_id END) AS new_clients,
+        SUM(CASE WHEN connection.connection_type = 'RECONNECT'
+          THEN 1 ELSE 0 END) AS reconnects,
+        SUM(CASE WHEN connection.connection_type = 'ONU_REPLACE'
+          THEN 1 ELSE 0 END) AS equipment_replacements
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      WHERE $connectionWhere
+      ''', periodArgs)).single;
+    final finance = await financeSummary(
+      providerId: providerId,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+    final extraMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS item_count, COALESCE(SUM(amount), 0) AS amount
+      FROM extra_works
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND work_date >= ?'}
+        ${to == null ? '' : 'AND work_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      ''', periodArgs)).single;
+    final expenseMetrics = (await db.rawQuery('''
+      SELECT COUNT(*) AS item_count, COALESCE(SUM(amount), 0) AS total,
+        COALESCE(SUM(CASE WHEN paid_by = 'INSTALLER' THEN amount ELSE 0 END), 0)
+          AS installer,
+        COALESCE(SUM(CASE WHEN paid_by = 'OFFICE' THEN amount ELSE 0 END), 0)
+          AS office
+      FROM expenses
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND expense_date >= ?'}
+        ${to == null ? '' : 'AND expense_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      ''', periodArgs)).single;
+    final topExpenseRows = await db.rawQuery('''
+      SELECT category, COALESCE(SUM(amount), 0) AS amount
+      FROM expenses
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${from == null ? '' : 'AND expense_date >= ?'}
+        ${to == null ? '' : 'AND expense_date <= ?'}
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      GROUP BY category ORDER BY amount DESC LIMIT 1
+      ''', periodArgs);
+    final stockRows = await db.rawQuery(
+      '''
+      SELECT material.name, material.item_type, material.unit_name,
+        COALESCE(SUM(transaction_row.quantity), 0) AS balance,
+        COALESCE(SUM(CASE
+          WHEN transaction_row.quantity < 0
+            ${occurredFrom == null ? '' : 'AND transaction_row.occurred_at >= ?'}
+            ${occurredTo == null ? '' : 'AND transaction_row.occurred_at < ?'}
+          THEN ABS(transaction_row.quantity) ELSE 0 END), 0) AS spent
+      FROM materials material
+      LEFT JOIN inventory_transactions transaction_row
+        ON transaction_row.material_id = material.id
+       AND transaction_row.deleted_at IS NULL
+       ${providerId == null ? '' : '''
+       AND COALESCE(
+         transaction_row.provider_id,
+         (SELECT warehouse.provider_id FROM warehouses warehouse
+          WHERE warehouse.id = transaction_row.warehouse_id)
+       ) = ?'''}
+      WHERE material.organization_id = ? AND material.deleted_at IS NULL
+        AND material.is_active = 1
+      GROUP BY material.id, material.name, material.item_type, material.unit_name
+      ORDER BY material.item_type, material.name
+      ''',
+      [?occurredFrom, ?occurredTo, ?providerId, orgId],
+    );
+    final stock = stockRows
+        .map(
+          (row) => DashboardStockItem(
+            name: row['name']! as String,
+            itemType: row['item_type']! as String,
+            unitName: row['unit_name']! as String,
+            balance: (row['balance']! as num).toDouble(),
+            spent: (row['spent']! as num).toDouble(),
+          ),
+        )
+        .toList();
+    final events = await _dashboardEvents(
+      db,
+      organizationId: orgId,
+      providerId: providerId,
+    );
+    final connections = (connectionMetrics['total']! as num).toInt();
+    final materialSpent = stock
+        .where((item) => item.itemType == 'MATERIAL')
+        .fold<double>(0, (total, item) => total + item.spent);
+    final attention = <String>[
+      for (final item in stock)
+        if (item.itemType == 'MATERIAL' && item.balance <= 10)
+          'Заканчивается материал: ${item.name}'
+        else if (item.itemType == 'EQUIPMENT' && item.balance <= 2)
+          'Заканчивается оборудование: ${item.name}',
+      if (finance.officeOwesMe >= 10000) 'Большой долг офиса',
+      if (finance.iOweOffice >= 10000) 'Большой долг монтажника',
+      if (finance.profit < 0) 'Отрицательная прибыль',
+    ];
     final pending =
         Sqflite.firstIntValue(
           await db.rawQuery(
@@ -588,12 +1302,81 @@ class LocalRepository {
       warehouses: await count('warehouses'),
       materials: await count('materials'),
       clients: await count('clients'),
-      connections: await count('connections'),
+      connections: connections,
       pendingChanges: pending,
+      newClients: (connectionMetrics['new_clients']! as num).toInt(),
+      reconnects: (connectionMetrics['reconnects'] as num? ?? 0).toInt(),
+      equipmentReplacements:
+          (connectionMetrics['equipment_replacements'] as num? ?? 0).toInt(),
+      finance: finance,
+      extraWorks: (extraMetrics['item_count']! as num).toInt(),
+      extraWorkAmount: (extraMetrics['amount']! as num).toDouble(),
+      expensesInstaller: (expenseMetrics['installer']! as num).toDouble(),
+      expensesOffice: (expenseMetrics['office']! as num).toDouble(),
+      expenseOperations: (expenseMetrics['item_count']! as num).toInt(),
+      topExpenseCategory: topExpenseRows.isEmpty
+          ? null
+          : topExpenseRows.single['category']! as String,
+      topExpenseAmount: topExpenseRows.isEmpty
+          ? 0
+          : (topExpenseRows.single['amount']! as num).toDouble(),
+      averageCheck: connections == 0
+          ? null
+          : finance.customerReceived / connections,
+      averageProfit: connections == 0 ? null : finance.profit / connections,
+      averageExpense: connections == 0
+          ? null
+          : finance.expensesTotal / connections,
+      averageMaterialSpent: connections == 0
+          ? null
+          : materialSpent / connections,
+      stock: stock,
+      attention: attention,
+      events: events,
     );
   }
 
-  Future<List<InventoryBalance>> inventoryBalances() async {
+  Future<List<DashboardEvent>> _dashboardEvents(
+    DatabaseExecutor db, {
+    required String organizationId,
+    String? providerId,
+  }) async {
+    final rows = await db.rawQuery(
+      '''
+      SELECT 'finance' AS kind, transaction_type AS type,
+        COALESCE(comment, transaction_type) AS title, amount, occurred_at
+      FROM finance_transactions
+      WHERE organization_id = ? AND deleted_at IS NULL
+        ${providerId == null ? '' : 'AND provider_id = ?'}
+      UNION ALL
+      SELECT 'inventory' AS kind, operation_type AS type,
+        COALESCE(material.name, operation_type) AS title,
+        inventory.quantity AS amount, inventory.occurred_at
+      FROM inventory_transactions inventory
+      LEFT JOIN materials material ON material.id = inventory.material_id
+      WHERE inventory.organization_id = ? AND inventory.deleted_at IS NULL
+        ${providerId == null ? '' : 'AND inventory.provider_id = ?'}
+      ORDER BY occurred_at DESC LIMIT 10
+      ''',
+      [organizationId, ?providerId, organizationId, ?providerId],
+    );
+    return rows
+        .map(
+          (row) => DashboardEvent(
+            kind: row['kind']! as String,
+            type: row['type']! as String,
+            title: row['title']! as String,
+            amount: (row['amount']! as num).toDouble(),
+            occurredAt: DateTime.parse(row['occurred_at']! as String),
+          ),
+        )
+        .toList();
+  }
+
+  Future<List<InventoryBalance>> inventoryBalances({
+    String? warehouseId,
+    String? providerId,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
@@ -604,12 +1387,19 @@ class LocalRepository {
       LEFT JOIN inventory_transactions transaction_row
         ON transaction_row.material_id = material.id
        AND transaction_row.deleted_at IS NULL
+       ${warehouseId == null ? '' : 'AND transaction_row.warehouse_id = ?'}
+       ${providerId == null ? '' : '''
+       AND COALESCE(
+         transaction_row.provider_id,
+         (SELECT owner.provider_id FROM warehouses owner
+          WHERE owner.id = transaction_row.warehouse_id)
+       ) = ?'''}
       WHERE material.organization_id = ?
         AND material.deleted_at IS NULL
       GROUP BY material.id, material.name, material.item_type, material.unit_name
       ORDER BY material.item_type, material.name
     ''',
-      [orgId],
+      [?warehouseId, ?providerId, orgId],
     );
     return rows
         .map(
@@ -669,6 +1459,27 @@ class LocalRepository {
         .toList();
   }
 
+  Future<List<CatalogItem>> providerCatalog() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'providers',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'name',
+    );
+    return rows
+        .map(
+          (row) => CatalogItem(
+            id: row['id']! as String,
+            name: row['name']! as String,
+            description: row['description'] as String?,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
   Future<List<LookupItem>> extraWorkTypes() async {
     final db = await database.instance;
     final orgId = await organizationId;
@@ -684,9 +1495,38 @@ class LocalRepository {
         .toList();
   }
 
-  Future<void> addProvider(String name) async {
+  Future<List<CatalogItem>> extraWorkTypeCatalog() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'extra_work_types',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'name',
+    );
+    return rows
+        .map(
+          (row) => CatalogItem(
+            id: row['id']! as String,
+            name: row['name']! as String,
+            description: row['description'] as String?,
+            defaultPrice: (row['default_price'] as num?)?.toDouble(),
+            defaultOfficeAmount: (row['default_office_amount'] as num?)
+                ?.toDouble(),
+            requiresMaterials: row['requires_materials'] == 1,
+            requiresEquipment: row['requires_equipment'] == 1,
+            isActive: row['is_active'] == 1,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> addProvider(String name, {String? description}) async {
     await _addCatalogRow('providers', {
       'name': _requiredName(name),
+      'description': description?.trim().isEmpty == true
+          ? null
+          : description?.trim(),
       'is_active': 1,
     }, 'provider');
   }
@@ -722,18 +1562,153 @@ class LocalRepository {
 
   Future<void> addExtraWorkType({
     required String name,
+    String? description,
     double defaultPrice = 0,
+    double defaultOfficeAmount = 0,
     bool requiresMaterials = false,
+    bool requiresEquipment = false,
   }) async {
-    if (defaultPrice < 0) {
-      throw ArgumentError('Цена не может быть отрицательной');
+    if (defaultPrice < 0 || defaultOfficeAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
     }
     await _addCatalogRow('extra_work_types', {
       'name': _requiredName(name),
+      'description': description?.trim().isEmpty == true
+          ? null
+          : description?.trim(),
       'default_price': defaultPrice,
+      'default_office_amount': defaultOfficeAmount,
       'requires_materials': requiresMaterials ? 1 : 0,
+      'requires_equipment': requiresEquipment ? 1 : 0,
       'is_active': 1,
     }, 'extra_work_type');
+  }
+
+  Future<void> updateProvider({
+    required String providerId,
+    required String name,
+    String? description,
+  }) {
+    return _updateCatalogRow(
+      table: 'providers',
+      entityType: 'provider',
+      id: providerId,
+      values: {
+        'name': _requiredName(name),
+        'description': description?.trim().isEmpty == true
+            ? null
+            : description?.trim(),
+      },
+    );
+  }
+
+  Future<void> toggleProvider(String providerId) {
+    return _toggleCatalogRow(
+      table: 'providers',
+      entityType: 'provider',
+      id: providerId,
+    );
+  }
+
+  Future<void> updateExtraWorkType({
+    required String workTypeId,
+    required String name,
+    String? description,
+    required double defaultPrice,
+    required double defaultOfficeAmount,
+    required bool requiresMaterials,
+    required bool requiresEquipment,
+  }) {
+    if (defaultPrice < 0 || defaultOfficeAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
+    }
+    return _updateCatalogRow(
+      table: 'extra_work_types',
+      entityType: 'extra_work_type',
+      id: workTypeId,
+      values: {
+        'name': _requiredName(name),
+        'description': description?.trim().isEmpty == true
+            ? null
+            : description?.trim(),
+        'default_price': defaultPrice,
+        'default_office_amount': defaultOfficeAmount,
+        'requires_materials': requiresMaterials ? 1 : 0,
+        'requires_equipment': requiresEquipment ? 1 : 0,
+      },
+    );
+  }
+
+  Future<void> toggleExtraWorkType(String workTypeId) {
+    return _toggleCatalogRow(
+      table: 'extra_work_types',
+      entityType: 'extra_work_type',
+      id: workTypeId,
+    );
+  }
+
+  Future<void> _updateCatalogRow({
+    required String table,
+    required String entityType,
+    required String id,
+    required Map<String, Object?> values,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        table,
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Запись не найдена');
+      final row = <String, Object?>{
+        ...rows.single,
+        ...values,
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      try {
+        await transaction.update(table, row, where: 'id = ?', whereArgs: [id]);
+      } on DatabaseException catch (error) {
+        if (error.isUniqueConstraintError()) {
+          throw ArgumentError('Запись с таким названием уже существует');
+        }
+        rethrow;
+      }
+      await _queueRow(transaction, orgId, entityType, row, now);
+    });
+  }
+
+  Future<void> _toggleCatalogRow({
+    required String table,
+    required String entityType,
+    required String id,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        table,
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Запись не найдена');
+      final row = <String, Object?>{
+        ...rows.single,
+        'is_active': rows.single['is_active'] == 1 ? 0 : 1,
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(table, row, where: 'id = ?', whereArgs: [id]);
+      await _queueRow(transaction, orgId, entityType, row, now);
+    });
   }
 
   Future<void> _addCatalogRow(
@@ -772,9 +1747,32 @@ class LocalRepository {
     return clean;
   }
 
-  Future<List<InventoryHistoryItem>> inventoryHistory() async {
+  Future<List<InventoryHistoryItem>> inventoryHistory({
+    String? warehouseId,
+    String? materialId,
+    String? operationType,
+    String? itemType,
+    String? providerId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String search = '',
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final rows = await db.rawQuery(
       '''
       SELECT movement.operation_type, movement.quantity, movement.occurred_at,
@@ -784,11 +1782,27 @@ class LocalRepository {
       JOIN warehouses warehouse ON warehouse.id = movement.warehouse_id
       JOIN materials material ON material.id = movement.material_id
       WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
+        ${warehouseId == null ? '' : 'AND movement.warehouse_id = ?'}
+        ${materialId == null ? '' : 'AND movement.material_id = ?'}
+        ${operationType == null ? '' : 'AND movement.operation_type = ?'}
+        ${itemType == null ? '' : 'AND material.item_type = ?'}
+        ${providerId == null ? '' : 'AND COALESCE(movement.provider_id, warehouse.provider_id) = ?'}
+        ${from == null ? '' : 'AND movement.occurred_at >= ?'}
+        ${toExclusive == null ? '' : 'AND movement.occurred_at < ?'}
       ORDER BY movement.occurred_at DESC, movement.created_at DESC
       ''',
-      [orgId],
+      [
+        orgId,
+        ?warehouseId,
+        ?materialId,
+        ?operationType,
+        ?itemType,
+        ?providerId,
+        ?from,
+        ?toExclusive,
+      ],
     );
-    return rows
+    final result = rows
         .map(
           (row) => InventoryHistoryItem(
             operationType: row['operation_type']! as String,
@@ -798,6 +1812,17 @@ class LocalRepository {
             occurredAt: DateTime.parse(row['occurred_at']! as String),
             comment: row['comment'] as String?,
           ),
+        )
+        .toList();
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (item) =>
+              item.materialName.toLowerCase().contains(normalized) ||
+              item.warehouseName.toLowerCase().contains(normalized) ||
+              item.operationType.toLowerCase().contains(normalized) ||
+              (item.comment?.toLowerCase().contains(normalized) ?? false),
         )
         .toList();
   }
@@ -811,6 +1836,20 @@ class LocalRepository {
     final orgId = await organizationId;
     final from = dateFrom?.toIso8601String().substring(0, 10);
     final to = dateTo?.toIso8601String().substring(0, 10);
+    final inventoryFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final inventoryToExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     String conditions(String dateColumn, String providerColumn) {
       return [
         'organization_id = ?',
@@ -856,16 +1895,19 @@ class LocalRepository {
       'provider_id',
       'amount',
     );
-    final materialRows = await db.rawQuery('''
+    final materialRows = await db.rawQuery(
+      '''
       SELECT COALESCE(SUM(ABS(quantity)), 0) amount
       FROM inventory_transactions
       WHERE organization_id = ? AND deleted_at IS NULL
         AND quantity < 0
         AND operation_type IN ('CONNECTION', 'WRITE_OFF')
-        ${from == null ? '' : 'AND substr(occurred_at, 1, 10) >= ?'}
-        ${to == null ? '' : 'AND substr(occurred_at, 1, 10) <= ?'}
+        ${inventoryFrom == null ? '' : 'AND occurred_at >= ?'}
+        ${inventoryToExclusive == null ? '' : 'AND occurred_at < ?'}
         ${providerId == null ? '' : 'AND provider_id = ?'}
-      ''', args());
+      ''',
+      [orgId, ?inventoryFrom, ?inventoryToExclusive, ?providerId],
+    );
     final connection = connectionRows.single;
     return ReportSummary(
       connections: (connection['item_count']! as num).toInt(),
@@ -882,11 +1924,121 @@ class LocalRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
     String? providerId,
+    String search = '',
   }) async {
+    if (section == 'providers') {
+      final result = <ReportDetailItem>[];
+      for (final provider in await providers()) {
+        if (providerId != null && provider.id != providerId) continue;
+        final summary = await reportSummary(
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          providerId: provider.id,
+        );
+        result.add(
+          ReportDetailItem(
+            title: provider.name,
+            subtitle:
+                'Подключений: ${summary.connections} · '
+                'Допработ: ${summary.extraWorks} · '
+                'Расходы: ${summary.expenses.toStringAsFixed(2)}',
+            value: summary.profit,
+          ),
+        );
+      }
+      return _filterReportDetails(result, search);
+    }
+    if (section == 'material_settlements') {
+      return _filterReportDetails(
+        (await materialSettlements())
+            .map(
+              (item) => ReportDetailItem(
+                title: '${item.debtorName} → ${item.creditorName}',
+                subtitle: '${item.materialName} · ${item.unitName}',
+                value: item.quantity,
+              ),
+            )
+            .toList(),
+        search,
+      );
+    }
+    if (section == 'finance') {
+      final items =
+          (await financeJournal(
+                providerId: providerId,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                search: search,
+              ))
+              .map(
+                (item) => ReportDetailItem(
+                  title: item.type,
+                  subtitle: [
+                    if (item.providerName != null) item.providerName!,
+                    if (item.comment != null) item.comment!,
+                  ].join(' · '),
+                  value: item.amount,
+                ),
+              )
+              .toList();
+      return _filterReportDetails(items, search);
+    }
+    if (section == 'inventory') {
+      final balances = await inventoryBalances(providerId: providerId);
+      final movements = await inventoryHistory(
+        providerId: providerId,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+      final receipt = <String, double>{};
+      final expense = <String, double>{};
+      for (final movement in movements) {
+        if (movement.quantity > 0) {
+          receipt.update(
+            movement.materialName,
+            (value) => value + movement.quantity,
+            ifAbsent: () => movement.quantity,
+          );
+        } else {
+          expense.update(
+            movement.materialName,
+            (value) => value + movement.quantity.abs(),
+            ifAbsent: () => movement.quantity.abs(),
+          );
+        }
+      }
+      final items = balances
+          .map(
+            (item) => ReportDetailItem(
+              title: item.name,
+              subtitle:
+                  'Приход: ${(receipt[item.name] ?? 0).toStringAsFixed(2)} · '
+                  'Расход: ${(expense[item.name] ?? 0).toStringAsFixed(2)} · '
+                  'Остаток: ${item.quantity.toStringAsFixed(2)} ${item.unitName}',
+              value: item.quantity,
+            ),
+          )
+          .toList();
+      return _filterReportDetails(items, search);
+    }
     final db = await database.instance;
     final orgId = await organizationId;
     final from = dateFrom?.toIso8601String().substring(0, 10);
     final to = dateTo?.toIso8601String().substring(0, 10);
+    final inventoryFrom = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final inventoryToExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final args = <Object?>[orgId, ?from, ?to, ?providerId];
     String dateFilter(String column) =>
         '${from == null ? '' : 'AND $column >= ?'} '
@@ -934,7 +2086,8 @@ class LocalRepository {
           ''', args);
         break;
       case 'inventory':
-        rows = await db.rawQuery('''
+        rows = await db.rawQuery(
+          '''
           SELECT material.name title,
                  warehouse.name || ' · ' || substr(movement.occurred_at, 1, 10) subtitle,
                  ABS(movement.quantity) value
@@ -944,57 +2097,484 @@ class LocalRepository {
           WHERE movement.organization_id = ? AND movement.deleted_at IS NULL
             AND movement.quantity < 0
             AND movement.operation_type IN ('CONNECTION', 'WRITE_OFF')
-            ${dateFilter('substr(movement.occurred_at, 1, 10)')}
+            ${inventoryFrom == null ? '' : 'AND movement.occurred_at >= ?'}
+            ${inventoryToExclusive == null ? '' : 'AND movement.occurred_at < ?'}
             ${providerId == null ? '' : 'AND movement.provider_id = ?'}
           ORDER BY movement.occurred_at DESC
-          ''', args);
+          ''',
+          [orgId, ?inventoryFrom, ?inventoryToExclusive, ?providerId],
+        );
         break;
       default:
         throw ArgumentError('Неизвестный раздел отчёта');
     }
-    return rows
-        .map(
-          (row) => ReportDetailItem(
-            title: row['title']! as String,
-            subtitle: row['subtitle']! as String,
-            value: (row['value']! as num).toDouble(),
-          ),
+    return _filterReportDetails(
+      rows
+          .map(
+            (row) => ReportDetailItem(
+              title: row['title']! as String,
+              subtitle: row['subtitle']! as String,
+              value: (row['value']! as num).toDouble(),
+            ),
+          )
+          .toList(),
+      search,
+    );
+  }
+
+  List<ReportDetailItem> _filterReportDetails(
+    List<ReportDetailItem> items,
+    String search,
+  ) {
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return items;
+    return items
+        .where(
+          (item) =>
+              item.title.toLowerCase().contains(normalized) ||
+              item.subtitle.toLowerCase().contains(normalized),
         )
         .toList();
   }
 
-  Future<List<ClientListItem>> clients() async {
+  Future<List<ClientListItem>> clients({String query = ''}) async {
     final db = await database.instance;
     final orgId = await organizationId;
     final rows = await db.rawQuery(
       '''
-      SELECT client.id, provider.name AS provider_name, client.login,
+      SELECT client.id, client.provider_id, provider.name AS provider_name, client.login,
              client.contract_number, client.address, client.phone,
+             client.comment,
              COUNT(connection.id) AS connection_count
       FROM clients client
       JOIN providers provider ON provider.id = client.provider_id
       LEFT JOIN connections connection
         ON connection.client_id = client.id AND connection.deleted_at IS NULL
       WHERE client.organization_id = ? AND client.deleted_at IS NULL
-      GROUP BY client.id, provider.name, client.login, client.contract_number,
-               client.address, client.phone
+      GROUP BY client.id, client.provider_id, provider.name, client.login,
+               client.contract_number, client.address, client.phone,
+               client.comment
       ORDER BY client.updated_at DESC
       ''',
       [orgId],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ClientListItem(
             id: row['id']! as String,
+            providerId: row['provider_id']! as String,
             providerName: row['provider_name']! as String,
             login: (row['login'] as String?) ?? '',
             contractNumber: (row['contract_number'] as String?) ?? '',
             address: row['address']! as String,
             phone: row['phone'] as String?,
+            comment: row['comment'] as String?,
             connections: (row['connection_count']! as num).toInt(),
           ),
         )
         .toList();
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (client) =>
+              client.login.toLowerCase().contains(normalized) ||
+              client.contractNumber.toLowerCase().contains(normalized) ||
+              client.address.toLowerCase().contains(normalized) ||
+              (client.phone?.toLowerCase().contains(normalized) ?? false) ||
+              (client.comment?.toLowerCase().contains(normalized) ?? false) ||
+              client.providerName.toLowerCase().contains(normalized),
+        )
+        .toList();
+  }
+
+  Future<List<ConnectionListItem>> connections({
+    String? clientId,
+    String search = '',
+    String? providerId,
+    String? connectionType,
+    String? warehouseId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
+    final rows = await db.rawQuery(
+      '''
+      SELECT connection.id, connection.connection_type,
+             connection.connection_date, connection.price, connection.comment,
+             client.login, client.contract_number, client.address, client.phone,
+             provider.name provider_name
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      JOIN providers provider ON provider.id = client.provider_id
+      WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+        ${clientId == null ? '' : 'AND connection.client_id = ?'}
+        ${providerId == null ? '' : 'AND client.provider_id = ?'}
+        ${connectionType == null ? '' : 'AND connection.connection_type = ?'}
+        ${warehouseId == null ? '' : 'AND connection.warehouse_id = ?'}
+        ${from == null ? '' : 'AND connection.connection_date >= ?'}
+        ${to == null ? '' : 'AND connection.connection_date <= ?'}
+      ORDER BY connection.connection_date DESC, connection.created_at DESC
+      ''',
+      [
+        orgId,
+        ?clientId,
+        ?providerId,
+        ?connectionType,
+        ?warehouseId,
+        ?from,
+        ?to,
+      ],
+    );
+    final normalized = search.trim().toLowerCase();
+    final filtered = normalized.isEmpty
+        ? rows
+        : rows
+              .where(
+                (row) =>
+                    [
+                      row['contract_number'],
+                      row['login'],
+                      row['address'],
+                      row['phone'],
+                      row['comment'],
+                    ].any(
+                      (value) =>
+                          value?.toString().toLowerCase().contains(
+                            normalized,
+                          ) ??
+                          false,
+                    ),
+              )
+              .toList();
+    return filtered
+        .map(
+          (row) => ConnectionListItem(
+            id: row['id']! as String,
+            clientLogin: (row['login'] as String?) ?? '',
+            address: row['address']! as String,
+            providerName: row['provider_name']! as String,
+            connectionType: row['connection_type']! as String,
+            connectionDate: DateTime.parse(row['connection_date']! as String),
+            price: (row['price']! as num).toDouble(),
+          ),
+        )
+        .toList();
+  }
+
+  Future<ConnectionEditData> connectionEditData(String connectionId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'connections',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [connectionId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Подключение не найдено');
+    final row = rows.single;
+    final usage = await db.query(
+      'connection_materials',
+      columns: ['material_id', 'quantity'],
+      where: 'connection_id = ? AND deleted_at IS NULL',
+      whereArgs: [connectionId],
+    );
+    return ConnectionEditData(
+      warehouseId: row['warehouse_id']! as String,
+      connectionType: row['connection_type']! as String,
+      connectionDate: DateTime.parse(row['connection_date']! as String),
+      price: (row['price']! as num).toDouble(),
+      officeAmount: (row['office_amount']! as num).toDouble(),
+      installerAmount: (row['installer_amount']! as num).toDouble(),
+      comment: row['comment'] as String?,
+      materials: {
+        for (final item in usage)
+          item['material_id']! as String: (item['quantity']! as num).toDouble(),
+      },
+    );
+  }
+
+  Future<void> deleteConnection(String connectionId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final connectionRows = await transaction.query(
+        'connections',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, orgId],
+        limit: 1,
+      );
+      if (connectionRows.isEmpty) {
+        throw ArgumentError('Подключение не найдено');
+      }
+      final connection = connectionRows.single;
+      final inventoryRows = await transaction.query(
+        'inventory_transactions',
+        where:
+            'connection_id = ? AND operation_type = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, 'CONNECTION'],
+      );
+      for (final original in inventoryRows) {
+        final returnRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': original['warehouse_id'],
+          'provider_id': original['provider_id'],
+          'material_id': original['material_id'],
+          'connection_id': connectionId,
+          'operation_type': 'RETURN',
+          'quantity': -(original['quantity']! as num).toDouble(),
+          'comment': 'Отмена подключения',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', returnRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          returnRow,
+          now,
+        );
+      }
+      Future<void> softDelete(String table, String entityType) async {
+        final rows = await transaction.query(
+          table,
+          where: table == 'connections'
+              ? 'id = ?'
+              : '${table == 'connection_materials' ? 'connection_id' : 'connection_id'} = ? AND deleted_at IS NULL',
+          whereArgs: [connectionId],
+        );
+        for (final row in rows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: entityType,
+            entityId: row['id']! as String,
+            operation: 'delete',
+            payload: {...row, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+
+      await softDelete('connection_materials', 'connection_material');
+      await softDelete('finance_transactions', 'finance_transaction');
+      await softDelete('connections', 'connection');
+      // Preserve the original connection row in the delete payload.
+      assert(connection['id'] == connectionId);
+    });
+  }
+
+  Future<void> updateConnection({
+    required String connectionId,
+    required String warehouseId,
+    required String connectionType,
+    required DateTime connectionDate,
+    required double price,
+    required double officeAmount,
+    required double installerAmount,
+    required List<ConnectionMaterialInput> materials,
+    String? comment,
+  }) async {
+    if (price < 0 || officeAmount < 0 || installerAmount < 0) {
+      throw ArgumentError('Суммы не могут быть отрицательными');
+    }
+    if (materials.any((item) => item.quantity <= 0)) {
+      throw ArgumentError('Количество материала должно быть больше нуля');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.rawQuery(
+        '''
+        SELECT connection.*, client.provider_id
+        FROM connections connection
+        JOIN clients client ON client.id = connection.client_id
+        WHERE connection.id = ? AND connection.organization_id = ?
+          AND connection.deleted_at IS NULL
+        ''',
+        [connectionId, orgId],
+      );
+      if (rows.isEmpty) throw ArgumentError('Подключение не найдено');
+      final oldInventory = await transaction.query(
+        'inventory_transactions',
+        where:
+            'connection_id = ? AND operation_type = ? AND deleted_at IS NULL',
+        whereArgs: [connectionId, 'CONNECTION'],
+      );
+      for (final original in oldInventory) {
+        final reversal = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': original['warehouse_id'],
+          'provider_id': original['provider_id'],
+          'material_id': original['material_id'],
+          'connection_id': connectionId,
+          'operation_type': 'RETURN',
+          'quantity': -(original['quantity']! as num).toDouble(),
+          'comment': 'Пересчёт подключения',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', reversal);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          reversal,
+          now,
+        );
+      }
+      for (final table in ['connection_materials', 'finance_transactions']) {
+        final oldRows = await transaction.query(
+          table,
+          where: 'connection_id = ? AND deleted_at IS NULL',
+          whereArgs: [connectionId],
+        );
+        for (final old in oldRows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [old['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: table == 'connection_materials'
+                ? 'connection_material'
+                : 'finance_transaction',
+            entityId: old['id']! as String,
+            operation: 'delete',
+            payload: {...old, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+      for (final material in materials) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
+          throw StateError('Недостаточно материала на выбранном складе');
+        }
+      }
+      final version = (rows.single['version']! as num).toInt() + 1;
+      final connectionRow = <String, Object?>{
+        ...rows.single,
+        'warehouse_id': warehouseId,
+        'connection_type': connectionType,
+        'connection_date': connectionDate.toIso8601String().substring(0, 10),
+        'price': price,
+        'office_amount': officeAmount,
+        'installer_amount': installerAmount,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': version,
+        'sync_state': 'pending',
+      }..remove('provider_id');
+      await transaction.update(
+        'connections',
+        connectionRow,
+        where: 'id = ?',
+        whereArgs: [connectionId],
+      );
+      await _queueRow(transaction, orgId, 'connection', connectionRow, now);
+      final providerId = rows.single['provider_id']! as String;
+      for (final material in materials) {
+        final usage = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'connection_id': connectionId,
+          'material_id': material.materialId,
+          'quantity': material.quantity,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        final movement = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': providerId,
+          'material_id': material.materialId,
+          'connection_id': connectionId,
+          'operation_type': 'CONNECTION',
+          'quantity': -material.quantity,
+          'comment': comment,
+          'occurred_at': connectionDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('connection_materials', usage);
+        await transaction.insert('inventory_transactions', movement);
+        await _queueRow(transaction, orgId, 'connection_material', usage, now);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          movement,
+          now,
+        );
+      }
+      for (final accrual in [
+        (
+          amount: installerAmount,
+          to: 'INSTALLER',
+          label: 'Начисление монтажнику',
+        ),
+        (amount: officeAmount, to: 'OFFICE', label: 'Начисление офису'),
+      ]) {
+        if (accrual.amount <= 0) continue;
+        final finance = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'connection_id': connectionId,
+          'transaction_type': 'CONNECTION',
+          'accrual_to': accrual.to,
+          'amount': accrual.amount,
+          'comment': accrual.label,
+          'occurred_at': connectionDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', finance);
+        await _queueRow(
+          transaction,
+          orgId,
+          'finance_transaction',
+          finance,
+          now,
+        );
+      }
+    });
   }
 
   Future<String> addClient({
@@ -1003,6 +2583,7 @@ class LocalRepository {
     required String login,
     required String address,
     String? phone,
+    String? comment,
   }) async {
     if (contractNumber.trim().isEmpty ||
         login.trim().isEmpty ||
@@ -1021,6 +2602,7 @@ class LocalRepository {
       'login': login.trim(),
       'address': address.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
       'created_at': now,
       'updated_at': now,
       'version': 1,
@@ -1039,6 +2621,66 @@ class LocalRepository {
       );
     });
     return id;
+  }
+
+  Future<void> updateClient({
+    required String clientId,
+    required String providerId,
+    required String contractNumber,
+    required String login,
+    required String address,
+    String? phone,
+    String? comment,
+  }) async {
+    final cleanContract = contractNumber.trim();
+    final cleanLogin = login.trim();
+    final cleanAddress = address.trim();
+    if (cleanContract.isEmpty || cleanLogin.isEmpty || cleanAddress.isEmpty) {
+      throw ArgumentError('Заполните договор, логин и адрес');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'clients',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [clientId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Клиент не найден');
+      final duplicate = await transaction.query(
+        'clients',
+        columns: ['id'],
+        where:
+            'organization_id = ? AND id <> ? AND deleted_at IS NULL '
+            'AND (contract_number = ? OR login = ?)',
+        whereArgs: [orgId, clientId, cleanContract, cleanLogin],
+        limit: 1,
+      );
+      if (duplicate.isNotEmpty) {
+        throw ArgumentError('Клиент с таким договором или логином уже есть');
+      }
+      final row = <String, Object?>{
+        ...rows.single,
+        'provider_id': providerId,
+        'contract_number': cleanContract,
+        'login': cleanLogin,
+        'address': cleanAddress,
+        'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'clients',
+        row,
+        where: 'id = ?',
+        whereArgs: [clientId],
+      );
+      await _queueRow(transaction, orgId, 'client', row, now);
+    });
   }
 
   Future<List<MaterialBalance>> materialBalancesForWarehouse(
@@ -1355,6 +2997,70 @@ class LocalRepository {
     });
   }
 
+  Future<void> addInventoryOperation({
+    required String warehouseId,
+    required String materialId,
+    required String operationType,
+    required double quantity,
+    String adjustmentDirection = 'plus',
+    String? comment,
+  }) async {
+    const supported = {
+      'ISSUE_TO_THIRD_PARTY',
+      'RETURN',
+      'WRITE_OFF',
+      'ADJUSTMENT',
+    };
+    if (!supported.contains(operationType)) {
+      throw ArgumentError('Некорректный тип складской операции');
+    }
+    if (quantity <= 0) {
+      throw ArgumentError('Количество должно быть больше нуля');
+    }
+    if (!{'plus', 'minus'}.contains(adjustmentDirection)) {
+      throw ArgumentError('Некорректное направление корректировки');
+    }
+    final isNegative =
+        operationType == 'ISSUE_TO_THIRD_PARTY' ||
+        operationType == 'WRITE_OFF' ||
+        (operationType == 'ADJUSTMENT' && adjustmentDirection == 'minus');
+    final signedQuantity = isNegative ? -quantity : quantity;
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      if (isNegative) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId,
+          materialId: materialId,
+        );
+        if (available + 0.000001 < quantity) {
+          throw StateError(
+            'Недостаточно на складе. Остаток: $available, требуется: $quantity',
+          );
+        }
+      }
+      final row = <String, Object?>{
+        'id': _uuid.v7(),
+        'organization_id': orgId,
+        'warehouse_id': warehouseId,
+        'material_id': materialId,
+        'operation_type': operationType,
+        'quantity': signedQuantity,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'occurred_at': now,
+        'created_at': now,
+        'updated_at': now,
+        'version': 1,
+        'sync_state': 'pending',
+      };
+      await transaction.insert('inventory_transactions', row);
+      await _queueRow(transaction, orgId, 'inventory_transaction', row, now);
+    });
+  }
+
   Future<List<MaterialSettlement>> materialSettlements() async {
     final db = await database.instance;
     final orgId = await organizationId;
@@ -1418,16 +3124,45 @@ class LocalRepository {
     }).toList()..sort((a, b) => a.debtorName.compareTo(b.debtorName));
   }
 
-  Future<FinanceSummary> financeSummary({String? providerId}) async {
+  Future<FinanceSummary> financeSummary({
+    String? providerId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
-    final providerClause = providerId == null ? '' : ' AND provider_id = ?';
-    final arguments = <Object?>[orgId, ?providerId];
-    Future<double> sum(String condition) async {
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
+    Future<double> sum(String condition, {bool cumulative = false}) async {
+      final where = [
+        'organization_id = ?',
+        'deleted_at IS NULL',
+        if (providerId != null) 'provider_id = ?',
+        if (!cumulative && from != null) 'occurred_at >= ?',
+        if (toExclusive != null) 'occurred_at < ?',
+      ].join(' AND ');
+      final arguments = <Object?>[
+        orgId,
+        ?providerId,
+        if (!cumulative) ?from,
+        ?toExclusive,
+      ];
       final rows = await db.rawQuery('''
         SELECT COALESCE(SUM($condition), 0) AS amount
         FROM finance_transactions
-        WHERE organization_id = ? AND deleted_at IS NULL$providerClause
+        WHERE $where
         ''', arguments);
       return (rows.single['amount']! as num).toDouble();
     }
@@ -1435,8 +3170,15 @@ class LocalRepository {
     final customerReceived = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND amount > 0 THEN amount ELSE 0 END",
     );
+    final installerAccrued = await sum(
+      "CASE WHEN transaction_type IN ('CONNECTION', 'EXTRA_WORK') "
+      "AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
+    );
     final officeAccrued = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
+    );
+    final extraWorkIncome = await sum(
+      "CASE WHEN transaction_type = 'EXTRA_WORK' AND amount > 0 THEN amount ELSE 0 END",
     );
     final paidFromOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
@@ -1444,28 +3186,91 @@ class LocalRepository {
     final paidToOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
     );
+    final paidFromOfficeBalance = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
+      cumulative: true,
+    );
+    final paidToOfficeBalance = await sum(
+      "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
+      cumulative: true,
+    );
     final adjustments = await sum(
       "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
+      cumulative: true,
     );
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
+      cumulative: true,
     );
-    final expenseRows = await db.rawQuery('''
+    final officeAccruedBalance = await sum(
+      "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
+      cumulative: true,
+    );
+    final expenseFrom = dateFrom?.toIso8601String().substring(0, 10);
+    final expenseTo = dateTo?.toIso8601String().substring(0, 10);
+    final expenseWhere = [
+      'organization_id = ?',
+      "paid_by = 'INSTALLER'",
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseFrom != null) 'expense_date >= ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final expenseRows = await db.rawQuery(
+      '''
       SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
-      WHERE organization_id = ? AND paid_by = 'INSTALLER'
-        AND deleted_at IS NULL$providerClause
-      ''', arguments);
+      WHERE $expenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseFrom, ?expenseTo],
+    );
     final installerExpenses = (expenseRows.single['amount']! as num).toDouble();
+    final allExpenseWhere = [
+      'organization_id = ?',
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseFrom != null) 'expense_date >= ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final allExpenseRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE $allExpenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseFrom, ?expenseTo],
+    );
+    final expensesTotal = (allExpenseRows.single['amount']! as num).toDouble();
+    final debtExpenseWhere = [
+      'organization_id = ?',
+      "paid_by = 'INSTALLER'",
+      'deleted_at IS NULL',
+      if (providerId != null) 'provider_id = ?',
+      if (expenseTo != null) 'expense_date <= ?',
+    ].join(' AND ');
+    final debtExpenseRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
+      WHERE $debtExpenseWhere
+      ''',
+      [orgId, ?providerId, ?expenseTo],
+    );
+    final debtInstallerExpenses = (debtExpenseRows.single['amount']! as num)
+        .toDouble();
     final balance =
         extraWorkInstaller +
-        installerExpenses -
-        paidFromOffice +
+        debtInstallerExpenses -
+        paidFromOfficeBalance +
         adjustments -
-        officeAccrued +
-        paidToOffice;
+        officeAccruedBalance +
+        paidToOfficeBalance;
+    final incomeTotal = customerReceived + extraWorkIncome;
     return FinanceSummary(
       customerReceived: customerReceived,
+      installerAccrued: installerAccrued,
       officeAccrued: officeAccrued,
+      extraWorkIncome: extraWorkIncome,
+      incomeTotal: incomeTotal,
+      expensesTotal: expensesTotal,
+      profit: incomeTotal - expensesTotal,
       paidToOffice: paidToOffice,
       paidFromOffice: paidFromOffice,
       balance: balance,
@@ -1474,9 +3279,29 @@ class LocalRepository {
     );
   }
 
-  Future<List<FinanceJournalItem>> financeJournal({String? providerId}) async {
+  Future<List<FinanceJournalItem>> financeJournal({
+    String? providerId,
+    String? transactionType,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String search = '',
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final from = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
     final rows = await db.rawQuery(
       '''
       SELECT transaction_row.transaction_type, transaction_row.amount,
@@ -1487,11 +3312,14 @@ class LocalRepository {
       WHERE transaction_row.organization_id = ?
         AND transaction_row.deleted_at IS NULL
         ${providerId == null ? '' : 'AND transaction_row.provider_id = ?'}
+        ${transactionType == null ? '' : 'AND transaction_row.transaction_type = ?'}
+        ${from == null ? '' : 'AND transaction_row.occurred_at >= ?'}
+        ${toExclusive == null ? '' : 'AND transaction_row.occurred_at < ?'}
       ORDER BY transaction_row.occurred_at DESC, transaction_row.created_at DESC
       ''',
-      [orgId, ?providerId],
+      [orgId, ?providerId, ?transactionType, ?from, ?toExclusive],
     );
-    return rows
+    final result = rows
         .map(
           (row) => FinanceJournalItem(
             type: row['transaction_type']! as String,
@@ -1500,6 +3328,17 @@ class LocalRepository {
             comment: row['comment'] as String?,
             occurredAt: DateTime.parse(row['occurred_at']! as String),
           ),
+        )
+        .toList();
+    final normalized = search.trim().toLowerCase();
+    if (normalized.isEmpty) return result;
+    return result
+        .where(
+          (item) =>
+              item.type.toLowerCase().contains(normalized) ||
+              (item.providerName?.toLowerCase().contains(normalized) ??
+                  false) ||
+              (item.comment?.toLowerCase().contains(normalized) ?? false),
         )
         .toList();
   }
@@ -1690,6 +3529,7 @@ class LocalRepository {
           'warehouse_id': warehouseId,
           'provider_id': providerId,
           'material_id': material.materialId,
+          'extra_work_id': workId,
           'operation_type': 'WRITE_OFF',
           'quantity': -material.quantity,
           'comment': 'Допработа',
@@ -1744,24 +3584,36 @@ class LocalRepository {
     });
   }
 
-  Future<List<ExtraWorkItem>> extraWorks() async {
+  Future<List<ExtraWorkItem>> extraWorks({
+    String search = '',
+    String? providerId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final normalized = search.trim();
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
-      SELECT work.amount, work.work_date, work.comment,
+      SELECT work.id, work.amount, work.work_date, work.comment,
              type.name type_name, provider.name provider_name
       FROM extra_works work
       JOIN extra_work_types type ON type.id = work.work_type_id
       JOIN providers provider ON provider.id = work.provider_id
       WHERE work.organization_id = ? AND work.deleted_at IS NULL
+        ${providerId == null ? '' : 'AND work.provider_id = ?'}
+        ${from == null ? '' : 'AND work.work_date >= ?'}
+        ${to == null ? '' : 'AND work.work_date <= ?'}
       ORDER BY work.work_date DESC, work.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?providerId, ?from, ?to],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ExtraWorkItem(
+            id: row['id']! as String,
             typeName: row['type_name']! as String,
             providerName: row['provider_name']! as String,
             amount: (row['amount']! as num).toDouble(),
@@ -1770,34 +3622,577 @@ class LocalRepository {
           ),
         )
         .toList();
+    if (normalized.isEmpty) return result;
+    final needle = normalized.toLowerCase();
+    return result
+        .where(
+          (item) =>
+              item.typeName.toLowerCase().contains(needle) ||
+              (item.comment?.toLowerCase().contains(needle) ?? false),
+        )
+        .toList();
   }
 
-  Future<List<ExpenseItem>> expenses() async {
+  Future<List<ExpenseItem>> expenses({
+    String search = '',
+    String? category,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final normalized = search.trim();
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
-      SELECT expense.category, expense.description, expense.amount,
-             expense.paid_by, expense.expense_date, provider.name provider_name
+      SELECT expense.id, expense.category, expense.description, expense.amount,
+             expense.paid_by, expense.expense_date, expense.comment,
+             provider.name provider_name
       FROM expenses expense
       JOIN providers provider ON provider.id = expense.provider_id
       WHERE expense.organization_id = ? AND expense.deleted_at IS NULL
+        ${category == null ? '' : 'AND expense.category = ?'}
+        ${from == null ? '' : 'AND expense.expense_date >= ?'}
+        ${to == null ? '' : 'AND expense.expense_date <= ?'}
       ORDER BY expense.expense_date DESC, expense.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?category, ?from, ?to],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ExpenseItem(
+            id: row['id']! as String,
             category: row['category']! as String,
             description: row['description']! as String,
             amount: (row['amount']! as num).toDouble(),
             paidBy: row['paid_by']! as String,
             providerName: row['provider_name']! as String,
             expenseDate: DateTime.parse(row['expense_date']! as String),
+            comment: row['comment'] as String?,
           ),
         )
         .toList();
+    if (normalized.isEmpty) return result;
+    final needle = normalized.toLowerCase();
+    return result
+        .where(
+          (item) =>
+              item.description.toLowerCase().contains(needle) ||
+              item.providerName.toLowerCase().contains(needle) ||
+              (item.comment?.toLowerCase().contains(needle) ?? false),
+        )
+        .toList();
+  }
+
+  Future<ExtraWorkEditData> extraWorkEditData(String extraWorkId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'extra_works',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [extraWorkId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw ArgumentError('Дополнительная работа не найдена');
+    }
+    final row = rows.single;
+    final usages = await db.query(
+      'extra_work_materials',
+      columns: ['material_id', 'quantity'],
+      where: 'extra_work_id = ? AND deleted_at IS NULL',
+      whereArgs: [extraWorkId],
+    );
+    return ExtraWorkEditData(
+      providerId: row['provider_id']! as String,
+      workTypeId: row['work_type_id']! as String,
+      workDate: DateTime.parse(row['work_date']! as String),
+      amount: (row['amount']! as num).toDouble(),
+      warehouseId: row['warehouse_id'] as String?,
+      materials: {
+        for (final usage in usages)
+          usage['material_id']! as String: (usage['quantity']! as num)
+              .toDouble(),
+      },
+      comment: row['comment'] as String?,
+    );
+  }
+
+  Future<ExpenseEditData> expenseEditData(String expenseId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'expenses',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [expenseId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Расход не найден');
+    final row = rows.single;
+    return ExpenseEditData(
+      providerId: row['provider_id']! as String,
+      category: row['category']! as String,
+      description: row['description']! as String,
+      amount: (row['amount']! as num).toDouble(),
+      paidBy: row['paid_by']! as String,
+      expenseDate: DateTime.parse(row['expense_date']! as String),
+      comment: row['comment'] as String?,
+    );
+  }
+
+  Future<void> updateExpense({
+    required String expenseId,
+    required String providerId,
+    required String category,
+    required String description,
+    required double amount,
+    required String paidBy,
+    required DateTime expenseDate,
+    String? comment,
+  }) async {
+    if (amount <= 0) throw ArgumentError('Сумма должна быть больше нуля');
+    if (description.trim().isEmpty) {
+      throw ArgumentError('Описание обязательно');
+    }
+    if (!{'INSTALLER', 'OFFICE'}.contains(paidBy)) {
+      throw ArgumentError('Укажите, кто оплатил расход');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'expenses',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Расход не найден');
+      final oldFinance = await transaction.query(
+        'finance_transactions',
+        where: 'expense_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId],
+      );
+      for (final old in oldFinance) {
+        await transaction.update(
+          'finance_transactions',
+          {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+          where: 'id = ?',
+          whereArgs: [old['id']],
+        );
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: old['id']! as String,
+          operation: 'delete',
+          payload: {...old, 'deleted_at': now},
+          now: now,
+        );
+      }
+      final expenseRow = <String, Object?>{
+        ...rows.single,
+        'provider_id': providerId,
+        'category': category,
+        'description': description.trim(),
+        'amount': amount,
+        'paid_by': paidBy,
+        'expense_date': expenseDate.toIso8601String().substring(0, 10),
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'expenses',
+        expenseRow,
+        where: 'id = ?',
+        whereArgs: [expenseId],
+      );
+      await _queueRow(transaction, orgId, 'expense', expenseRow, now);
+      final financeRow = <String, Object?>{
+        'id': _uuid.v7(),
+        'organization_id': orgId,
+        'provider_id': providerId,
+        'expense_id': expenseId,
+        'transaction_type': 'EXPENSE',
+        'amount': -amount,
+        'comment': description.trim(),
+        'occurred_at': expenseDate.toUtc().toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
+        'version': 1,
+        'sync_state': 'pending',
+      };
+      await transaction.insert('finance_transactions', financeRow);
+      await _queueRow(
+        transaction,
+        orgId,
+        'finance_transaction',
+        financeRow,
+        now,
+      );
+    });
+  }
+
+  Future<void> updateExtraWork({
+    required String extraWorkId,
+    required String providerId,
+    required String workTypeId,
+    required DateTime workDate,
+    required double amount,
+    String? warehouseId,
+    List<ConnectionMaterialInput> materials = const [],
+    String? comment,
+  }) async {
+    if (amount < 0) {
+      throw ArgumentError('Стоимость не может быть отрицательной');
+    }
+    if (materials.any((item) => item.quantity <= 0)) {
+      throw ArgumentError('Количество материала должно быть больше нуля');
+    }
+    if (materials.isNotEmpty && warehouseId == null) {
+      throw ArgumentError('Выберите склад для списания');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'extra_works',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) {
+        throw ArgumentError('Дополнительная работа не найдена');
+      }
+      final oldWork = rows.single;
+      final oldUsages = await transaction.query(
+        'extra_work_materials',
+        where: 'extra_work_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId],
+      );
+      final oldWarehouseId = oldWork['warehouse_id'] as String?;
+      if (oldUsages.isNotEmpty && oldWarehouseId == null) {
+        throw StateError('У дополнительной работы не указан склад');
+      }
+      for (final usage in oldUsages) {
+        final reversal = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': oldWarehouseId,
+          'provider_id': oldWork['provider_id'],
+          'material_id': usage['material_id'],
+          'extra_work_id': extraWorkId,
+          'operation_type': 'RETURN',
+          'quantity': (usage['quantity']! as num).toDouble(),
+          'comment': 'Пересчёт дополнительной работы',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', reversal);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          reversal,
+          now,
+        );
+      }
+      for (final table in ['extra_work_materials', 'finance_transactions']) {
+        final oldRows = await transaction.query(
+          table,
+          where: 'extra_work_id = ? AND deleted_at IS NULL',
+          whereArgs: [extraWorkId],
+        );
+        for (final old in oldRows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [old['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: table == 'extra_work_materials'
+                ? 'extra_work_material'
+                : 'finance_transaction',
+            entityId: old['id']! as String,
+            operation: 'delete',
+            payload: {...old, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+      for (final material in materials) {
+        final available = await _balanceInTransaction(
+          transaction,
+          organizationId: orgId,
+          warehouseId: warehouseId!,
+          materialId: material.materialId,
+        );
+        if (available + 0.000001 < material.quantity) {
+          throw StateError('Недостаточно материала на выбранном складе');
+        }
+      }
+      final workRow = <String, Object?>{
+        ...oldWork,
+        'provider_id': providerId,
+        'work_type_id': workTypeId,
+        'warehouse_id': warehouseId,
+        'work_date': workDate.toIso8601String().substring(0, 10),
+        'amount': amount,
+        'installer_amount': amount,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (oldWork['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'extra_works',
+        workRow,
+        where: 'id = ?',
+        whereArgs: [extraWorkId],
+      );
+      await _queueRow(transaction, orgId, 'extra_work', workRow, now);
+      for (final material in materials) {
+        final usageRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'extra_work_id': extraWorkId,
+          'material_id': material.materialId,
+          'quantity': material.quantity,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        final inventoryRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': providerId,
+          'material_id': material.materialId,
+          'extra_work_id': extraWorkId,
+          'operation_type': 'WRITE_OFF',
+          'quantity': -material.quantity,
+          'comment': 'Допработа',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('extra_work_materials', usageRow);
+        await transaction.insert('inventory_transactions', inventoryRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'extra_work_material',
+          usageRow,
+          now,
+        );
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          inventoryRow,
+          now,
+        );
+      }
+      if (amount > 0) {
+        final financeRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'extra_work_id': extraWorkId,
+          'transaction_type': 'EXTRA_WORK',
+          'accrual_to': 'INSTALLER',
+          'amount': amount,
+          'comment': 'Допработа: офис должен монтажнику',
+          'occurred_at': workDate.toUtc().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', financeRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'finance_transaction',
+          financeRow,
+          now,
+        );
+      }
+    });
+  }
+
+  Future<void> deleteExtraWork(String extraWorkId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final works = await transaction.query(
+        'extra_works',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId, orgId],
+        limit: 1,
+      );
+      if (works.isEmpty) {
+        throw ArgumentError('Дополнительная работа не найдена');
+      }
+      final work = works.single;
+      final warehouseId = work['warehouse_id'] as String?;
+      final usages = await transaction.query(
+        'extra_work_materials',
+        where: 'extra_work_id = ? AND deleted_at IS NULL',
+        whereArgs: [extraWorkId],
+      );
+      if (usages.isNotEmpty && warehouseId == null) {
+        throw StateError('У дополнительной работы не указан склад');
+      }
+      for (final usage in usages) {
+        final returnRow = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'warehouse_id': warehouseId,
+          'provider_id': work['provider_id'],
+          'material_id': usage['material_id'],
+          'extra_work_id': extraWorkId,
+          'operation_type': 'RETURN',
+          'quantity': (usage['quantity']! as num).toDouble(),
+          'comment': 'Отмена дополнительной работы',
+          'occurred_at': now,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('inventory_transactions', returnRow);
+        await _queueRow(
+          transaction,
+          orgId,
+          'inventory_transaction',
+          returnRow,
+          now,
+        );
+      }
+
+      Future<void> softDelete(
+        String table,
+        String entityType,
+        String foreignKey,
+      ) async {
+        final rows = await transaction.query(
+          table,
+          where: '$foreignKey = ? AND deleted_at IS NULL',
+          whereArgs: [extraWorkId],
+        );
+        for (final row in rows) {
+          await transaction.update(
+            table,
+            {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+          await _enqueue(
+            transaction,
+            organizationId: orgId,
+            entityType: entityType,
+            entityId: row['id']! as String,
+            operation: 'delete',
+            payload: {...row, 'deleted_at': now},
+            now: now,
+          );
+        }
+      }
+
+      await softDelete(
+        'extra_work_materials',
+        'extra_work_material',
+        'extra_work_id',
+      );
+      await softDelete(
+        'finance_transactions',
+        'finance_transaction',
+        'extra_work_id',
+      );
+      await transaction.update(
+        'extra_works',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ?',
+        whereArgs: [extraWorkId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'extra_work',
+        entityId: extraWorkId,
+        operation: 'delete',
+        payload: {...work, 'deleted_at': now},
+        now: now,
+      );
+    });
+  }
+
+  Future<void> deleteExpense(String expenseId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final expenses = await transaction.query(
+        'expenses',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId, orgId],
+        limit: 1,
+      );
+      if (expenses.isEmpty) throw ArgumentError('Расход не найден');
+      final expense = expenses.single;
+      final financeRows = await transaction.query(
+        'finance_transactions',
+        where: 'expense_id = ? AND deleted_at IS NULL',
+        whereArgs: [expenseId],
+      );
+      for (final row in financeRows) {
+        await transaction.update(
+          'finance_transactions',
+          {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: row['id']! as String,
+          operation: 'delete',
+          payload: {...row, 'deleted_at': now},
+          now: now,
+        );
+      }
+      await transaction.update(
+        'expenses',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ?',
+        whereArgs: [expenseId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'expense',
+        entityId: expenseId,
+        operation: 'delete',
+        payload: {...expense, 'deleted_at': now},
+        now: now,
+      );
+    });
   }
 
   Future<double> _balanceInTransaction(
@@ -1838,8 +4233,12 @@ class LocalRepository {
 
   Future<int> pendingChanges() async {
     final db = await database.instance;
+    final orgId = await organizationId;
     return Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) FROM sync_queue'),
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM sync_queue WHERE organization_id = ?',
+            [orgId],
+          ),
         ) ??
         0;
   }
@@ -1894,11 +4293,12 @@ class LocalRepository {
 
   Future<int> syncCursor() async {
     final db = await database.instance;
+    final key = 'sync_cursor_${await organizationId}';
     final row = await db.query(
       'app_settings',
       columns: ['value'],
       where: 'key = ?',
-      whereArgs: ['sync_cursor'],
+      whereArgs: [key],
       limit: 1,
     );
     return row.isEmpty ? 0 : int.tryParse(row.single['value']! as String) ?? 0;
@@ -1929,20 +4329,74 @@ class LocalRepository {
       'extra_work_material': 'extra_work_materials',
       'expense': 'expenses',
     };
+    const priorities = {
+      'provider': 10,
+      'providers': 10,
+      'material': 10,
+      'materials': 10,
+      'extra_work_type': 10,
+      'extra_work_types': 10,
+      'user': 10,
+      'warehouse': 20,
+      'warehouses': 20,
+      'client': 20,
+      'connection': 30,
+      'extra_work': 30,
+      'expense': 30,
+      'connection_material': 40,
+      'extra_work_material': 40,
+      'inventory_transaction': 40,
+      'finance_transaction': 40,
+    };
+    final ordered = [...changes]
+      ..sort((left, right) {
+        final leftDelete = left['operation'] == 'delete';
+        final rightDelete = right['operation'] == 'delete';
+        if (leftDelete != rightDelete) return leftDelete ? 1 : -1;
+        final leftPriority = priorities[left['entity_type']] ?? 100;
+        final rightPriority = priorities[right['entity_type']] ?? 100;
+        return leftDelete
+            ? rightPriority.compareTo(leftPriority)
+            : leftPriority.compareTo(rightPriority);
+      });
     await db.transaction((transaction) async {
-      for (final change in changes) {
+      for (final change in ordered) {
         final table = tables[change['entity_type']];
         if (table == null) continue;
+        final entityId = change['entity_id']! as String;
+        final pending =
+            Sqflite.firstIntValue(
+              await transaction.rawQuery(
+                'SELECT COUNT(*) FROM sync_queue WHERE entity_id = ?',
+                [entityId],
+              ),
+            ) ??
+            0;
+        if (pending > 0) {
+          await transaction.rawUpdate(
+            '''
+            UPDATE sync_queue
+            SET attempts = attempts + 1,
+                last_error = 'Конфликт с изменением на сервере'
+            WHERE entity_id = ?
+            ''',
+            [entityId],
+          );
+          continue;
+        }
         final payload = Map<String, Object?>.from(change['payload']! as Map);
         if (payload.containsKey('organization_id')) {
           payload['organization_id'] = orgId;
+        }
+        if (payload.containsKey('sync_state')) {
+          payload['sync_state'] = 'synced';
         }
         if (change['operation'] == 'delete') {
           await transaction.update(
             table,
             {'deleted_at': DateTime.now().toUtc().toIso8601String()},
             where: 'id = ?',
-            whereArgs: [change['entity_id']],
+            whereArgs: [entityId],
           );
         } else {
           await transaction.insert(
@@ -1953,7 +4407,7 @@ class LocalRepository {
         }
       }
       await transaction.insert('app_settings', {
-        'key': 'sync_cursor',
+        'key': 'sync_cursor_$orgId',
         'value': cursor.toString(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });

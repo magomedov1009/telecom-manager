@@ -34,6 +34,56 @@ class SyncResult {
   final int conflicts;
 }
 
+class ServerOrganization {
+  const ServerOrganization({
+    required this.id,
+    required this.name,
+    required this.role,
+  });
+
+  final int id;
+  final String name;
+  final String role;
+
+  factory ServerOrganization.fromJson(Map<String, Object?> json) =>
+      ServerOrganization(
+        id: (json['id']! as num).toInt(),
+        name: json['name']! as String,
+        role: json['role']! as String,
+      );
+}
+
+class ServerMember {
+  const ServerMember({
+    required this.userId,
+    required this.username,
+    required this.fullName,
+    required this.role,
+  });
+
+  final int userId;
+  final String username;
+  final String fullName;
+  final String role;
+
+  factory ServerMember.fromJson(Map<String, Object?> json) => ServerMember(
+    userId: (json['user_id']! as num).toInt(),
+    username: json['username']! as String,
+    fullName: json['full_name']! as String,
+    role: json['role']! as String,
+  );
+}
+
+class ServerConnection {
+  const ServerConnection({
+    required this.organizationId,
+    required this.organizations,
+  });
+
+  final int organizationId;
+  final List<ServerOrganization> organizations;
+}
+
 class SyncService {
   SyncService({
     required this.repository,
@@ -52,10 +102,11 @@ class SyncService {
     '${serverUrl.trim().replaceAll(RegExp(r'/+$'), '')}/api/mobile$path',
   ).replace(queryParameters: query);
 
-  Future<void> connect({
+  Future<ServerConnection> connect({
     required String username,
     required String password,
     required String deviceName,
+    int? organizationId,
   }) async {
     final response = await client.post(
       endpoint('/login'),
@@ -64,6 +115,7 @@ class SyncService {
         'username': username,
         'password': password,
         'device_name': deviceName,
+        'organization_id': ?organizationId,
       }),
     );
     if (response.statusCode != 200) {
@@ -71,15 +123,115 @@ class SyncService {
     }
     final body = jsonDecode(response.body) as Map<String, Object?>;
     await tokenStore.write(body['token']! as String);
+    await repository.bindRemoteOrganization(
+      serverUrl: serverUrl,
+      remoteOrganizationId: '${body['organization_id']}',
+      organizationName: body['organization_name']! as String,
+      username: (body['username'] as String?) ?? username.trim(),
+      fullName:
+          (body['full_name'] as String?) ??
+          (body['username'] as String?) ??
+          username.trim(),
+      role: body['role']! as String,
+      password: password,
+    );
+    return ServerConnection(
+      organizationId: (body['organization_id']! as num).toInt(),
+      organizations: ((body['organizations'] as List?) ?? const [])
+          .map(
+            (item) => ServerOrganization.fromJson(
+              Map<String, Object?>.from(item as Map),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Future<Map<String, String>> _authorizedHeaders() async {
+    final token = await tokenStore.read();
+    if (token == null) throw StateError('Сначала подключитесь к серверу');
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Never _serverError(http.Response response) {
+    var message = 'Ошибка сервера (${response.statusCode})';
+    try {
+      final body = jsonDecode(response.body) as Map<String, Object?>;
+      message = body['detail']?.toString() ?? message;
+    } catch (_) {}
+    throw StateError(message);
+  }
+
+  Future<ServerOrganization> createOrganization(String name) async {
+    final response = await client.post(
+      endpoint('/organizations'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({'name': name}),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return ServerOrganization.fromJson(
+      Map<String, Object?>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<List<ServerMember>> members() async {
+    final binding = await repository.remoteOrganizationBinding();
+    if (binding == null) throw StateError('Организация не подключена');
+    final response = await client.get(
+      endpoint('/organizations/${binding.remoteOrganizationId}/members'),
+      headers: await _authorizedHeaders(),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return (jsonDecode(response.body) as List)
+        .map(
+          (item) =>
+              ServerMember.fromJson(Map<String, Object?>.from(item as Map)),
+        )
+        .toList();
+  }
+
+  Future<ServerMember> addMember({
+    required String username,
+    required String role,
+  }) async {
+    final binding = await repository.remoteOrganizationBinding();
+    if (binding == null) throw StateError('Организация не подключена');
+    final response = await client.post(
+      endpoint('/organizations/${binding.remoteOrganizationId}/members'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({'username': username, 'role': role}),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return ServerMember.fromJson(
+      Map<String, Object?>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<void> removeMember(int userId) async {
+    final binding = await repository.remoteOrganizationBinding();
+    if (binding == null) throw StateError('Организация не подключена');
+    final response = await client.delete(
+      endpoint(
+        '/organizations/${binding.remoteOrganizationId}/members/$userId',
+      ),
+      headers: await _authorizedHeaders(),
+    );
+    if (response.statusCode != 204) _serverError(response);
   }
 
   Future<SyncResult> synchronize() async {
     final token = await tokenStore.read();
     if (token == null) throw StateError('Сначала подключитесь к серверу');
-    final headers = {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
+    if (!await repository.syncTargetMatches(serverUrl)) {
+      throw StateError(
+        'Выбранная организация не связана с этим подключением. '
+        'Подключите устройство заново.',
+      );
+    }
+    final headers = await _authorizedHeaders();
     var sent = 0;
     var received = 0;
     var conflicts = 0;

@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 7,
+        version: 12,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -37,6 +37,8 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'local',
+        remote_server_url TEXT,
+        remote_organization_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -49,6 +51,7 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         organization_id TEXT NOT NULL REFERENCES organizations(id),
         name TEXT NOT NULL,
+        description TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -99,6 +102,7 @@ class AppDatabase {
         provider_id TEXT REFERENCES providers(id),
         material_id TEXT NOT NULL REFERENCES materials(id),
         connection_id TEXT,
+        extra_work_id TEXT,
         operation_type TEXT NOT NULL,
         quantity REAL NOT NULL CHECK (quantity <> 0),
         comment TEXT,
@@ -119,6 +123,7 @@ class AppDatabase {
         login TEXT,
         address TEXT NOT NULL,
         phone TEXT,
+        comment TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -176,7 +181,14 @@ class AppDatabase {
       'CREATE INDEX ix_inventory_connection ON inventory_transactions(connection_id)',
     );
     await db.execute(
+      'CREATE INDEX ix_inventory_extra_work ON inventory_transactions(extra_work_id)',
+    );
+    await db.execute(
       'CREATE INDEX ix_sync_queue_created ON sync_queue(created_at)',
+    );
+    await db.execute(
+      'CREATE UNIQUE INDEX ix_organizations_remote '
+      'ON organizations(remote_server_url, remote_organization_id)',
     );
   }
 
@@ -214,6 +226,40 @@ class AppDatabase {
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE users ADD COLUMN password_hash TEXT');
       await db.execute('ALTER TABLE users ADD COLUMN password_salt TEXT');
+    }
+    if (oldVersion < 8) {
+      await db.execute(
+        'ALTER TABLE inventory_transactions ADD COLUMN extra_work_id TEXT',
+      );
+      await db.execute(
+        'CREATE INDEX ix_inventory_extra_work ON inventory_transactions(extra_work_id)',
+      );
+    }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE clients ADD COLUMN comment TEXT');
+    }
+    if (oldVersion < 10) {
+      await db.execute('ALTER TABLE providers ADD COLUMN description TEXT');
+      await db.execute(
+        'ALTER TABLE extra_work_types ADD COLUMN default_office_amount REAL',
+      );
+    }
+    if (oldVersion < 11) {
+      await db.execute('ALTER TABLE users ADD COLUMN manager_id TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN comment TEXT');
+      await db.execute('ALTER TABLE users ADD COLUMN last_login_at TEXT');
+    }
+    if (oldVersion < 12) {
+      await db.execute(
+        'ALTER TABLE organizations ADD COLUMN remote_server_url TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE organizations ADD COLUMN remote_organization_id TEXT',
+      );
+      await db.execute(
+        'CREATE UNIQUE INDEX ix_organizations_remote '
+        'ON organizations(remote_server_url, remote_organization_id)',
+      );
     }
   }
 
@@ -275,6 +321,7 @@ class AppDatabase {
         name TEXT NOT NULL,
         description TEXT,
         default_price REAL,
+        default_office_amount REAL,
         requires_materials INTEGER NOT NULL DEFAULT 0,
         requires_equipment INTEGER NOT NULL DEFAULT 0,
         is_active INTEGER NOT NULL DEFAULT 1,
@@ -356,6 +403,9 @@ class AppDatabase {
         role TEXT NOT NULL CHECK (role IN ('admin', 'manager', 'installer')),
         password_hash TEXT,
         password_salt TEXT,
+        manager_id TEXT,
+        comment TEXT,
+        last_login_at TEXT,
         is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,

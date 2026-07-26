@@ -140,6 +140,7 @@ class _AppShellState extends State<AppShell> {
         repository: widget.repository,
         role: widget.user.role,
         onLogout: widget.onLogout,
+        onChanged: refresh,
       ),
     ];
     return Scaffold(

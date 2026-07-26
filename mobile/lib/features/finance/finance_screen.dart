@@ -18,6 +18,12 @@ class FinanceScreen extends StatefulWidget {
 
 class _FinanceScreenState extends State<FinanceScreen> {
   late Future<(FinanceSummary, List<FinanceJournalItem>)> data;
+  String? providerId;
+  String? transactionType;
+  DateTime? dateFrom;
+  DateTime? dateTo;
+  final search = TextEditingController();
+  String journalView = 'all';
 
   static const labels = {
     'CONNECTION': 'Подключение',
@@ -38,8 +44,18 @@ class _FinanceScreenState extends State<FinanceScreen> {
     setState(() {
       data =
           Future.wait([
-            widget.repository.financeSummary(),
-            widget.repository.financeJournal(),
+            widget.repository.financeSummary(
+              providerId: providerId,
+              dateFrom: dateFrom,
+              dateTo: dateTo,
+            ),
+            widget.repository.financeJournal(
+              providerId: providerId,
+              transactionType: transactionType,
+              dateFrom: dateFrom,
+              dateTo: dateTo,
+              search: search.text,
+            ),
           ]).then((items) {
             return (
               items[0] as FinanceSummary,
@@ -48,6 +64,151 @@ class _FinanceScreenState extends State<FinanceScreen> {
           });
     });
     if (notify) widget.onChanged();
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  Future<void> showFilters() async {
+    final providers = await widget.repository.providers();
+    if (!mounted) return;
+    var selectedProvider = providerId;
+    var selectedType = transactionType;
+    var selectedFrom = dateFrom;
+    var selectedTo = dateTo;
+    final searchController = TextEditingController(text: search.text);
+    final applied = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> pickDate(bool from) async {
+            final value = await showDatePicker(
+              context: context,
+              initialDate: from
+                  ? (selectedFrom ?? selectedTo ?? DateTime.now())
+                  : (selectedTo ?? selectedFrom ?? DateTime.now()),
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2100),
+            );
+            if (value == null) return;
+            setDialogState(() {
+              if (from) {
+                selectedFrom = value;
+                if (selectedTo != null && value.isAfter(selectedTo!)) {
+                  selectedTo = value;
+                }
+              } else {
+                selectedTo = value;
+                if (selectedFrom != null && value.isBefore(selectedFrom!)) {
+                  selectedFrom = value;
+                }
+              }
+            });
+          }
+
+          String date(DateTime? value) => value == null
+              ? 'Не выбрана'
+              : '${value.day}.${value.month}.${value.year}';
+          return AlertDialog(
+            title: const Text('Фильтры финансов'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: searchController,
+                    decoration: const InputDecoration(
+                      labelText: 'Поиск в журнале',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedProvider,
+                    decoration: const InputDecoration(
+                      labelText: 'Провайдер',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Все')),
+                      ...providers.map(
+                        (item) => DropdownMenuItem(
+                          value: item.id,
+                          child: Text(item.name),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => selectedProvider = value,
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedType,
+                    decoration: const InputDecoration(
+                      labelText: 'Тип операции',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Все')),
+                      ...labels.entries.map(
+                        (item) => DropdownMenuItem(
+                          value: item.key,
+                          child: Text(item.value),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => selectedType = value,
+                  ),
+                  const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Дата начала'),
+                    subtitle: Text(date(selectedFrom)),
+                    trailing: const Icon(Icons.date_range_outlined),
+                    onTap: () => pickDate(true),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Дата окончания'),
+                    subtitle: Text(date(selectedTo)),
+                    trailing: const Icon(Icons.event_outlined),
+                    onTap: () => pickDate(false),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  searchController.clear();
+                  selectedProvider = null;
+                  selectedType = null;
+                  selectedFrom = null;
+                  selectedTo = null;
+                  Navigator.pop(context, true);
+                },
+                child: const Text('Сбросить'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Применить'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (applied == true) {
+      providerId = selectedProvider;
+      transactionType = selectedType;
+      dateFrom = selectedFrom;
+      dateTo = selectedTo;
+      search.text = searchController.text;
+      reload(notify: false);
+    }
+    searchController.dispose();
   }
 
   String money(double value) =>
@@ -63,6 +224,13 @@ class _FinanceScreenState extends State<FinanceScreen> {
           'Финансы',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Фильтры',
+            onPressed: showFilters,
+            icon: const Icon(Icons.filter_alt_outlined),
+          ),
+        ],
       ),
       body: FutureBuilder<(FinanceSummary, List<FinanceJournalItem>)>(
         future: data,
@@ -72,6 +240,24 @@ class _FinanceScreenState extends State<FinanceScreen> {
           }
           final summary = snapshot.data!.$1;
           final journal = snapshot.data!.$2;
+          final visibleJournal = switch (journalView) {
+            'income' =>
+              journal
+                  .where(
+                    (item) =>
+                        item.type == 'CONNECTION' || item.type == 'EXTRA_WORK',
+                  )
+                  .toList(),
+            'settlements' =>
+              journal
+                  .where(
+                    (item) =>
+                        item.type == 'PAYMENT_TO_OFFICE' ||
+                        item.type == 'PAYMENT_FROM_OFFICE',
+                  )
+                  .toList(),
+            _ => journal,
+          };
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
             children: [
@@ -106,6 +292,35 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   ),
                 ),
               ),
+              if (providerId != null ||
+                  transactionType != null ||
+                  dateFrom != null ||
+                  dateTo != null ||
+                  search.text.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.filter_alt_outlined),
+                    title: const Text('Фильтры применены'),
+                    subtitle: Text(
+                      [
+                        if (dateFrom != null)
+                          'с ${dateFrom!.day}.${dateFrom!.month}.${dateFrom!.year}',
+                        if (dateTo != null)
+                          'по ${dateTo!.day}.${dateTo!.month}.${dateTo!.year}',
+                        if (transactionType != null)
+                          labels[transactionType] ?? transactionType!,
+                        if (search.text.isNotEmpty) '«${search.text}»',
+                      ].join(' · '),
+                    ),
+                    trailing: IconButton(
+                      tooltip: 'Изменить',
+                      onPressed: showFilters,
+                      icon: const Icon(Icons.tune),
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               GridView.count(
                 shrinkWrap: true,
@@ -124,6 +339,26 @@ class _FinanceScreenState extends State<FinanceScreen> {
                     value: money(summary.officeAccrued),
                   ),
                   _FinanceMetric(
+                    label: 'Начислено монтажнику',
+                    value: money(summary.installerAccrued),
+                  ),
+                  _FinanceMetric(
+                    label: 'Доход от допработ',
+                    value: money(summary.extraWorkIncome),
+                  ),
+                  _FinanceMetric(
+                    label: 'Общий доход',
+                    value: money(summary.incomeTotal),
+                  ),
+                  _FinanceMetric(
+                    label: 'Расходы',
+                    value: money(summary.expensesTotal),
+                  ),
+                  _FinanceMetric(
+                    label: 'Чистая прибыль',
+                    value: money(summary.profit),
+                  ),
+                  _FinanceMetric(
                     label: 'Передано в офис',
                     value: money(summary.paidToOffice),
                   ),
@@ -134,14 +369,38 @@ class _FinanceScreenState extends State<FinanceScreen> {
                 ],
               ),
               const SizedBox(height: 20),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'all',
+                    label: Text('Все'),
+                    icon: Icon(Icons.swap_vert),
+                  ),
+                  ButtonSegment(
+                    value: 'income',
+                    label: Text('Доходы'),
+                    icon: Icon(Icons.trending_up),
+                  ),
+                  ButtonSegment(
+                    value: 'settlements',
+                    label: Text('Расчёты'),
+                    icon: Icon(Icons.handshake_outlined),
+                  ),
+                ],
+                selected: {journalView},
+                onSelectionChanged: (value) {
+                  setState(() => journalView = value.first);
+                },
+              ),
+              const SizedBox(height: 16),
               const Text(
                 'Журнал операций',
                 style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 10),
-              if (journal.isEmpty)
+              if (visibleJournal.isEmpty)
                 const Card(child: ListTile(title: Text('Операций пока нет'))),
-              ...journal.map(
+              ...visibleJournal.map(
                 (item) => Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: Card(

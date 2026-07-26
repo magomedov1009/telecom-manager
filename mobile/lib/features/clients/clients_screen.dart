@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
+import 'connections_screen.dart';
 
 class ClientsScreen extends StatefulWidget {
   const ClientsScreen({
@@ -18,6 +19,7 @@ class ClientsScreen extends StatefulWidget {
 
 class _ClientsScreenState extends State<ClientsScreen> {
   late Future<List<ClientListItem>> clients;
+  final search = TextEditingController();
 
   @override
   void initState() {
@@ -26,8 +28,92 @@ class _ClientsScreenState extends State<ClientsScreen> {
   }
 
   void reload() {
-    setState(() => clients = widget.repository.clients());
+    setState(() => clients = widget.repository.clients(query: search.text));
     widget.onChanged();
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  Future<void> showClient(ClientListItem client) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: FutureBuilder<List<ConnectionListItem>>(
+          future: widget.repository.connections(clientId: client.id),
+          builder: (context, snapshot) => ListView(
+            shrinkWrap: true,
+            children: [
+              Text(
+                client.login,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('Провайдер: ${client.providerName}'),
+              Text('Договор: ${client.contractNumber}'),
+              Text('Адрес: ${client.address}'),
+              if (client.phone?.isNotEmpty == true)
+                Text('Телефон: ${client.phone}'),
+              if (client.comment?.isNotEmpty == true) ...[
+                const SizedBox(height: 8),
+                Text('Комментарий: ${client.comment}'),
+              ],
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  editClient(client);
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Редактировать клиента'),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'История подключений',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              if (!snapshot.hasData)
+                const Center(child: CircularProgressIndicator())
+              else if (snapshot.data!.isEmpty)
+                const Text('Подключений пока нет')
+              else
+                ...snapshot.data!.map(
+                  (item) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.router_outlined),
+                    title: Text(item.connectionType),
+                    subtitle: Text(
+                      '${item.connectionDate.day}.${item.connectionDate.month}.${item.connectionDate.year}',
+                    ),
+                    trailing: Text('${item.price.toStringAsFixed(0)} ₽'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> editClient(ClientListItem client) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) =>
+          _ClientSheet(repository: widget.repository, initial: client),
+    );
+    if (saved == true) reload();
   }
 
   @override
@@ -40,58 +126,96 @@ class _ClientsScreenState extends State<ClientsScreen> {
           'Клиенты',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
-      ),
-      body: FutureBuilder<List<ClientListItem>>(
-        future: clients,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.data!.isEmpty) {
-            return const Center(child: Text('Добавьте первого клиента'));
-          }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-            itemCount: snapshot.data!.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 10),
-            itemBuilder: (context, index) {
-              final client = snapshot.data![index];
-              return Card(
-                child: ListTile(
-                  contentPadding: const EdgeInsets.all(16),
-                  leading: const CircleAvatar(
-                    child: Icon(Icons.person_outline),
-                  ),
-                  title: Text(
-                    client.login,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    '${client.providerName} · договор ${client.contractNumber}\n'
-                    '${client.address} · подключений: ${client.connections}',
-                  ),
-                  isThreeLine: true,
-                  trailing: IconButton.filledTonal(
-                    tooltip: 'Оформить подключение',
-                    icon: const Icon(Icons.add_link),
-                    onPressed: () async {
-                      final saved = await showModalBottomSheet<bool>(
-                        context: context,
-                        isScrollControlled: true,
-                        useSafeArea: true,
-                        builder: (_) => _ConnectionSheet(
-                          repository: widget.repository,
-                          client: client,
-                        ),
-                      );
-                      if (saved == true) reload();
-                    },
-                  ),
+        actions: [
+          IconButton(
+            tooltip: 'Все подключения',
+            icon: const Icon(Icons.router_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => ConnectionsScreen(
+                  repository: widget.repository,
+                  onChanged: reload,
                 ),
-              );
-            },
-          );
-        },
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: TextField(
+              controller: search,
+              decoration: const InputDecoration(
+                hintText: 'Логин, договор, адрес, телефон или провайдер',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) {
+                setState(
+                  () => clients = widget.repository.clients(query: value),
+                );
+              },
+            ),
+          ),
+          Expanded(
+            child: FutureBuilder<List<ClientListItem>>(
+              future: clients,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.data!.isEmpty) {
+                  return const Center(child: Text('Добавьте первого клиента'));
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                  itemCount: snapshot.data!.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final client = snapshot.data![index];
+                    return Card(
+                      child: ListTile(
+                        onTap: () => showClient(client),
+                        contentPadding: const EdgeInsets.all(16),
+                        leading: const CircleAvatar(
+                          child: Icon(Icons.person_outline),
+                        ),
+                        title: Text(
+                          client.login,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: Text(
+                          '${client.providerName} · договор ${client.contractNumber}\n'
+                          '${client.address} · подключений: ${client.connections}',
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton.filledTonal(
+                          tooltip: 'Оформить подключение',
+                          icon: const Icon(Icons.add_link),
+                          onPressed: () async {
+                            final saved = await showModalBottomSheet<bool>(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              builder: (_) => _ConnectionSheet(
+                                repository: widget.repository,
+                                client: client,
+                              ),
+                            );
+                            if (saved == true) reload();
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
@@ -111,9 +235,10 @@ class _ClientsScreenState extends State<ClientsScreen> {
 }
 
 class _ClientSheet extends StatefulWidget {
-  const _ClientSheet({required this.repository});
+  const _ClientSheet({required this.repository, this.initial});
 
   final LocalRepository repository;
+  final ClientListItem? initial;
 
   @override
   State<_ClientSheet> createState() => _ClientSheetState();
@@ -124,6 +249,7 @@ class _ClientSheetState extends State<_ClientSheet> {
   final login = TextEditingController();
   final address = TextEditingController();
   final phone = TextEditingController();
+  final comment = TextEditingController();
   late Future<List<LookupItem>> providers;
   String? providerId;
   bool saving = false;
@@ -133,6 +259,15 @@ class _ClientSheetState extends State<_ClientSheet> {
   void initState() {
     super.initState();
     providers = widget.repository.providers();
+    final initial = widget.initial;
+    if (initial != null) {
+      providerId = initial.providerId;
+      contract.text = initial.contractNumber;
+      login.text = initial.login;
+      address.text = initial.address;
+      phone.text = initial.phone ?? '';
+      comment.text = initial.comment ?? '';
+    }
   }
 
   @override
@@ -141,6 +276,7 @@ class _ClientSheetState extends State<_ClientSheet> {
     login.dispose();
     address.dispose();
     phone.dispose();
+    comment.dispose();
     super.dispose();
   }
 
@@ -157,8 +293,10 @@ class _ClientSheetState extends State<_ClientSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Новый клиент',
+            Text(
+              widget.initial == null
+                  ? 'Новый клиент'
+                  : 'Редактирование клиента',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 16),
@@ -195,6 +333,15 @@ class _ClientSheetState extends State<_ClientSheet> {
             _field(address, 'Адрес'),
             const SizedBox(height: 12),
             _field(phone, 'Телефон', required: false),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: comment,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Комментарий',
+                border: OutlineInputBorder(),
+              ),
+            ),
             if (error != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -233,13 +380,26 @@ class _ClientSheetState extends State<_ClientSheet> {
       error = null;
     });
     try {
-      await widget.repository.addClient(
-        providerId: providerId!,
-        contractNumber: contract.text,
-        login: login.text,
-        address: address.text,
-        phone: phone.text,
-      );
+      if (widget.initial == null) {
+        await widget.repository.addClient(
+          providerId: providerId!,
+          contractNumber: contract.text,
+          login: login.text,
+          address: address.text,
+          phone: phone.text,
+          comment: comment.text,
+        );
+      } else {
+        await widget.repository.updateClient(
+          clientId: widget.initial!.id,
+          providerId: providerId!,
+          contractNumber: contract.text,
+          login: login.text,
+          address: address.text,
+          phone: phone.text,
+          comment: comment.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (exception) {
       setState(() {
