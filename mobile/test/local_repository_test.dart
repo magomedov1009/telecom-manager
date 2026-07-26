@@ -142,6 +142,20 @@ void main() {
       )).materialSpent,
       3,
     );
+    final owner = (await repository.providers()).singleWhere(
+      (item) => item.name == warehouse.name,
+    );
+    final inventoryReport = await repository.reportDetails(
+      section: 'inventory',
+      dateFrom: DateTime.now(),
+      dateTo: DateTime.now(),
+      providerId: owner.id,
+      search: material.name,
+    );
+    expect(inventoryReport, hasLength(1));
+    expect(inventoryReport.single.subtitle, contains('Приход: 15.00'));
+    expect(inventoryReport.single.subtitle, contains('Расход: 7.00'));
+    expect(inventoryReport.single.value, 8);
   });
 
   test(

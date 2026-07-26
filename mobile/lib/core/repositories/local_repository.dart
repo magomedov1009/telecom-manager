@@ -764,6 +764,7 @@ class LocalRepository {
 
   Future<List<InventoryBalance>> inventoryBalances({
     String? warehouseId,
+    String? providerId,
   }) async {
     final db = await database.instance;
     final orgId = await organizationId;
@@ -776,12 +777,18 @@ class LocalRepository {
         ON transaction_row.material_id = material.id
        AND transaction_row.deleted_at IS NULL
        ${warehouseId == null ? '' : 'AND transaction_row.warehouse_id = ?'}
+       ${providerId == null ? '' : '''
+       AND COALESCE(
+         transaction_row.provider_id,
+         (SELECT owner.provider_id FROM warehouses owner
+          WHERE owner.id = transaction_row.warehouse_id)
+       ) = ?'''}
       WHERE material.organization_id = ?
         AND material.deleted_at IS NULL
       GROUP BY material.id, material.name, material.item_type, material.unit_name
       ORDER BY material.item_type, material.name
     ''',
-      [?warehouseId, orgId],
+      [?warehouseId, ?providerId, orgId],
     );
     return rows
         .map(
@@ -949,6 +956,7 @@ class LocalRepository {
     String? materialId,
     String? operationType,
     String? itemType,
+    String? providerId,
     DateTime? dateFrom,
     DateTime? dateTo,
     String search = '',
@@ -982,6 +990,7 @@ class LocalRepository {
         ${materialId == null ? '' : 'AND movement.material_id = ?'}
         ${operationType == null ? '' : 'AND movement.operation_type = ?'}
         ${itemType == null ? '' : 'AND material.item_type = ?'}
+        ${providerId == null ? '' : 'AND COALESCE(movement.provider_id, warehouse.provider_id) = ?'}
         ${from == null ? '' : 'AND movement.occurred_at >= ?'}
         ${toExclusive == null ? '' : 'AND movement.occurred_at < ?'}
       ORDER BY movement.occurred_at DESC, movement.created_at DESC
@@ -992,6 +1001,7 @@ class LocalRepository {
         ?materialId,
         ?operationType,
         ?itemType,
+        ?providerId,
         ?from,
         ?toExclusive,
       ],
@@ -1175,6 +1185,44 @@ class LocalRepository {
                 ),
               )
               .toList();
+      return _filterReportDetails(items, search);
+    }
+    if (section == 'inventory') {
+      final balances = await inventoryBalances(providerId: providerId);
+      final movements = await inventoryHistory(
+        providerId: providerId,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+      final receipt = <String, double>{};
+      final expense = <String, double>{};
+      for (final movement in movements) {
+        if (movement.quantity > 0) {
+          receipt.update(
+            movement.materialName,
+            (value) => value + movement.quantity,
+            ifAbsent: () => movement.quantity,
+          );
+        } else {
+          expense.update(
+            movement.materialName,
+            (value) => value + movement.quantity.abs(),
+            ifAbsent: () => movement.quantity.abs(),
+          );
+        }
+      }
+      final items = balances
+          .map(
+            (item) => ReportDetailItem(
+              title: item.name,
+              subtitle:
+                  'Приход: ${(receipt[item.name] ?? 0).toStringAsFixed(2)} · '
+                  'Расход: ${(expense[item.name] ?? 0).toStringAsFixed(2)} · '
+                  'Остаток: ${item.quantity.toStringAsFixed(2)} ${item.unitName}',
+              value: item.quantity,
+            ),
+          )
+          .toList();
       return _filterReportDetails(items, search);
     }
     final db = await database.instance;
