@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/repositories/local_repository.dart';
+import '../catalogs/catalogs_screen.dart';
 
 class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key, required this.repository});
@@ -38,6 +39,21 @@ class _SyncScreenState extends State<SyncScreen> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Справочники'),
+            subtitle: const Text('Провайдеры, склады, материалы и виды работ'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => CatalogsScreen(repository: widget.repository),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         const Text(
           'Синхронизация',
           style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
