@@ -338,6 +338,7 @@ class ExpenseItem {
     required this.paidBy,
     required this.providerName,
     required this.expenseDate,
+    required this.comment,
   });
 
   final String id;
@@ -347,6 +348,7 @@ class ExpenseItem {
   final String paidBy;
   final String providerName;
   final DateTime expenseDate;
+  final String? comment;
 }
 
 class ExtraWorkItem {
@@ -3380,9 +3382,17 @@ class LocalRepository {
     });
   }
 
-  Future<List<ExtraWorkItem>> extraWorks() async {
+  Future<List<ExtraWorkItem>> extraWorks({
+    String search = '',
+    String? providerId,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final normalized = search.trim();
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
       SELECT work.id, work.amount, work.work_date, work.comment,
@@ -3391,11 +3401,14 @@ class LocalRepository {
       JOIN extra_work_types type ON type.id = work.work_type_id
       JOIN providers provider ON provider.id = work.provider_id
       WHERE work.organization_id = ? AND work.deleted_at IS NULL
+        ${providerId == null ? '' : 'AND work.provider_id = ?'}
+        ${from == null ? '' : 'AND work.work_date >= ?'}
+        ${to == null ? '' : 'AND work.work_date <= ?'}
       ORDER BY work.work_date DESC, work.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?providerId, ?from, ?to],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ExtraWorkItem(
             id: row['id']! as String,
@@ -3407,23 +3420,44 @@ class LocalRepository {
           ),
         )
         .toList();
+    if (normalized.isEmpty) return result;
+    final needle = normalized.toLowerCase();
+    return result
+        .where(
+          (item) =>
+              item.typeName.toLowerCase().contains(needle) ||
+              (item.comment?.toLowerCase().contains(needle) ?? false),
+        )
+        .toList();
   }
 
-  Future<List<ExpenseItem>> expenses() async {
+  Future<List<ExpenseItem>> expenses({
+    String search = '',
+    String? category,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final db = await database.instance;
     final orgId = await organizationId;
+    final normalized = search.trim();
+    final from = dateFrom?.toIso8601String().substring(0, 10);
+    final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
       SELECT expense.id, expense.category, expense.description, expense.amount,
-             expense.paid_by, expense.expense_date, provider.name provider_name
+             expense.paid_by, expense.expense_date, expense.comment,
+             provider.name provider_name
       FROM expenses expense
       JOIN providers provider ON provider.id = expense.provider_id
       WHERE expense.organization_id = ? AND expense.deleted_at IS NULL
+        ${category == null ? '' : 'AND expense.category = ?'}
+        ${from == null ? '' : 'AND expense.expense_date >= ?'}
+        ${to == null ? '' : 'AND expense.expense_date <= ?'}
       ORDER BY expense.expense_date DESC, expense.created_at DESC
       ''',
-      [orgId],
+      [orgId, ?category, ?from, ?to],
     );
-    return rows
+    final result = rows
         .map(
           (row) => ExpenseItem(
             id: row['id']! as String,
@@ -3433,7 +3467,18 @@ class LocalRepository {
             paidBy: row['paid_by']! as String,
             providerName: row['provider_name']! as String,
             expenseDate: DateTime.parse(row['expense_date']! as String),
+            comment: row['comment'] as String?,
           ),
+        )
+        .toList();
+    if (normalized.isEmpty) return result;
+    final needle = normalized.toLowerCase();
+    return result
+        .where(
+          (item) =>
+              item.description.toLowerCase().contains(needle) ||
+              item.providerName.toLowerCase().contains(needle) ||
+              (item.comment?.toLowerCase().contains(needle) ?? false),
         )
         .toList();
   }

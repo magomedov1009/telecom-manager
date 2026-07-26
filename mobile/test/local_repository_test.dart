@@ -609,6 +609,7 @@ void main() {
       amount: 500,
       paidBy: 'INSTALLER',
       expenseDate: DateTime(2026, 7, 26),
+      comment: 'Рабочая поездка',
     );
 
     final summary = await repository.financeSummary();
@@ -617,6 +618,16 @@ void main() {
     expect(summary.expensesTotal, 500);
     expect(summary.profit, -500);
     expect((await repository.expenses()).single.description, 'Бензин');
+    expect(
+      await repository.expenses(
+        search: 'поездка',
+        category: 'fuel',
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+      ),
+      hasLength(1),
+    );
+    expect(await repository.expenses(dateFrom: DateTime(2026, 8, 1)), isEmpty);
   });
 
   test('deleting expense reverses installer debt and cash impact', () async {
@@ -691,6 +702,7 @@ void main() {
         materials: [
           ConnectionMaterialInput(materialId: material.id, quantity: 3),
         ],
+        comment: 'Срочный выезд',
       );
 
       final balance = (await repository.materialBalancesForWarehouse(
@@ -698,6 +710,19 @@ void main() {
       )).singleWhere((item) => item.materialId == material.id);
       expect(balance.quantity, 5);
       expect((await repository.extraWorks()).single.amount, 700);
+      expect(
+        await repository.extraWorks(
+          search: 'срочный',
+          providerId: provider.id,
+          dateFrom: DateTime(2026, 7, 1),
+          dateTo: DateTime(2026, 7, 31),
+        ),
+        hasLength(1),
+      );
+      expect(
+        await repository.extraWorks(dateFrom: DateTime(2026, 8, 1)),
+        isEmpty,
+      );
       final summary = await repository.financeSummary();
       expect(summary.officeOwesMe, 700);
       expect(summary.extraWorkIncome, 700);

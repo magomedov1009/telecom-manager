@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
 
+const expenseCategories = {
+  'fuel': 'Бензин',
+  'tools': 'Инструмент',
+  'materials': 'Материалы',
+  'transport': 'Транспорт',
+  'rent': 'Аренда',
+  'other': 'Прочее',
+};
+
 class WorksScreen extends StatefulWidget {
   const WorksScreen({
     super.key,
@@ -18,7 +27,12 @@ class WorksScreen extends StatefulWidget {
 
 class _WorksScreenState extends State<WorksScreen> {
   late Future<(List<ExtraWorkItem>, List<ExpenseItem>)> data;
+  final search = TextEditingController();
   int tab = 0;
+  String? providerId;
+  String? category;
+  DateTime? dateFrom;
+  DateTime? dateTo;
 
   @override
   void initState() {
@@ -30,8 +44,18 @@ class _WorksScreenState extends State<WorksScreen> {
     setState(() {
       data =
           Future.wait([
-            widget.repository.extraWorks(),
-            widget.repository.expenses(),
+            widget.repository.extraWorks(
+              search: search.text,
+              providerId: providerId,
+              dateFrom: dateFrom,
+              dateTo: dateTo,
+            ),
+            widget.repository.expenses(
+              search: search.text,
+              category: category,
+              dateFrom: dateFrom,
+              dateTo: dateTo,
+            ),
           ]).then(
             (items) => (
               items[0] as List<ExtraWorkItem>,
@@ -40,6 +64,12 @@ class _WorksScreenState extends State<WorksScreen> {
           );
     });
     if (notify) widget.onChanged();
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
   }
 
   Future<bool> confirmDelete(String title) async {
@@ -174,8 +204,15 @@ class _WorksScreenState extends State<WorksScreen> {
                 ),
               ],
               selected: {tab},
-              onSelectionChanged: (value) => setState(() => tab = value.first),
+              onSelectionChanged: (value) {
+                setState(() => tab = value.first);
+                reload(notify: false);
+              },
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+            child: _filters(),
           ),
           Expanded(
             child: FutureBuilder<(List<ExtraWorkItem>, List<ExpenseItem>)>(
@@ -305,6 +342,109 @@ class _WorksScreenState extends State<WorksScreen> {
       ),
     );
   }
+
+  Widget _filters() => ExpansionTile(
+    tilePadding: EdgeInsets.zero,
+    title: const Text('Поиск и фильтры'),
+    leading: const Icon(Icons.filter_alt_outlined),
+    children: [
+      TextField(
+        controller: search,
+        decoration: InputDecoration(
+          labelText: 'Поиск',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: IconButton(
+            onPressed: () {
+              search.clear();
+              reload(notify: false);
+            },
+            icon: const Icon(Icons.clear),
+          ),
+        ),
+        onSubmitted: (_) => reload(notify: false),
+      ),
+      const SizedBox(height: 8),
+      if (tab == 0)
+        FutureBuilder<List<LookupItem>>(
+          future: widget.repository.providers(),
+          builder: (context, snapshot) => DropdownButtonFormField<String?>(
+            initialValue: providerId,
+            decoration: const InputDecoration(labelText: 'Провайдер'),
+            items: [
+              const DropdownMenuItem<String?>(value: null, child: Text('Все')),
+              for (final item in snapshot.data ?? const <LookupItem>[])
+                DropdownMenuItem<String?>(
+                  value: item.id,
+                  child: Text(item.name),
+                ),
+            ],
+            onChanged: (value) => setState(() => providerId = value),
+          ),
+        )
+      else
+        DropdownButtonFormField<String?>(
+          initialValue: category,
+          decoration: const InputDecoration(labelText: 'Категория'),
+          items: [
+            const DropdownMenuItem<String?>(value: null, child: Text('Все')),
+            for (final item in expenseCategories.entries)
+              DropdownMenuItem<String?>(
+                value: item.key,
+                child: Text(item.value),
+              ),
+          ],
+          onChanged: (value) => setState(() => category = value),
+        ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: _DateButton(
+              label: 'С',
+              value: dateFrom,
+              onChanged: (value) => setState(() => dateFrom = value),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: _DateButton(
+              label: 'По',
+              value: dateTo,
+              onChanged: (value) => setState(() => dateTo = value),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () {
+                search.clear();
+                setState(() {
+                  providerId = null;
+                  category = null;
+                  dateFrom = null;
+                  dateTo = null;
+                });
+                reload(notify: false);
+              },
+              child: const Text('Сбросить'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: FilledButton(
+              onPressed: () => reload(notify: false),
+              child: const Text('Применить'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+    ],
+  );
 }
 
 class _ExtraWorkSheet extends StatefulWidget {
@@ -318,30 +458,43 @@ class _ExtraWorkSheet extends StatefulWidget {
 
 class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
   final amount = TextEditingController();
-  final quantity = TextEditingController();
   final comment = TextEditingController();
-  String? providerId, typeId, warehouseId, materialId, error;
+  final materialRows = <_MaterialDraft>[];
+  String? providerId, typeId, warehouseId, error;
+  late DateTime workDate;
   bool saving = false;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initial;
-    if (initial == null) return;
+    workDate = initial?.workDate ?? DateTime.now();
+    if (initial == null) {
+      materialRows.add(_MaterialDraft());
+      return;
+    }
     providerId = initial.providerId;
     typeId = initial.workTypeId;
     warehouseId = initial.warehouseId;
-    materialId = initial.materials.keys.firstOrNull;
     amount.text = initial.amount.toString();
-    quantity.text = initial.materials.values.firstOrNull?.toString() ?? '';
+    materialRows.addAll(
+      initial.materials.entries.map(
+        (entry) => _MaterialDraft(
+          materialId: entry.key,
+          quantity: entry.value.toString(),
+        ),
+      ),
+    );
     comment.text = initial.comment ?? '';
   }
 
   @override
   void dispose() {
     amount.dispose();
-    quantity.dispose();
     comment.dispose();
+    for (final row in materialRows) {
+      row.dispose();
+    }
     super.dispose();
   }
 
@@ -391,6 +544,12 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
                 const SizedBox(height: 10),
                 _lookup('Вид работы', typeId, types, (v) => typeId = v),
                 const SizedBox(height: 10),
+                _DateButton(
+                  label: 'Дата работы',
+                  value: workDate,
+                  onChanged: (value) => setState(() => workDate = value),
+                ),
+                const SizedBox(height: 10),
                 _number(amount, 'Стоимость, ₽'),
                 const SizedBox(height: 16),
                 const Text(
@@ -406,15 +565,43 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
                   optional: true,
                 ),
                 const SizedBox(height: 10),
-                _lookup(
-                  'Материал',
-                  materialId,
-                  materials,
-                  (v) => materialId = v,
-                  optional: true,
+                for (var index = 0; index < materialRows.length; index++) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: _lookup(
+                          'Материал ${index + 1}',
+                          materialRows[index].materialId,
+                          materials,
+                          (value) => materialRows[index].materialId = value,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: _number(
+                          materialRows[index].quantity,
+                          'Количество',
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Удалить строку',
+                        onPressed: () => setState(() {
+                          materialRows.removeAt(index).dispose();
+                        }),
+                        icon: const Icon(Icons.remove_circle_outline),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      setState(() => materialRows.add(_MaterialDraft())),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Добавить материал'),
                 ),
-                const SizedBox(height: 10),
-                _number(quantity, 'Количество'),
                 const SizedBox(height: 10),
                 TextField(
                   controller: comment,
@@ -483,17 +670,21 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
       error = null;
     });
     try {
-      final qty = parse(quantity.text);
-      final materials = qty > 0 && materialId != null
-          ? [ConnectionMaterialInput(materialId: materialId!, quantity: qty)]
-          : const <ConnectionMaterialInput>[];
+      final materials = [
+        for (final row in materialRows)
+          if (row.materialId != null && parse(row.quantity.text) > 0)
+            ConnectionMaterialInput(
+              materialId: row.materialId!,
+              quantity: parse(row.quantity.text),
+            ),
+      ];
       if (widget.editId == null) {
         await widget.repository.addExtraWork(
           providerId: providerId!,
           workTypeId: typeId!,
-          workDate: DateTime.now(),
+          workDate: workDate,
           amount: parse(amount.text),
-          warehouseId: qty > 0 ? warehouseId : null,
+          warehouseId: materials.isNotEmpty ? warehouseId : null,
           materials: materials,
           comment: comment.text,
         );
@@ -502,9 +693,9 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
           extraWorkId: widget.editId!,
           providerId: providerId!,
           workTypeId: typeId!,
-          workDate: widget.initial!.workDate,
+          workDate: workDate,
           amount: parse(amount.text),
-          warehouseId: qty > 0 ? warehouseId : null,
+          warehouseId: materials.isNotEmpty ? warehouseId : null,
           materials: materials,
           comment: comment.text,
         );
@@ -522,6 +713,16 @@ class _ExtraWorkSheetState extends State<_ExtraWorkSheet> {
   }
 }
 
+class _MaterialDraft {
+  _MaterialDraft({this.materialId, String quantity = ''})
+    : quantity = TextEditingController(text: quantity);
+
+  String? materialId;
+  final TextEditingController quantity;
+
+  void dispose() => quantity.dispose();
+}
+
 class _ExpenseSheet extends StatefulWidget {
   const _ExpenseSheet({required this.repository, this.editId, this.initial});
   final LocalRepository repository;
@@ -537,12 +738,14 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
       comment = TextEditingController();
   String? providerId, error;
   String category = 'other', paidBy = 'INSTALLER';
+  late DateTime expenseDate;
   bool saving = false;
 
   @override
   void initState() {
     super.initState();
     final initial = widget.initial;
+    expenseDate = initial?.expenseDate ?? DateTime.now();
     if (initial == null) return;
     providerId = initial.providerId;
     category = initial.category;
@@ -600,28 +803,24 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
                 onChanged: (v) => providerId = v,
               ),
               const SizedBox(height: 10),
+              _DateButton(
+                label: 'Дата расхода',
+                value: expenseDate,
+                onChanged: (value) => setState(() => expenseDate = value),
+              ),
+              const SizedBox(height: 10),
               DropdownButtonFormField<String>(
                 initialValue: category,
                 decoration: const InputDecoration(
                   labelText: 'Категория',
                   border: OutlineInputBorder(),
                 ),
-                items:
-                    const {
-                          'fuel': 'Бензин',
-                          'tools': 'Инструмент',
-                          'materials': 'Материалы',
-                          'transport': 'Транспорт',
-                          'rent': 'Аренда',
-                          'other': 'Прочее',
-                        }.entries
-                        .map(
-                          (e) => DropdownMenuItem(
-                            value: e.key,
-                            child: Text(e.value),
-                          ),
-                        )
-                        .toList(),
+                items: expenseCategories.entries
+                    .map(
+                      (e) =>
+                          DropdownMenuItem(value: e.key, child: Text(e.value)),
+                    )
+                    .toList(),
                 onChanged: (v) => category = v!,
               ),
               const SizedBox(height: 10),
@@ -697,7 +896,7 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
           description: description.text,
           amount: value,
           paidBy: paidBy,
-          expenseDate: DateTime.now(),
+          expenseDate: expenseDate,
           comment: comment.text,
         );
       } else {
@@ -708,7 +907,7 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
           description: description.text,
           amount: value,
           paidBy: paidBy,
-          expenseDate: widget.initial!.expenseDate,
+          expenseDate: expenseDate,
           comment: comment.text,
         );
       }
@@ -720,4 +919,41 @@ class _ExpenseSheetState extends State<_ExpenseSheet> {
       });
     }
   }
+}
+
+class _DateButton extends StatelessWidget {
+  const _DateButton({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String label;
+  final DateTime? value;
+  final ValueChanged<DateTime> onChanged;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: () async {
+      final selected = await showDatePicker(
+        context: context,
+        initialDate: value ?? DateTime.now(),
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2100),
+      );
+      if (selected != null) onChanged(selected);
+    },
+    child: InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      child: Text(
+        value == null
+            ? 'Не выбрано'
+            : '${value!.day.toString().padLeft(2, '0')}.'
+                  '${value!.month.toString().padLeft(2, '0')}.${value!.year}',
+      ),
+    ),
+  );
 }
