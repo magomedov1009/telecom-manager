@@ -50,4 +50,75 @@ void main() {
     expect(changed.quantity, 10);
     expect(await repository.pendingChanges(), pendingBefore + 1);
   });
+
+  test('connection writes off material and queues related records', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 10,
+    );
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: '1001',
+      login: 'client-1001',
+      address: 'Тестовый адрес',
+    );
+    final pendingBefore = await repository.pendingChanges();
+
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 7, 26),
+      price: 1500,
+      officeAmount: 500,
+      installerAmount: 1000,
+      materials: [
+        ConnectionMaterialInput(materialId: material.id, quantity: 3),
+      ],
+    );
+
+    final balance = (await repository.materialBalancesForWarehouse(
+      warehouse.id,
+    )).singleWhere((item) => item.materialId == material.id);
+    final client = (await repository.clients()).single;
+    expect(balance.quantity, 7);
+    expect(client.connections, 1);
+    expect(await repository.pendingChanges(), pendingBefore + 3);
+  });
+
+  test('insufficient stock rolls back the whole connection', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: '1002',
+      login: 'client-1002',
+      address: 'Другой адрес',
+    );
+    final pendingBefore = await repository.pendingChanges();
+
+    await expectLater(
+      repository.addConnection(
+        clientId: clientId,
+        warehouseId: warehouse.id,
+        connectionType: 'NEW',
+        connectionDate: DateTime(2026, 7, 26),
+        price: 1000,
+        officeAmount: 0,
+        installerAmount: 1000,
+        materials: [
+          ConnectionMaterialInput(materialId: material.id, quantity: 1),
+        ],
+      ),
+      throwsStateError,
+    );
+
+    expect((await repository.clients()).single.connections, 0);
+    expect(await repository.pendingChanges(), pendingBefore);
+  });
 }

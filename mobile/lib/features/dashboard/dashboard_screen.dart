@@ -90,9 +90,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   icon: Icons.warehouse_outlined,
                 ),
                 _MetricCard(
-                  label: 'Позиции склада',
-                  value: data.materials,
-                  icon: Icons.inventory_2_outlined,
+                  label: 'Клиенты',
+                  value: data.clients,
+                  icon: Icons.people_outline,
+                ),
+                _MetricCard(
+                  label: 'Подключения',
+                  value: data.connections,
+                  icon: Icons.add_link,
                 ),
                 _MetricCard(
                   label: 'В очереди',
@@ -105,9 +110,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const Card(
               child: ListTile(
                 leading: Icon(Icons.info_outline),
-                title: Text('Первый этап'),
+                title: Text('Автономная работа'),
                 subtitle: Text(
-                  'Локальный склад уже работает. Подключения, финансы и безопасная серверная синхронизация будут добавляться следующими модулями.',
+                  'Склад, клиенты и подключения сохраняются на телефоне. Интернет для работы не требуется.',
                 ),
               ),
             ),

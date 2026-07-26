@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'core/repositories/local_repository.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/inventory/inventory_screen.dart';
+import 'features/clients/clients_screen.dart';
 import 'features/sync/sync_screen.dart';
 
 class TelecomManagerApp extends StatelessWidget {
@@ -64,6 +65,11 @@ class _AppShellState extends State<AppShell> {
         repository: widget.repository,
         onChanged: refresh,
       ),
+      ClientsScreen(
+        key: ValueKey('clients-$refreshKey'),
+        repository: widget.repository,
+        onChanged: refresh,
+      ),
       SyncScreen(
         key: ValueKey('sync-$refreshKey'),
         repository: widget.repository,
@@ -84,6 +90,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.inventory_2_outlined),
             selectedIcon: Icon(Icons.inventory_2),
             label: 'Склад',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: 'Клиенты',
           ),
           NavigationDestination(
             icon: Icon(Icons.sync_outlined),
