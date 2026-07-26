@@ -7,7 +7,8 @@ import app.models  # noqa: F401
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.enums import UserRole
-from app.models.mobile_sync import MobileDeviceToken
+from app.models.mobile_sync import MobileDeviceToken, MobileMembership
+from fastapi import HTTPException
 from app.models.users import User
 from app.routers.mobile_sync import LoginRequest, PushItem, PushRequest, login, pull, push
 
@@ -68,6 +69,21 @@ class MobileSyncTest(unittest.TestCase):
         self.assertEqual(len(first_page.changes), 1)
         self.assertEqual(first_page.changes[0].payload["name"], "ELLKO")
         self.assertEqual(len(pull(self.db, self.token, cursor=first_page.cursor, limit=200).changes), 0)
+
+    def test_installer_cannot_change_catalogs(self) -> None:
+        membership = self.db.scalar(select(MobileMembership))
+        membership.role = "installer"
+        self.db.commit()
+        request = PushRequest(changes=[PushItem(
+            entity_type="provider",
+            entity_id="018f0000-0000-7000-8000-000000000002",
+            operation="upsert",
+            version=1,
+            payload={"name": "Forbidden"},
+        )])
+        with self.assertRaises(HTTPException) as error:
+            push(request, self.db, self.token)
+        self.assertEqual(error.exception.status_code, 403)
 
 
 if __name__ == "__main__":

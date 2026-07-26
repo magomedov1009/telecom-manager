@@ -94,7 +94,30 @@ class _OrganizationUsersScreenState extends State<OrganizationUsersScreen> {
                     child: Icon(Icons.person_outline),
                   ),
                   title: Text(user.fullName),
-                  subtitle: Text('${user.username} · ${roleLabel(user.role)}'),
+                  subtitle: Text(
+                    '${user.username} · ${roleLabel(user.role)} · '
+                    '${user.isActive ? 'активен' : 'отключён'}',
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (action) async {
+                      if (action == 'password') {
+                        await changePassword(user);
+                      } else {
+                        await widget.repository.toggleUser(user.id);
+                        reload();
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'password',
+                        child: Text('Сменить пароль'),
+                      ),
+                      PopupMenuItem(
+                        value: 'toggle',
+                        child: Text(user.isActive ? 'Отключить' : 'Включить'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -209,6 +232,37 @@ class _OrganizationUsersScreenState extends State<OrganizationUsersScreen> {
         role: role,
         password: secret,
       );
+      reload();
+    }
+  }
+
+  Future<void> changePassword(UserItem user) async {
+    final controller = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Пароль: ${user.fullName}'),
+        content: TextField(
+          controller: controller,
+          obscureText: true,
+          decoration: const InputDecoration(labelText: 'Новый пароль'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    final password = controller.text;
+    controller.dispose();
+    if (saved == true) {
+      await widget.repository.changeUserPassword(user.id, password);
       reload();
     }
   }

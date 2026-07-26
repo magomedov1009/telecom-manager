@@ -419,5 +419,18 @@ void main() {
       (await repository.authenticate('installer1', '1234'))?.role,
       'installer',
     );
+    final installer = (await repository.users()).singleWhere(
+      (user) => user.username == 'installer1',
+    );
+    await repository.authenticate('admin', '0000');
+    await repository.toggleUser(installer.id);
+    expect(await repository.authenticate('installer1', '1234'), isNull);
+    await repository.toggleUser(installer.id);
+    await repository.changeUserPassword(installer.id, '5678');
+    expect(await repository.authenticate('installer1', '1234'), isNull);
+    expect(
+      (await repository.authenticate('installer1', '5678'))?.role,
+      'installer',
+    );
   });
 }

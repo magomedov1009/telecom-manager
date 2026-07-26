@@ -557,6 +557,77 @@ class LocalRepository {
     );
   }
 
+  Future<void> changeUserPassword(String userId, String password) async {
+    if (password.length < 4) {
+      throw ArgumentError('Пароль должен содержать минимум 4 символа');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final belongs =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM users WHERE id = ? AND organization_id = ?',
+            [userId, orgId],
+          ),
+        ) ??
+        0;
+    if (belongs != 1) throw ArgumentError('Пользователь не найден');
+    await _setPassword(db, userId, password);
+    final row = (await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+      limit: 1,
+    )).single;
+    await _enqueue(
+      db,
+      organizationId: orgId,
+      entityType: 'user',
+      entityId: userId,
+      operation: 'upsert',
+      payload: row,
+      now: DateTime.now().toUtc().toIso8601String(),
+    );
+  }
+
+  Future<void> toggleUser(String userId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final current = await currentUser();
+    if (current?.id == userId) {
+      throw ArgumentError('Нельзя отключить текущего пользователя');
+    }
+    final rows = await db.query(
+      'users',
+      where: 'id = ? AND organization_id = ?',
+      whereArgs: [userId, orgId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw ArgumentError('Пользователь не найден');
+    final now = DateTime.now().toUtc().toIso8601String();
+    final active = rows.single['is_active'] == 1 ? 0 : 1;
+    await db.update(
+      'users',
+      {'is_active': active, 'updated_at': now, 'sync_state': 'pending'},
+      where: 'id = ?',
+      whereArgs: [userId],
+    );
+    final row = (await db.query(
+      'users',
+      where: 'id = ?',
+      whereArgs: [userId],
+    )).single;
+    await _enqueue(
+      db,
+      organizationId: orgId,
+      entityType: 'user',
+      entityId: userId,
+      operation: 'upsert',
+      payload: row,
+      now: now,
+    );
+  }
+
   Future<DashboardSummary> dashboardSummary() async {
     final db = await database.instance;
     final orgId = await organizationId;

@@ -137,6 +137,21 @@ def push(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> list[PushResult]:
+    membership = db.scalar(
+        select(MobileMembership).where(
+            MobileMembership.organization_id == token.organization_id,
+            MobileMembership.user_id == token.user_id,
+        )
+    )
+    operational_types = {
+        "client", "connection", "connection_material",
+        "inventory_transaction", "finance_transaction",
+        "extra_work", "extra_work_material", "expense",
+    }
+    if membership is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к организации")
+    if membership.role != "admin" and any(item.entity_type not in operational_types for item in payload.changes):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Роль не разрешает изменение справочников")
     results: list[PushResult] = []
     for item in payload.changes:
         record = db.scalar(
