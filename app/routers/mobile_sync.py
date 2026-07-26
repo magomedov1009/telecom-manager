@@ -17,6 +17,12 @@ from app.models.mobile_sync import (
     MobileSyncChange,
     MobileSyncRecord,
 )
+from app.models.clients import (
+    Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial,
+    ExtraWorkType, Provider,
+)
+from app.models.finance import Expense, FinanceTransaction
+from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile-sync"])
@@ -101,6 +107,122 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def _value(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if hasattr(value, "value"):
+        return value.value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return float(value)
+
+
+def _mobile_payload(item, fields: tuple[str, ...]) -> dict:
+    payload = {field: _value(getattr(item, field)) for field in fields}
+    payload.update({
+        "id": str(item.id),
+        "organization_id": "",
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+        "deleted_at": None,
+        "version": 1,
+        "sync_state": "synced",
+    })
+    for key, value in tuple(payload.items()):
+        if key.endswith("_id") and value is not None:
+            payload[key] = str(value)
+    return payload
+
+
+def _bootstrap_site_data(db: Session, organization_id: int) -> None:
+    """Seed the primary mobile workspace from the existing website database."""
+    if db.scalar(
+        select(func.count()).select_from(MobileSyncRecord).where(
+            MobileSyncRecord.organization_id == organization_id
+        )
+    ):
+        return
+    primary_id = db.scalar(select(MobileOrganization.id).order_by(MobileOrganization.id))
+    if primary_id != organization_id:
+        return
+    if not db.scalar(select(func.count()).select_from(Provider)):
+        return
+    specs = (
+        ("provider", Provider, ("name", "description", "is_active")),
+        ("material", Material, ("name", "item_type", "unit_name", "category", "active")),
+        ("extra_work_type", ExtraWorkType, (
+            "name", "description", "default_price", "default_office_amount",
+            "requires_materials", "requires_equipment", "is_active",
+        )),
+        ("user", User, (
+            "username", "full_name", "role", "manager_id", "comment",
+            "last_login_at", "is_active",
+        )),
+        ("warehouse", Warehouse, ("provider_id", "name", "active")),
+        ("client", Client, (
+            "provider_id", "contract_number", "login", "address", "phone", "comment",
+        )),
+        ("connection", Connection, (
+            "client_id", "warehouse_id", "connection_type", "connection_date",
+            "price", "office_amount", "installer_amount", "comment",
+        )),
+        ("extra_work", ExtraWork, (
+            "provider_id", "work_type_id", "work_date", "amount",
+            "office_amount", "installer_amount", "status", "comment",
+        )),
+        ("expense", Expense, ("provider_id", "category", "amount", "paid_by", "comment")),
+        ("connection_material", ConnectionMaterial, (
+            "connection_id", "material_id", "quantity", "comment",
+        )),
+        ("extra_work_material", ExtraWorkMaterial, (
+            "extra_work_id", "material_id", "quantity",
+        )),
+        ("inventory_transaction", InventoryTransaction, (
+            "warehouse_id", "counterpart_warehouse_id", "provider_id", "material_id",
+            "connection_id", "operation_type", "quantity", "comment",
+        )),
+        ("finance_transaction", FinanceTransaction, (
+            "provider_id", "connection_id", "expense_id", "extra_work_id",
+            "transaction_type", "accrual_to", "amount", "comment",
+        )),
+    )
+    for entity_type, model, fields in specs:
+        for item in db.scalars(select(model).order_by(model.id)):
+            payload = _mobile_payload(item, fields)
+            if entity_type == "material":
+                payload["is_active"] = payload.pop("active")
+                payload["unit_name"] = payload["unit_name"] or (
+                    "м" if _value(item.unit) == "meter" else "шт."
+                )
+            elif entity_type == "warehouse":
+                payload["is_active"] = payload.pop("active")
+            elif entity_type == "inventory_transaction":
+                payload["occurred_at"] = item.created_at.isoformat()
+                payload["extra_work_id"] = None
+            elif entity_type == "finance_transaction":
+                payload["occurred_at"] = item.created_at.isoformat()
+            elif entity_type == "expense":
+                payload["description"] = item.comment or _value(item.category)
+                payload["expense_date"] = item.created_at.date().isoformat()
+            record = MobileSyncRecord(
+                organization_id=organization_id,
+                entity_type=entity_type,
+                entity_id=str(item.id),
+                payload=payload,
+                version=1,
+            )
+            db.add(record)
+            db.flush()
+            db.add(MobileSyncChange(
+                organization_id=organization_id,
+                record_id=record.id,
+                entity_type=entity_type,
+                entity_id=str(item.id),
+                operation="upsert",
+                version=1,
+            ))
+
+
 def current_token(
     db: DbSession,
     authorization: Annotated[str | None, Header()] = None,
@@ -161,6 +283,7 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
     else:
         membership = memberships[0]
     organization = db.get(MobileOrganization, membership.organization_id)
+    _bootstrap_site_data(db, membership.organization_id)
     raw_token = secrets.token_urlsafe(48)
     db.add(
         MobileDeviceToken(

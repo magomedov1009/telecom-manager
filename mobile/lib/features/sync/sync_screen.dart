@@ -287,13 +287,14 @@ class _SyncScreenState extends State<SyncScreen> {
           );
         }
       }
+      final syncResult = await service().synchronize();
       widget.onChanged();
       final localUser = await widget.repository.currentUser();
       setState(() {
         effectiveRole = localUser?.role ?? effectiveRole;
         statusMessage =
-            'Устройство подключено. Создано отдельное серверное '
-            'рабочее пространство.';
+            'Устройство подключено. Загружено с сервера: '
+            '${syncResult.received}.';
         pending = widget.repository.pendingChanges();
       });
     } catch (error) {
