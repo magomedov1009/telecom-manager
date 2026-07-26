@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 3,
+        version: 4,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -146,6 +146,7 @@ class AppDatabase {
       )
     ''');
     await _createConnectionMaterials(db);
+    await _createFinanceTables(db);
     await db.execute('''
       CREATE TABLE sync_queue (
         id TEXT PRIMARY KEY,
@@ -199,6 +200,9 @@ class AppDatabase {
         'CREATE INDEX ix_inventory_connection ON inventory_transactions(connection_id)',
       );
     }
+    if (oldVersion < 4) {
+      await _createFinanceTables(db);
+    }
   }
 
   Future<void> _createConnectionMaterials(Database db) async {
@@ -219,6 +223,35 @@ class AppDatabase {
     ''');
     await db.execute(
       'CREATE INDEX IF NOT EXISTS ix_connection_materials_connection ON connection_materials(connection_id)',
+    );
+  }
+
+  Future<void> _createFinanceTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS finance_transactions (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        provider_id TEXT REFERENCES providers(id),
+        connection_id TEXT REFERENCES connections(id) ON DELETE CASCADE,
+        expense_id TEXT,
+        extra_work_id TEXT,
+        transaction_type TEXT NOT NULL,
+        accrual_to TEXT,
+        amount REAL NOT NULL CHECK (amount <> 0),
+        comment TEXT,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_finance_org_date ON finance_transactions(organization_id, occurred_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_finance_provider ON finance_transactions(provider_id)',
     );
   }
 }
