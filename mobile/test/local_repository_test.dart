@@ -112,6 +112,52 @@ void main() {
     },
   );
 
+  test('editing client preserves history and queues comment changes', () async {
+    final providers = await repository.providers();
+    final warehouse = (await repository.warehouses()).first;
+    final clientId = await repository.addClient(
+      providerId: providers.first.id,
+      contractNumber: 'EDIT-1',
+      login: 'old-login',
+      address: 'Старый адрес',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'WITHOUT_MATERIALS',
+      connectionDate: DateTime(2026, 7, 27),
+      price: 0,
+      officeAmount: 0,
+      installerAmount: 0,
+      materials: const [],
+    );
+    final before = await repository.pendingChanges();
+
+    await repository.updateClient(
+      clientId: clientId,
+      providerId: providers.last.id,
+      contractNumber: 'EDIT-2',
+      login: 'new-login',
+      address: 'Новый адрес',
+      phone: '+70000000000',
+      comment: 'Позвонить заранее',
+    );
+
+    final client = (await repository.clients(query: 'заранее')).single;
+    expect(client.id, clientId);
+    expect(client.providerId, providers.last.id);
+    expect(client.contractNumber, 'EDIT-2');
+    expect(client.comment, 'Позвонить заранее');
+    expect(client.connections, 1);
+    expect(await repository.connections(clientId: clientId), hasLength(1));
+    expect(await repository.pendingChanges(), before);
+    final queued = (await repository.syncQueue()).singleWhere(
+      (item) => item.entityType == 'client' && item.entityId == clientId,
+    );
+    expect(queued.payload['comment'], 'Позвонить заранее');
+    expect(queued.version, 2);
+  });
+
   test('insufficient stock rolls back the whole connection', () async {
     final provider = (await repository.providers()).first;
     final warehouse = (await repository.warehouses()).first;

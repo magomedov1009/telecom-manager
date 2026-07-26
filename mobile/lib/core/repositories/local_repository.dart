@@ -83,20 +83,24 @@ class UserItem {
 class ClientListItem {
   const ClientListItem({
     required this.id,
+    required this.providerId,
     required this.providerName,
     required this.login,
     required this.contractNumber,
     required this.address,
     required this.phone,
+    required this.comment,
     required this.connections,
   });
 
   final String id;
+  final String providerId;
   final String providerName;
   final String login;
   final String contractNumber;
   final String address;
   final String? phone;
+  final String? comment;
   final int connections;
 }
 
@@ -1123,16 +1127,18 @@ class LocalRepository {
     final orgId = await organizationId;
     final rows = await db.rawQuery(
       '''
-      SELECT client.id, provider.name AS provider_name, client.login,
+      SELECT client.id, client.provider_id, provider.name AS provider_name, client.login,
              client.contract_number, client.address, client.phone,
+             client.comment,
              COUNT(connection.id) AS connection_count
       FROM clients client
       JOIN providers provider ON provider.id = client.provider_id
       LEFT JOIN connections connection
         ON connection.client_id = client.id AND connection.deleted_at IS NULL
       WHERE client.organization_id = ? AND client.deleted_at IS NULL
-      GROUP BY client.id, provider.name, client.login, client.contract_number,
-               client.address, client.phone
+      GROUP BY client.id, client.provider_id, provider.name, client.login,
+               client.contract_number, client.address, client.phone,
+               client.comment
       ORDER BY client.updated_at DESC
       ''',
       [orgId],
@@ -1141,11 +1147,13 @@ class LocalRepository {
         .map(
           (row) => ClientListItem(
             id: row['id']! as String,
+            providerId: row['provider_id']! as String,
             providerName: row['provider_name']! as String,
             login: (row['login'] as String?) ?? '',
             contractNumber: (row['contract_number'] as String?) ?? '',
             address: row['address']! as String,
             phone: row['phone'] as String?,
+            comment: row['comment'] as String?,
             connections: (row['connection_count']! as num).toInt(),
           ),
         )
@@ -1159,6 +1167,7 @@ class LocalRepository {
               client.contractNumber.toLowerCase().contains(normalized) ||
               client.address.toLowerCase().contains(normalized) ||
               (client.phone?.toLowerCase().contains(normalized) ?? false) ||
+              (client.comment?.toLowerCase().contains(normalized) ?? false) ||
               client.providerName.toLowerCase().contains(normalized),
         )
         .toList();
@@ -1514,6 +1523,7 @@ class LocalRepository {
     required String login,
     required String address,
     String? phone,
+    String? comment,
   }) async {
     if (contractNumber.trim().isEmpty ||
         login.trim().isEmpty ||
@@ -1532,6 +1542,7 @@ class LocalRepository {
       'login': login.trim(),
       'address': address.trim(),
       'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
       'created_at': now,
       'updated_at': now,
       'version': 1,
@@ -1550,6 +1561,66 @@ class LocalRepository {
       );
     });
     return id;
+  }
+
+  Future<void> updateClient({
+    required String clientId,
+    required String providerId,
+    required String contractNumber,
+    required String login,
+    required String address,
+    String? phone,
+    String? comment,
+  }) async {
+    final cleanContract = contractNumber.trim();
+    final cleanLogin = login.trim();
+    final cleanAddress = address.trim();
+    if (cleanContract.isEmpty || cleanLogin.isEmpty || cleanAddress.isEmpty) {
+      throw ArgumentError('Заполните договор, логин и адрес');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'clients',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [clientId, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Клиент не найден');
+      final duplicate = await transaction.query(
+        'clients',
+        columns: ['id'],
+        where:
+            'organization_id = ? AND id <> ? AND deleted_at IS NULL '
+            'AND (contract_number = ? OR login = ?)',
+        whereArgs: [orgId, clientId, cleanContract, cleanLogin],
+        limit: 1,
+      );
+      if (duplicate.isNotEmpty) {
+        throw ArgumentError('Клиент с таким договором или логином уже есть');
+      }
+      final row = <String, Object?>{
+        ...rows.single,
+        'provider_id': providerId,
+        'contract_number': cleanContract,
+        'login': cleanLogin,
+        'address': cleanAddress,
+        'phone': phone?.trim().isEmpty == true ? null : phone?.trim(),
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': (rows.single['version']! as num).toInt() + 1,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'clients',
+        row,
+        where: 'id = ?',
+        whereArgs: [clientId],
+      );
+      await _queueRow(transaction, orgId, 'client', row, now);
+    });
   }
 
   Future<List<MaterialBalance>> materialBalancesForWarehouse(

@@ -63,6 +63,19 @@ class _ClientsScreenState extends State<ClientsScreen> {
               Text('Адрес: ${client.address}'),
               if (client.phone?.isNotEmpty == true)
                 Text('Телефон: ${client.phone}'),
+              if (client.comment?.isNotEmpty == true) ...[
+                const SizedBox(height: 8),
+                Text('Комментарий: ${client.comment}'),
+              ],
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  editClient(client);
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Редактировать клиента'),
+              ),
               const SizedBox(height: 20),
               const Text(
                 'История подключений',
@@ -90,6 +103,17 @@ class _ClientsScreenState extends State<ClientsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> editClient(ClientListItem client) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) =>
+          _ClientSheet(repository: widget.repository, initial: client),
+    );
+    if (saved == true) reload();
   }
 
   @override
@@ -211,9 +235,10 @@ class _ClientsScreenState extends State<ClientsScreen> {
 }
 
 class _ClientSheet extends StatefulWidget {
-  const _ClientSheet({required this.repository});
+  const _ClientSheet({required this.repository, this.initial});
 
   final LocalRepository repository;
+  final ClientListItem? initial;
 
   @override
   State<_ClientSheet> createState() => _ClientSheetState();
@@ -224,6 +249,7 @@ class _ClientSheetState extends State<_ClientSheet> {
   final login = TextEditingController();
   final address = TextEditingController();
   final phone = TextEditingController();
+  final comment = TextEditingController();
   late Future<List<LookupItem>> providers;
   String? providerId;
   bool saving = false;
@@ -233,6 +259,15 @@ class _ClientSheetState extends State<_ClientSheet> {
   void initState() {
     super.initState();
     providers = widget.repository.providers();
+    final initial = widget.initial;
+    if (initial != null) {
+      providerId = initial.providerId;
+      contract.text = initial.contractNumber;
+      login.text = initial.login;
+      address.text = initial.address;
+      phone.text = initial.phone ?? '';
+      comment.text = initial.comment ?? '';
+    }
   }
 
   @override
@@ -241,6 +276,7 @@ class _ClientSheetState extends State<_ClientSheet> {
     login.dispose();
     address.dispose();
     phone.dispose();
+    comment.dispose();
     super.dispose();
   }
 
@@ -257,8 +293,10 @@ class _ClientSheetState extends State<_ClientSheet> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Новый клиент',
+            Text(
+              widget.initial == null
+                  ? 'Новый клиент'
+                  : 'Редактирование клиента',
               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 16),
@@ -295,6 +333,15 @@ class _ClientSheetState extends State<_ClientSheet> {
             _field(address, 'Адрес'),
             const SizedBox(height: 12),
             _field(phone, 'Телефон', required: false),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: comment,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Комментарий',
+                border: OutlineInputBorder(),
+              ),
+            ),
             if (error != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -333,13 +380,26 @@ class _ClientSheetState extends State<_ClientSheet> {
       error = null;
     });
     try {
-      await widget.repository.addClient(
-        providerId: providerId!,
-        contractNumber: contract.text,
-        login: login.text,
-        address: address.text,
-        phone: phone.text,
-      );
+      if (widget.initial == null) {
+        await widget.repository.addClient(
+          providerId: providerId!,
+          contractNumber: contract.text,
+          login: login.text,
+          address: address.text,
+          phone: phone.text,
+          comment: comment.text,
+        );
+      } else {
+        await widget.repository.updateClient(
+          clientId: widget.initial!.id,
+          providerId: providerId!,
+          contractNumber: contract.text,
+          login: login.text,
+          address: address.text,
+          phone: phone.text,
+          comment: comment.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (exception) {
       setState(() {

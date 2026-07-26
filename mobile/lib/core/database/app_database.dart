@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 8,
+        version: 9,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -120,6 +120,7 @@ class AppDatabase {
         login TEXT,
         address TEXT NOT NULL,
         phone TEXT,
+        comment TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -226,6 +227,9 @@ class AppDatabase {
       await db.execute(
         'CREATE INDEX ix_inventory_extra_work ON inventory_transactions(extra_work_id)',
       );
+    }
+    if (oldVersion < 9) {
+      await db.execute('ALTER TABLE clients ADD COLUMN comment TEXT');
     }
   }
 
