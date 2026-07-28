@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/repositories/local_repository.dart';
 import '../../core/sync/sync_service.dart';
+import '../../core/update/app_update_service.dart';
 import '../catalogs/catalogs_screen.dart';
 import '../reports/reports_screen.dart';
 import '../settings/organization_users_screen.dart';
@@ -32,6 +33,8 @@ class _SyncScreenState extends State<SyncScreen> {
   late String effectiveRole;
   bool busy = false;
   String? statusMessage;
+  late Future<AppUpdate> update;
+  double? updateProgress;
 
   @override
   void initState() {
@@ -39,6 +42,7 @@ class _SyncScreenState extends State<SyncScreen> {
     pending = widget.repository.pendingChanges();
     effectiveRole = widget.role;
     _loadSettings();
+    update = AppUpdateService().check();
   }
 
   Future<void> _loadSettings() async {
@@ -59,6 +63,39 @@ class _SyncScreenState extends State<SyncScreen> {
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        FutureBuilder<AppUpdate>(
+          future: update,
+          builder: (context, snapshot) {
+            final info = snapshot.data;
+            return Card(
+              child: ListTile(
+                leading: const Icon(Icons.system_update_outlined),
+                title: Text(
+                  info?.available == true
+                      ? 'Доступна версия ${info!.latestVersion}'
+                      : 'Обновление приложения',
+                ),
+                subtitle: updateProgress != null
+                    ? LinearProgressIndicator(value: updateProgress)
+                    : Text(
+                        snapshot.hasError
+                            ? 'Не удалось проверить. Нажмите, чтобы повторить'
+                            : info == null
+                            ? 'Проверка версии…'
+                            : info.available
+                            ? 'Установлена ${info.currentVersion}. Нажмите, чтобы обновить'
+                            : 'Установлена актуальная версия ${info.currentVersion}',
+                      ),
+                trailing: info?.available == true
+                    ? const Icon(Icons.download_outlined)
+                    : const Icon(Icons.refresh),
+                onTap: updateProgress != null
+                    ? null
+                    : () => checkOrInstallUpdate(info),
+              ),
+            );
+          },
+        ),
         if (effectiveRole == 'admin')
           Card(
             child: ListTile(
@@ -252,6 +289,35 @@ class _SyncScreenState extends State<SyncScreen> {
     repository: widget.repository,
     serverUrl: serverController.text.trim(),
   );
+
+  Future<void> checkOrInstallUpdate(AppUpdate? info) async {
+    if (info == null || !info.available) {
+      setState(() => update = AppUpdateService().check());
+      return;
+    }
+    try {
+      setState(() => updateProgress = 0);
+      await AppUpdateService().downloadAndInstall(
+        info,
+        onProgress: (received, total) {
+          if (!mounted) return;
+          setState(() {
+            updateProgress = total > 0 ? received / total : null;
+          });
+        },
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => updateProgress = null);
+    }
+  }
 
   Future<void> connect() async {
     setState(() {

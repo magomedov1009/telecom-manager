@@ -284,7 +284,11 @@ class _WorksScreenState extends State<WorksScreen> {
                         leading: const CircleAvatar(
                           child: Icon(Icons.receipt_long_outlined),
                         ),
-                        title: Text(item.description),
+                        title: Text(
+                          item.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         subtitle: Text(
                           '${item.providerName} · ${item.paidBy == 'INSTALLER' ? 'Монтажник' : 'Офис'}',
                         ),
