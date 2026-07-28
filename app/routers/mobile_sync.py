@@ -24,6 +24,7 @@ from app.models.clients import (
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.users import User
+from app.services.expenses import unpack_comment
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile-sync"])
 DbSession = Annotated[Session, Depends(get_db)]
@@ -207,7 +208,12 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
             elif entity_type == "finance_transaction":
                 payload["occurred_at"] = item.created_at.isoformat()
             elif entity_type == "expense":
-                payload["description"] = item.comment or _value(item.category)
+                expense_data = unpack_comment(item)
+                payload["category"] = (
+                    expense_data["category"] or _value(item.category)
+                )
+                payload["description"] = expense_data["description"]
+                payload["comment"] = expense_data["comment"] or None
                 payload["expense_date"] = item.created_at.date().isoformat()
             record = db.scalar(
                 select(MobileSyncRecord).where(

@@ -6,6 +6,26 @@ import 'package:cryptography/cryptography.dart';
 
 import '../database/app_database.dart';
 
+({String description, String? comment}) _unpackLegacyExpense(
+  String description,
+  String? comment,
+) {
+  if (!description.trimLeft().startsWith('{')) {
+    return (description: description, comment: comment);
+  }
+  try {
+    final data = Map<String, Object?>.from(jsonDecode(description) as Map);
+    return (
+      description: data['description']?.toString() ?? description,
+      comment: data['comment']?.toString().trim().isEmpty == false
+          ? data['comment']!.toString()
+          : null,
+    );
+  } catch (_) {
+    return (description: description, comment: comment);
+  }
+}
+
 class DashboardSummary {
   const DashboardSummary({
     required this.organizationName,
@@ -3678,20 +3698,22 @@ class LocalRepository {
       ''',
       [orgId, ?category, ?from, ?to],
     );
-    final result = rows
-        .map(
-          (row) => ExpenseItem(
-            id: row['id']! as String,
-            category: row['category']! as String,
-            description: row['description']! as String,
-            amount: (row['amount']! as num).toDouble(),
-            paidBy: row['paid_by']! as String,
-            providerName: row['provider_name']! as String,
-            expenseDate: DateTime.parse(row['expense_date']! as String),
-            comment: row['comment'] as String?,
-          ),
-        )
-        .toList();
+    final result = rows.map((row) {
+      final unpacked = _unpackLegacyExpense(
+        row['description']! as String,
+        row['comment'] as String?,
+      );
+      return ExpenseItem(
+        id: row['id']! as String,
+        category: row['category']! as String,
+        description: unpacked.description,
+        amount: (row['amount']! as num).toDouble(),
+        paidBy: row['paid_by']! as String,
+        providerName: row['provider_name']! as String,
+        expenseDate: DateTime.parse(row['expense_date']! as String),
+        comment: unpacked.comment,
+      );
+    }).toList();
     if (normalized.isEmpty) return result;
     final needle = normalized.toLowerCase();
     return result
@@ -3749,14 +3771,18 @@ class LocalRepository {
     );
     if (rows.isEmpty) throw ArgumentError('Расход не найден');
     final row = rows.single;
+    final unpacked = _unpackLegacyExpense(
+      row['description']! as String,
+      row['comment'] as String?,
+    );
     return ExpenseEditData(
       providerId: row['provider_id']! as String,
       category: row['category']! as String,
-      description: row['description']! as String,
+      description: unpacked.description,
       amount: (row['amount']! as num).toDouble(),
       paidBy: row['paid_by']! as String,
       expenseDate: DateTime.parse(row['expense_date']! as String),
-      comment: row['comment'] as String?,
+      comment: unpacked.comment,
     );
   }
 
