@@ -44,6 +44,7 @@ from app.routers.mobile_sync import (
     replace_snapshot,
     remove_organization_member,
 )
+from app.scripts.audit_mobile_restore import audit_restore
 
 
 class MobileSyncTest(unittest.TestCase):
@@ -426,6 +427,14 @@ class MobileSyncTest(unittest.TestCase):
         )
         result = replace_snapshot(request, self.db, self.token)
         self.assertEqual(result["counts"]["client"], 1)
+        audit_rows, audit_errors = audit_restore(
+            self.db,
+            self.token.organization_id,
+        )
+        self.assertEqual(audit_errors, [])
+        self.assertTrue(
+            all(row["phone"] == row["website"] for row in audit_rows)
+        )
         self.assertEqual(self.db.scalar(select(func.count()).select_from(Client)), 1)
         self.assertEqual(
             self.db.scalar(select(func.count()).select_from(Connection)),
