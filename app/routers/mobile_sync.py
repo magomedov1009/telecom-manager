@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 import hashlib
 import secrets
 from typing import Annotated, Literal
@@ -23,6 +24,9 @@ from app.models.clients import (
 )
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
+from app.models.enums import (
+    ConnectionType, FinanceTransactionType, InventoryTransactionType, PaidBy,
+)
 from app.models.users import User
 from app.services.expenses import unpack_comment
 
@@ -229,13 +233,15 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                     entity_id=str(item.id),
                     payload=payload,
                     version=1,
+                    site_id=item.id,
                 )
                 db.add(record)
                 db.flush()
-            elif record.payload == payload:
+            elif record.payload == payload and record.site_id == item.id:
                 continue
             else:
                 record.payload = payload
+                record.site_id = item.id
                 record.version += 1
             db.add(MobileSyncChange(
                 organization_id=organization_id,
@@ -308,6 +314,7 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         membership = memberships[0]
     organization = db.get(MobileOrganization, membership.organization_id)
     _bootstrap_site_data(db, membership.organization_id)
+    _publish_pending_to_site(db, membership.organization_id, user.id)
     raw_token = secrets.token_urlsafe(48)
     db.add(
         MobileDeviceToken(
@@ -532,6 +539,149 @@ def remove_organization_member(
     db.commit()
 
 
+def _site_id(
+    db: Session,
+    organization_id: int,
+    entity_type: str,
+    entity_id: str | None,
+) -> int | None:
+    if entity_id is None:
+        return None
+    record = db.scalar(
+        select(MobileSyncRecord).where(
+            MobileSyncRecord.organization_id == organization_id,
+            MobileSyncRecord.entity_type == entity_type,
+            MobileSyncRecord.entity_id == str(entity_id),
+        )
+    )
+    if record is not None and record.site_id is not None:
+        return record.site_id
+    return int(entity_id) if str(entity_id).isdigit() else None
+
+
+def _publish_record_to_site(
+    db: Session,
+    record: MobileSyncRecord,
+    user_id: int,
+) -> bool:
+    """Materialize a mobile record in the tables used by the website."""
+    if record.site_id is not None or record.deleted_at is not None:
+        return True
+    data = record.payload
+    org_id = record.organization_id
+    entity_type = record.entity_type
+    item = None
+    if entity_type == "client":
+        provider_id = _site_id(db, org_id, "provider", data.get("provider_id"))
+        if provider_id is None:
+            return False
+        item = Client(
+            provider_id=provider_id,
+            contract_number=data.get("contract_number") or data.get("login"),
+            login=data.get("login") or data.get("contract_number"),
+            address=data.get("address") or "—",
+            phone=data.get("phone"),
+            comment=data.get("comment"),
+        )
+    elif entity_type == "connection":
+        client_id = _site_id(db, org_id, "client", data.get("client_id"))
+        warehouse_id = _site_id(db, org_id, "warehouse", data.get("warehouse_id"))
+        if client_id is None or warehouse_id is None:
+            return False
+        item = Connection(
+            client_id=client_id,
+            warehouse_id=warehouse_id,
+            connection_type=ConnectionType(data["connection_type"]),
+            connection_date=date.fromisoformat(data["connection_date"]),
+            installer_id=user_id,
+            price=Decimal(str(data.get("price") or 0)),
+            office_amount=Decimal(str(data.get("office_amount") or 0)),
+            installer_amount=Decimal(str(data.get("installer_amount") or 0)),
+            comment=data.get("comment"),
+        )
+    elif entity_type == "connection_material":
+        connection_id = _site_id(db, org_id, "connection", data.get("connection_id"))
+        material_id = _site_id(db, org_id, "material", data.get("material_id"))
+        if connection_id is None or material_id is None:
+            return False
+        item = ConnectionMaterial(
+            connection_id=connection_id,
+            material_id=material_id,
+            quantity=Decimal(str(data["quantity"])),
+            comment=data.get("comment"),
+        )
+    elif entity_type == "inventory_transaction":
+        warehouse_id = _site_id(db, org_id, "warehouse", data.get("warehouse_id"))
+        material_id = _site_id(db, org_id, "material", data.get("material_id"))
+        if warehouse_id is None or material_id is None:
+            return False
+        item = InventoryTransaction(
+            warehouse_id=warehouse_id,
+            counterpart_warehouse_id=_site_id(
+                db, org_id, "warehouse", data.get("counterpart_warehouse_id")
+            ),
+            provider_id=_site_id(db, org_id, "provider", data.get("provider_id")),
+            material_id=material_id,
+            connection_id=_site_id(
+                db, org_id, "connection", data.get("connection_id")
+            ),
+            user_id=user_id,
+            operation_type=InventoryTransactionType(data["operation_type"]),
+            quantity=Decimal(str(data["quantity"])),
+            comment=data.get("comment"),
+            created_at=datetime.fromisoformat(data["occurred_at"]),
+        )
+    elif entity_type == "finance_transaction":
+        item = FinanceTransaction(
+            connection_id=_site_id(
+                db, org_id, "connection", data.get("connection_id")
+            ),
+            expense_id=_site_id(db, org_id, "expense", data.get("expense_id")),
+            extra_work_id=_site_id(
+                db, org_id, "extra_work", data.get("extra_work_id")
+            ),
+            user_id=user_id,
+            provider_id=_site_id(db, org_id, "provider", data.get("provider_id")),
+            amount=Decimal(str(data["amount"])),
+            transaction_type=FinanceTransactionType(data["transaction_type"]),
+            accrual_to=PaidBy(data["accrual_to"]) if data.get("accrual_to") else None,
+            comment=data.get("comment"),
+            created_at=datetime.fromisoformat(data["occurred_at"]),
+        )
+    else:
+        return True
+    db.add(item)
+    db.flush()
+    record.site_id = item.id
+    return True
+
+
+def _publish_pending_to_site(
+    db: Session,
+    organization_id: int,
+    user_id: int,
+) -> None:
+    priority = {
+        "client": 10,
+        "connection": 20,
+        "connection_material": 30,
+        "inventory_transaction": 30,
+        "finance_transaction": 30,
+    }
+    records = list(
+        db.scalars(
+            select(MobileSyncRecord).where(
+                MobileSyncRecord.organization_id == organization_id,
+                MobileSyncRecord.site_id.is_(None),
+                MobileSyncRecord.deleted_at.is_(None),
+            )
+        )
+    )
+    records.sort(key=lambda item: (priority.get(item.entity_type, 100), item.id))
+    for record in records:
+        _publish_record_to_site(db, record, user_id)
+
+
 @router.post("/sync/push", response_model=list[PushResult])
 def push(
     payload: PushRequest,
@@ -585,6 +735,7 @@ def push(
             version=item.version,
         ))
         results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="accepted", server_version=item.version))
+    _publish_pending_to_site(db, token.organization_id, token.user_id)
     db.commit()
     return results
 

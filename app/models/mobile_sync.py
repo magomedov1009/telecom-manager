@@ -33,6 +33,7 @@ class MobileSyncRecord(BaseModel):
     organization_id: Mapped[int] = mapped_column(ForeignKey("mobile_organizations.id", ondelete="CASCADE"), index=True)
     entity_type: Mapped[str] = mapped_column(String(64), index=True)
     entity_id: Mapped[str] = mapped_column(String(36), index=True)
+    site_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -7,6 +7,9 @@ import app.models  # noqa: F401
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.enums import UserRole
+from app.models.clients import Client, Connection, Provider
+from app.models.inventory import InventoryTransaction, Material, Warehouse
+from app.models.enums import InventoryItemType, MaterialUnit
 from app.models.mobile_sync import MobileDeviceToken, MobileMembership
 from fastapi import HTTPException
 from app.models.users import User
@@ -188,6 +191,88 @@ class MobileSyncTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as revoked:
             pull(self.db, installer_token, cursor=0, limit=200)
         self.assertEqual(revoked.exception.status_code, 403)
+
+    def test_mobile_connection_is_published_to_website_tables(self) -> None:
+        provider = Provider(name="ELLKO", is_active=True)
+        material = Material(
+            name="ONU",
+            unit=MaterialUnit.PIECE,
+            item_type=InventoryItemType.EQUIPMENT,
+            active=True,
+        )
+        self.db.add_all([provider, material])
+        self.db.flush()
+        warehouse = Warehouse(
+            name="ELLKO warehouse",
+            provider_id=provider.id,
+            active=True,
+        )
+        self.db.add(warehouse)
+        self.db.commit()
+        login(LoginRequest(username="admin", password="secret", device_name="phone"), self.db)
+        token = list(self.db.scalars(select(MobileDeviceToken)))[-1]
+        client_id = "018f0000-0000-7000-8000-100000000001"
+        connection_id = "018f0000-0000-7000-8000-100000000002"
+        changes = [
+            PushItem(
+                entity_type="client",
+                entity_id=client_id,
+                operation="upsert",
+                version=1,
+                payload={
+                    "id": client_id,
+                    "provider_id": str(provider.id),
+                    "contract_number": "MOBILE-1",
+                    "login": "mobile-client",
+                    "address": "Mobile street",
+                },
+            ),
+            PushItem(
+                entity_type="connection",
+                entity_id=connection_id,
+                operation="upsert",
+                version=1,
+                payload={
+                    "id": connection_id,
+                    "client_id": client_id,
+                    "warehouse_id": str(warehouse.id),
+                    "connection_type": "NEW",
+                    "connection_date": "2026-07-30",
+                    "price": 1000,
+                    "office_amount": 500,
+                    "installer_amount": 500,
+                },
+            ),
+            PushItem(
+                entity_type="inventory_transaction",
+                entity_id="018f0000-0000-7000-8000-100000000003",
+                operation="upsert",
+                version=1,
+                payload={
+                    "warehouse_id": str(warehouse.id),
+                    "provider_id": str(provider.id),
+                    "material_id": str(material.id),
+                    "connection_id": connection_id,
+                    "operation_type": "CONNECTION",
+                    "quantity": -1,
+                    "occurred_at": "2026-07-30T00:00:00+00:00",
+                },
+            ),
+        ]
+        results = push(PushRequest(changes=changes), self.db, token)
+        self.assertTrue(all(item.status == "accepted" for item in results))
+        site_client = self.db.scalar(select(Client).where(Client.login == "mobile-client"))
+        self.assertIsNotNone(site_client)
+        site_connection = self.db.scalar(
+            select(Connection).where(Connection.client_id == site_client.id)
+        )
+        self.assertIsNotNone(site_connection)
+        movement = self.db.scalar(
+            select(InventoryTransaction).where(
+                InventoryTransaction.connection_id == site_connection.id
+            )
+        )
+        self.assertEqual(movement.quantity, -1)
 
 
 if __name__ == "__main__":
