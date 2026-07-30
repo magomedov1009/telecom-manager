@@ -333,6 +333,37 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                 operation="upsert",
                 version=record.version,
             ))
+    _mark_site_deletions(db, organization_id)
+
+
+def _mark_site_deletions(db: Session, organization_id: int) -> None:
+    """Publish website deletions to mobile devices, including cascaded rows."""
+    for entity_type, model in SITE_MODELS.items():
+        records = list(
+            db.scalars(
+                select(MobileSyncRecord).where(
+                    MobileSyncRecord.organization_id == organization_id,
+                    MobileSyncRecord.entity_type == entity_type,
+                    MobileSyncRecord.site_id.is_not(None),
+                    MobileSyncRecord.deleted_at.is_(None),
+                )
+            )
+        )
+        for record in records:
+            if db.get(model, record.site_id) is not None:
+                continue
+            record.deleted_at = datetime.now(UTC)
+            record.version += 1
+            db.add(
+                MobileSyncChange(
+                    organization_id=organization_id,
+                    record_id=record.id,
+                    entity_type=entity_type,
+                    entity_id=record.entity_id,
+                    operation="delete",
+                    version=record.version,
+                )
+            )
 
 
 def current_token(
@@ -1048,6 +1079,14 @@ def push(
             )
         )
         if record is not None and item.version == record.version and record.payload == item.payload:
+            if item.operation == "delete":
+                _delete_record_from_site(db, record)
+            elif not _update_record_on_site(db, record, token.user_id):
+                db.rollback()
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"Не удалось связать {item.entity_type}:{item.entity_id}",
+                )
             results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="duplicate", server_version=record.version))
             continue
         if record is not None and item.version <= record.version:

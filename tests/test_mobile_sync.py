@@ -7,10 +7,24 @@ import app.models  # noqa: F401
 from app.core.security import hash_password
 from app.db.base import Base
 from app.models.enums import UserRole
-from app.models.clients import Client, Connection, Provider
+from app.models.clients import (
+    Client,
+    Connection,
+    ConnectionMaterial,
+    ExtraWork,
+    ExtraWorkMaterial,
+    ExtraWorkType,
+    Provider,
+)
+from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.enums import InventoryItemType, MaterialUnit
-from app.models.mobile_sync import MobileDeviceToken, MobileMembership, MobileSyncRecord
+from app.models.mobile_sync import (
+    MobileDeviceToken,
+    MobileMembership,
+    MobileSyncChange,
+    MobileSyncRecord,
+)
 from fastapi import HTTPException
 from app.models.users import User
 from app.routers.mobile_sync import (
@@ -321,6 +335,13 @@ class MobileSyncTest(unittest.TestCase):
             "material": "018f0000-0000-7000-8000-200000000003",
             "client": "018f0000-0000-7000-8000-200000000004",
             "connection": "018f0000-0000-7000-8000-200000000005",
+            "extra_work_type": "018f0000-0000-7000-8000-200000000006",
+            "connection_material": "018f0000-0000-7000-8000-200000000007",
+            "inventory_transaction": "018f0000-0000-7000-8000-200000000008",
+            "finance_transaction": "018f0000-0000-7000-8000-200000000009",
+            "extra_work": "018f0000-0000-7000-8000-200000000010",
+            "extra_work_material": "018f0000-0000-7000-8000-200000000011",
+            "expense": "018f0000-0000-7000-8000-200000000012",
         }
         payloads = {
             "provider": {"id": ids["provider"], "name": "Optima", "is_active": 1},
@@ -342,6 +363,52 @@ class MobileSyncTest(unittest.TestCase):
                 "warehouse_id": ids["warehouse"], "connection_type": "NEW",
                 "connection_date": "2026-07-30", "price": 1000,
                 "office_amount": 500, "installer_amount": 500,
+            },
+            "extra_work_type": {
+                "id": ids["extra_work_type"], "name": "Repair",
+                "default_price": 100, "default_office_amount": 0,
+                "requires_materials": 1, "requires_equipment": 0,
+                "is_active": 1,
+            },
+            "connection_material": {
+                "id": ids["connection_material"],
+                "connection_id": ids["connection"],
+                "material_id": ids["material"], "quantity": 1,
+            },
+            "inventory_transaction": {
+                "id": ids["inventory_transaction"],
+                "warehouse_id": ids["warehouse"],
+                "provider_id": ids["provider"],
+                "material_id": ids["material"],
+                "connection_id": ids["connection"],
+                "operation_type": "CONNECTION", "quantity": -1,
+                "occurred_at": "2026-07-30T00:00:00+00:00",
+            },
+            "finance_transaction": {
+                "id": ids["finance_transaction"],
+                "provider_id": ids["provider"],
+                "connection_id": ids["connection"],
+                "transaction_type": "CONNECTION",
+                "accrual_to": "INSTALLER", "amount": 500,
+                "occurred_at": "2026-07-30T00:00:00+00:00",
+            },
+            "extra_work": {
+                "id": ids["extra_work"], "provider_id": ids["provider"],
+                "work_type_id": ids["extra_work_type"],
+                "work_date": "2026-07-30", "amount": 100,
+                "office_amount": 0, "installer_amount": 100,
+                "status": "completed",
+            },
+            "extra_work_material": {
+                "id": ids["extra_work_material"],
+                "extra_work_id": ids["extra_work"],
+                "material_id": ids["material"], "quantity": 1,
+            },
+            "expense": {
+                "id": ids["expense"], "provider_id": ids["provider"],
+                "category": "transport", "description": "Taxi",
+                "amount": 200, "paid_by": "INSTALLER",
+                "expense_date": "2026-07-30",
             },
         }
         request = ReplaceSnapshotRequest(
@@ -367,6 +434,32 @@ class MobileSyncTest(unittest.TestCase):
         self.assertEqual(
             self.db.scalar(select(Client).where(Client.login == "phone-1")).address,
             "Phone address",
+        )
+        for model in (
+            ConnectionMaterial,
+            InventoryTransaction,
+            FinanceTransaction,
+            ExtraWorkType,
+            ExtraWork,
+            ExtraWorkMaterial,
+            Expense,
+        ):
+            self.assertEqual(
+                self.db.scalar(select(func.count()).select_from(model)),
+                1,
+            )
+        cursor = self.db.scalar(select(func.max(MobileSyncChange.id))) or 0
+        site_connection = self.db.scalar(select(Connection))
+        self.db.delete(site_connection)
+        self.db.commit()
+        deletion_page = pull(self.db, self.token, cursor=cursor, limit=200)
+        self.assertTrue(
+            any(
+                item.entity_type == "connection"
+                and item.entity_id == ids["connection"]
+                and item.operation == "delete"
+                for item in deletion_page.changes
+            )
         )
 
 
