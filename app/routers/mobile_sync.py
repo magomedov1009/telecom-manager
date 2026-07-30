@@ -748,6 +748,8 @@ def pull(
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> PullResponse:
     current_membership(db, token)
+    _publish_pending_to_site(db, token.organization_id, token.user_id)
+    db.commit()
     changes = list(db.scalars(
         select(MobileSyncChange)
         .where(MobileSyncChange.organization_id == token.organization_id, MobileSyncChange.id > cursor)
