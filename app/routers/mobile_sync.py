@@ -329,7 +329,7 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                 organization_id=organization_id,
                 record_id=record.id,
                 entity_type=entity_type,
-                entity_id=str(item.id),
+                entity_id=record.entity_id,
                 operation="upsert",
                 version=record.version,
             ))

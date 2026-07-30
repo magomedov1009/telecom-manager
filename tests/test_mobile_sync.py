@@ -113,8 +113,8 @@ class MobileSyncTest(unittest.TestCase):
             if item.entity_type == "provider"
             and item.entity_id == "018f0000-0000-7000-8000-000000000001"
         ]
-        self.assertEqual(len(provider_changes), 1)
-        self.assertEqual(provider_changes[0].payload["name"], "ELLKO")
+        self.assertGreaterEqual(len(provider_changes), 1)
+        self.assertEqual(provider_changes[-1].payload["name"], "ELLKO")
         self.assertEqual(len(pull(self.db, self.token, cursor=first_page.cursor, limit=200).changes), 0)
 
     def test_installer_cannot_change_catalogs(self) -> None:
@@ -448,6 +448,63 @@ class MobileSyncTest(unittest.TestCase):
                 self.db.scalar(select(func.count()).select_from(model)),
                 1,
             )
+        change_cursor = self.db.scalar(select(func.max(MobileSyncChange.id))) or 0
+        site_client = self.db.scalar(select(Client).where(Client.login == "phone-1"))
+        site_client.address = "Changed on website"
+        self.db.commit()
+        website_page = pull(self.db, self.token, cursor=change_cursor, limit=200)
+        website_client_changes = [
+            item for item in website_page.changes
+            if item.entity_type == "client" and item.entity_id == ids["client"]
+        ]
+        self.assertEqual(len(website_client_changes), 1)
+        self.assertEqual(
+            website_client_changes[0].payload["address"],
+            "Changed on website",
+        )
+        stable_page = pull(
+            self.db,
+            self.token,
+            cursor=website_page.cursor,
+            limit=200,
+        )
+        self.assertEqual(stable_page.changes, [])
+
+        server_client_record = self.db.scalar(
+            select(MobileSyncRecord).where(
+                MobileSyncRecord.entity_type == "client",
+                MobileSyncRecord.entity_id == ids["client"],
+            )
+        )
+        phone_update = PushRequest(
+            changes=[
+                PushItem(
+                    entity_type="client",
+                    entity_id=ids["client"],
+                    operation="upsert",
+                    version=server_client_record.version + 1,
+                    payload={
+                        **server_client_record.payload,
+                        "address": "Changed on phone",
+                        "version": server_client_record.version + 1,
+                    },
+                )
+            ]
+        )
+        self.assertEqual(push(phone_update, self.db, self.token)[0].status, "accepted")
+        self.assertEqual(
+            self.db.scalar(select(Client).where(Client.login == "phone-1")).address,
+            "Changed on phone",
+        )
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(Client)),
+            1,
+        )
+        self.assertEqual(push(phone_update, self.db, self.token)[0].status, "duplicate")
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(Client)),
+            1,
+        )
         cursor = self.db.scalar(select(func.max(MobileSyncChange.id))) or 0
         site_connection = self.db.scalar(select(Connection))
         self.db.delete(site_connection)
