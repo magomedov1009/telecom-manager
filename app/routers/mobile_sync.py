@@ -314,7 +314,6 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         membership = memberships[0]
     organization = db.get(MobileOrganization, membership.organization_id)
     _bootstrap_site_data(db, membership.organization_id)
-    _publish_pending_to_site(db, membership.organization_id, user.id)
     raw_token = secrets.token_urlsafe(48)
     db.add(
         MobileDeviceToken(
@@ -754,7 +753,6 @@ def push(
             version=item.version,
         ))
         results.append(PushResult(entity_type=item.entity_type, entity_id=item.entity_id, status="accepted", server_version=item.version))
-    _publish_pending_to_site(db, token.organization_id, token.user_id)
     db.commit()
     return results
 
@@ -767,8 +765,6 @@ def pull(
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> PullResponse:
     current_membership(db, token)
-    _publish_pending_to_site(db, token.organization_id, token.user_id)
-    db.commit()
     changes = list(db.scalars(
         select(MobileSyncChange)
         .where(MobileSyncChange.organization_id == token.organization_id, MobileSyncChange.id > cursor)

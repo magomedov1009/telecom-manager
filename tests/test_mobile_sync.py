@@ -192,7 +192,7 @@ class MobileSyncTest(unittest.TestCase):
             pull(self.db, installer_token, cursor=0, limit=200)
         self.assertEqual(revoked.exception.status_code, 403)
 
-    def test_mobile_connection_is_published_to_website_tables(self) -> None:
+    def test_mobile_connection_stays_out_of_website_tables(self) -> None:
         provider = Provider(name="ELLKO", is_active=True)
         material = Material(
             name="ONU",
@@ -279,17 +279,15 @@ class MobileSyncTest(unittest.TestCase):
             ),
             1,
         )
-        self.assertEqual(site_client.address, "Mobile street")
-        site_connection = self.db.scalar(
-            select(Connection).where(Connection.client_id == site_client.id)
+        self.assertEqual(site_client.address, "Old address")
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(Connection)),
+            0,
         )
-        self.assertIsNotNone(site_connection)
-        movement = self.db.scalar(
-            select(InventoryTransaction).where(
-                InventoryTransaction.connection_id == site_connection.id
-            )
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(InventoryTransaction)),
+            0,
         )
-        self.assertEqual(movement.quantity, -1)
 
 
 if __name__ == "__main__":
