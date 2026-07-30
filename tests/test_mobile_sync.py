@@ -1,6 +1,6 @@
 import unittest
 
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
 
 import app.models  # noqa: F401
@@ -208,6 +208,14 @@ class MobileSyncTest(unittest.TestCase):
             active=True,
         )
         self.db.add(warehouse)
+        self.db.flush()
+        existing_client = Client(
+            provider_id=provider.id,
+            contract_number="MOBILE-1",
+            login="mobile-client",
+            address="Old address",
+        )
+        self.db.add(existing_client)
         self.db.commit()
         login(LoginRequest(username="admin", password="secret", device_name="phone"), self.db)
         token = list(self.db.scalars(select(MobileDeviceToken)))[-1]
@@ -263,6 +271,15 @@ class MobileSyncTest(unittest.TestCase):
         self.assertTrue(all(item.status == "accepted" for item in results))
         site_client = self.db.scalar(select(Client).where(Client.login == "mobile-client"))
         self.assertIsNotNone(site_client)
+        self.assertEqual(
+            self.db.scalar(
+                select(func.count()).select_from(Client).where(
+                    Client.login == "mobile-client"
+                )
+            ),
+            1,
+        )
+        self.assertEqual(site_client.address, "Mobile street")
         site_connection = self.db.scalar(
             select(Connection).where(Connection.client_id == site_client.id)
         )

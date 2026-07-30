@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
@@ -575,10 +575,29 @@ def _publish_record_to_site(
         provider_id = _site_id(db, org_id, "provider", data.get("provider_id"))
         if provider_id is None:
             return False
+        contract_number = data.get("contract_number") or data.get("login")
+        login_name = data.get("login") or data.get("contract_number")
+        existing_client = db.scalars(
+            select(Client).where(
+                or_(
+                    Client.contract_number == contract_number,
+                    Client.login == login_name,
+                )
+            ).order_by(Client.id)
+        ).first()
+        if existing_client is not None:
+            existing_client.provider_id = provider_id
+            existing_client.contract_number = contract_number
+            existing_client.login = login_name
+            existing_client.address = data.get("address") or existing_client.address
+            existing_client.phone = data.get("phone")
+            existing_client.comment = data.get("comment")
+            record.site_id = existing_client.id
+            return True
         item = Client(
             provider_id=provider_id,
-            contract_number=data.get("contract_number") or data.get("login"),
-            login=data.get("login") or data.get("contract_number"),
+            contract_number=contract_number,
+            login=login_name,
             address=data.get("address") or "—",
             phone=data.get("phone"),
             comment=data.get("comment"),
