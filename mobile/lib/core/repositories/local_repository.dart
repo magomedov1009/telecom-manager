@@ -4312,6 +4312,43 @@ class LocalRepository {
     }).toList();
   }
 
+  Future<List<Map<String, Object?>>> fullSyncSnapshot() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    const entities = {
+      'providers': 'provider',
+      'warehouses': 'warehouse',
+      'materials': 'material',
+      'clients': 'client',
+      'connections': 'connection',
+      'connection_materials': 'connection_material',
+      'inventory_transactions': 'inventory_transaction',
+      'finance_transactions': 'finance_transaction',
+      'extra_work_types': 'extra_work_type',
+      'extra_works': 'extra_work',
+      'extra_work_materials': 'extra_work_material',
+      'expenses': 'expense',
+    };
+    final result = <Map<String, Object?>>[];
+    for (final entry in entities.entries) {
+      final rows = await db.query(
+        entry.key,
+        where: 'organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [orgId],
+      );
+      for (final row in rows) {
+        result.add({
+          'entity_type': entry.value,
+          'entity_id': row['id']! as String,
+          'operation': 'upsert',
+          'version': (row['version'] as num?)?.toInt() ?? 1,
+          'payload': Map<String, Object?>.from(row),
+        });
+      }
+    }
+    return result;
+  }
+
   Future<void> acknowledgeSync(String entityType, String entityId) async {
     final db = await database.instance;
     await db.delete(

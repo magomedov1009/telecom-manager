@@ -312,4 +312,23 @@ class SyncService {
     }
     return SyncResult(sent: sent, received: received, conflicts: conflicts);
   }
+
+  Future<Map<String, int>> replaceServerFromPhone() async {
+    final snapshot = await repository.fullSyncSnapshot();
+    final response = await client.post(
+      endpoint('/sync/replace-snapshot'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({
+        'confirmation': 'REPLACE_ALL_FROM_PHONE',
+        'changes': snapshot,
+      }),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    final body = jsonDecode(response.body) as Map<String, Object?>;
+    return Map<String, int>.from(
+      (body['counts'] as Map).map(
+        (key, value) => MapEntry(key.toString(), (value as num).toInt()),
+      ),
+    );
+  }
 }

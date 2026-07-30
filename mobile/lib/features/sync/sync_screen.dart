@@ -98,6 +98,19 @@ class _SyncScreenState extends State<SyncScreen> {
         ),
         if (effectiveRole == 'admin')
           Card(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: ListTile(
+              leading: const Icon(Icons.phonelink_setup_outlined),
+              title: const Text('Восстановить сервер из телефона'),
+              subtitle: const Text(
+                'Полностью заменить рабочие данные сайта текущей локальной копией',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: busy ? null : replaceServerFromPhone,
+            ),
+          ),
+        if (effectiveRole == 'admin')
+          Card(
             child: ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: const Text('Справочники'),
@@ -316,6 +329,73 @@ class _SyncScreenState extends State<SyncScreen> {
       }
     } finally {
       if (mounted) setState(() => updateProgress = null);
+    }
+  }
+
+  Future<void> replaceServerFromPhone() async {
+    final confirmation = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Заменить данные сервера?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Клиенты, подключения, склады, материалы, расходы, работы и '
+              'финансы на сайте будут заменены данными этого телефона. '
+              'Пользователи сайта сохранятся.',
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: confirmation,
+              decoration: const InputDecoration(
+                labelText: 'Введите ЗАМЕНИТЬ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              confirmation.text.trim().toUpperCase() == 'ЗАМЕНИТЬ',
+            ),
+            child: const Text('Продолжить'),
+          ),
+        ],
+      ),
+    );
+    confirmation.dispose();
+    if (approved != true) return;
+    setState(() {
+      busy = true;
+      statusMessage = 'Отправка полной копии телефона…';
+    });
+    try {
+      final counts = await service().replaceServerFromPhone();
+      if (!mounted) return;
+      setState(() {
+        statusMessage =
+            'Сервер восстановлен: клиентов ${counts['client'] ?? 0}, '
+            'подключений ${counts['connection'] ?? 0}, '
+            'складских операций ${counts['inventory_transaction'] ?? 0}.';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 

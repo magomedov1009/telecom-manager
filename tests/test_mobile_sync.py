@@ -10,7 +10,7 @@ from app.models.enums import UserRole
 from app.models.clients import Client, Connection, Provider
 from app.models.inventory import InventoryTransaction, Material, Warehouse
 from app.models.enums import InventoryItemType, MaterialUnit
-from app.models.mobile_sync import MobileDeviceToken, MobileMembership
+from app.models.mobile_sync import MobileDeviceToken, MobileMembership, MobileSyncRecord
 from fastapi import HTTPException
 from app.models.users import User
 from app.routers.mobile_sync import (
@@ -19,6 +19,7 @@ from app.routers.mobile_sync import (
     LoginRequest,
     PushItem,
     PushRequest,
+    ReplaceSnapshotRequest,
     add_organization_member,
     create_organization,
     login,
@@ -26,6 +27,7 @@ from app.routers.mobile_sync import (
     organizations,
     pull,
     push,
+    replace_snapshot,
     remove_organization_member,
 )
 
@@ -92,8 +94,13 @@ class MobileSyncTest(unittest.TestCase):
         )])
         self.assertEqual(push(conflict, self.db, self.token)[0].status, "conflict")
         first_page = pull(self.db, self.token, cursor=0, limit=200)
-        self.assertEqual(len(first_page.changes), 1)
-        self.assertEqual(first_page.changes[0].payload["name"], "ELLKO")
+        provider_changes = [
+            item for item in first_page.changes
+            if item.entity_type == "provider"
+            and item.entity_id == "018f0000-0000-7000-8000-000000000001"
+        ]
+        self.assertEqual(len(provider_changes), 1)
+        self.assertEqual(provider_changes[0].payload["name"], "ELLKO")
         self.assertEqual(len(pull(self.db, self.token, cursor=first_page.cursor, limit=200).changes), 0)
 
     def test_installer_cannot_change_catalogs(self) -> None:
@@ -110,12 +117,30 @@ class MobileSyncTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             push(request, self.db, self.token)
         self.assertEqual(error.exception.status_code, 403)
+        provider = Provider(name="Allowed provider", is_active=True)
+        self.db.add(provider)
+        self.db.flush()
+        provider_record = MobileSyncRecord(
+            organization_id=self.token.organization_id,
+            entity_type="provider",
+            entity_id=str(provider.id),
+            payload={"id": str(provider.id), "name": provider.name},
+            version=1,
+            site_id=provider.id,
+        )
+        self.db.add(provider_record)
+        self.db.commit()
         operational = PushRequest(changes=[PushItem(
             entity_type="client",
             entity_id="018f0000-0000-7000-8000-000000000003",
             operation="upsert",
             version=1,
-            payload={"login": "allowed"},
+            payload={
+                "provider_id": str(provider.id),
+                "contract_number": "allowed",
+                "login": "allowed",
+                "address": "Allowed",
+            },
         )])
         self.assertEqual(
             push(operational, self.db, self.token)[0].status,
@@ -192,7 +217,7 @@ class MobileSyncTest(unittest.TestCase):
             pull(self.db, installer_token, cursor=0, limit=200)
         self.assertEqual(revoked.exception.status_code, 403)
 
-    def test_mobile_connection_stays_out_of_website_tables(self) -> None:
+    def test_mobile_connection_is_published_without_duplicate_client(self) -> None:
         provider = Provider(name="ELLKO", is_active=True)
         material = Material(
             name="ONU",
@@ -279,14 +304,69 @@ class MobileSyncTest(unittest.TestCase):
             ),
             1,
         )
-        self.assertEqual(site_client.address, "Old address")
+        self.assertEqual(site_client.address, "Mobile street")
         self.assertEqual(
             self.db.scalar(select(func.count()).select_from(Connection)),
-            0,
+            1,
         )
         self.assertEqual(
             self.db.scalar(select(func.count()).select_from(InventoryTransaction)),
-            0,
+            1,
+        )
+
+    def test_full_phone_snapshot_replaces_website_business_data(self) -> None:
+        ids = {
+            "provider": "018f0000-0000-7000-8000-200000000001",
+            "warehouse": "018f0000-0000-7000-8000-200000000002",
+            "material": "018f0000-0000-7000-8000-200000000003",
+            "client": "018f0000-0000-7000-8000-200000000004",
+            "connection": "018f0000-0000-7000-8000-200000000005",
+        }
+        payloads = {
+            "provider": {"id": ids["provider"], "name": "Optima", "is_active": 1},
+            "warehouse": {
+                "id": ids["warehouse"], "provider_id": ids["provider"],
+                "name": "Main", "is_active": 1,
+            },
+            "material": {
+                "id": ids["material"], "name": "ONU", "item_type": "EQUIPMENT",
+                "unit_name": "шт.", "is_active": 1,
+            },
+            "client": {
+                "id": ids["client"], "provider_id": ids["provider"],
+                "contract_number": "PHONE-1", "login": "phone-1",
+                "address": "Phone address",
+            },
+            "connection": {
+                "id": ids["connection"], "client_id": ids["client"],
+                "warehouse_id": ids["warehouse"], "connection_type": "NEW",
+                "connection_date": "2026-07-30", "price": 1000,
+                "office_amount": 500, "installer_amount": 500,
+            },
+        }
+        request = ReplaceSnapshotRequest(
+            confirmation="REPLACE_ALL_FROM_PHONE",
+            changes=[
+                PushItem(
+                    entity_type=name,
+                    entity_id=ids[name],
+                    operation="upsert",
+                    version=1,
+                    payload=payloads[name],
+                )
+                for name in ids
+            ],
+        )
+        result = replace_snapshot(request, self.db, self.token)
+        self.assertEqual(result["counts"]["client"], 1)
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(Client)), 1)
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(Connection)),
+            1,
+        )
+        self.assertEqual(
+            self.db.scalar(select(Client).where(Client.login == "phone-1")).address,
+            "Phone address",
         )
 
 
