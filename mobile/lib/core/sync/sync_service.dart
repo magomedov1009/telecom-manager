@@ -313,13 +313,16 @@ class SyncService {
     return SyncResult(sent: sent, received: received, conflicts: conflicts);
   }
 
-  Future<Map<String, int>> replaceServerFromPhone() async {
+  Future<Map<String, int>> replaceServerFromPhone({
+    required int ownerUserId,
+  }) async {
     final snapshot = await repository.fullSyncSnapshot();
     final response = await client.post(
       endpoint('/sync/replace-snapshot'),
       headers: await _authorizedHeaders(),
       body: jsonEncode({
         'confirmation': 'REPLACE_ALL_FROM_PHONE',
+        'owner_user_id': ownerUserId,
         'changes': snapshot,
       }),
     );
@@ -330,5 +333,15 @@ class SyncService {
         (key, value) => MapEntry(key.toString(), (value as num).toInt()),
       ),
     );
+  }
+
+  Future<Map<String, Object?>> reassignSnapshotOwner(int ownerUserId) async {
+    final response = await client.post(
+      endpoint('/sync/reassign-snapshot-owner'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({'owner_user_id': ownerUserId}),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return Map<String, Object?>.from(jsonDecode(response.body) as Map);
   }
 }

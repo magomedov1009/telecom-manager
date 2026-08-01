@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.security import verify_password
@@ -94,7 +94,12 @@ class PushRequest(BaseModel):
 
 class ReplaceSnapshotRequest(BaseModel):
     confirmation: Literal["REPLACE_ALL_FROM_PHONE"]
+    owner_user_id: int | None = None
     changes: list[PushItem] = Field(max_length=20000)
+
+
+class ReassignSnapshotOwnerRequest(BaseModel):
+    owner_user_id: int
 
 
 class PushResult(BaseModel):
@@ -479,6 +484,26 @@ def require_admin(db: Session, token: MobileDeviceToken) -> MobileMembership:
             "Требуются права администратора",
         )
     return membership
+
+
+def _organization_member_user(
+    db: Session,
+    organization_id: int,
+    user_id: int,
+) -> User:
+    membership = db.scalar(
+        select(MobileMembership).where(
+            MobileMembership.organization_id == organization_id,
+            MobileMembership.user_id == user_id,
+        )
+    )
+    user = db.get(User, user_id)
+    if membership is None or user is None or not user.is_active:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Выбранный пользователь не состоит в организации или отключён",
+        )
+    return user
 
 
 @router.get("/organizations", response_model=list[OrganizationOption])
@@ -930,6 +955,44 @@ def _clear_site_business_data(db: Session) -> None:
     db.flush()
 
 
+def _reassign_snapshot_site_owner(
+    db: Session,
+    organization_id: int,
+    owner_user_id: int,
+) -> dict[str, int]:
+    """Assign only rows published from this organization's mobile snapshot."""
+    targets = {
+        "connection": (Connection, "installer_id"),
+        "extra_work": (ExtraWork, "installer_id"),
+        "expense": (Expense, "user_id"),
+        "inventory_transaction": (InventoryTransaction, "user_id"),
+        "finance_transaction": (FinanceTransaction, "user_id"),
+    }
+    counts: dict[str, int] = {}
+    for entity_type, (model, owner_field) in targets.items():
+        site_ids = list(
+            db.scalars(
+                select(MobileSyncRecord.site_id).where(
+                    MobileSyncRecord.organization_id == organization_id,
+                    MobileSyncRecord.entity_type == entity_type,
+                    MobileSyncRecord.site_id.is_not(None),
+                    MobileSyncRecord.deleted_at.is_(None),
+                )
+            )
+        )
+        if not site_ids:
+            counts[entity_type] = 0
+            continue
+        result = db.execute(
+            update(model)
+            .where(model.id.in_(site_ids))
+            .values({owner_field: owner_user_id})
+        )
+        counts[entity_type] = result.rowcount or 0
+    db.flush()
+    return counts
+
+
 SITE_MODELS = {
     "provider": Provider,
     "warehouse": Warehouse,
@@ -1135,6 +1198,12 @@ def replace_snapshot(
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> dict:
     require_admin(db, token)
+    owner_user_id = payload.owner_user_id or token.user_id
+    _organization_member_user(
+        db,
+        token.organization_id,
+        owner_user_id,
+    )
     if not payload.changes:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Снимок телефона пуст")
     counts: dict[str, int] = {}
@@ -1183,7 +1252,7 @@ def replace_snapshot(
     unresolved = _publish_pending_to_site(
         db,
         token.organization_id,
-        token.user_id,
+        owner_user_id,
     )
     if unresolved:
         db.rollback()
@@ -1193,6 +1262,31 @@ def replace_snapshot(
         )
     db.commit()
     return {"total": len(payload.changes), "counts": counts}
+
+
+@router.post("/sync/reassign-snapshot-owner")
+def reassign_snapshot_owner(
+    payload: ReassignSnapshotOwnerRequest,
+    db: DbSession,
+    token: Annotated[MobileDeviceToken, Depends(current_token)],
+) -> dict:
+    require_admin(db, token)
+    owner = _organization_member_user(
+        db,
+        token.organization_id,
+        payload.owner_user_id,
+    )
+    counts = _reassign_snapshot_site_owner(
+        db,
+        token.organization_id,
+        owner.id,
+    )
+    db.commit()
+    return {
+        "owner_user_id": owner.id,
+        "owner_username": owner.username,
+        "counts": counts,
+    }
 
 
 @router.get("/sync/pull", response_model=PullResponse)

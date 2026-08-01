@@ -34,6 +34,7 @@ from app.routers.mobile_sync import (
     PushItem,
     PushRequest,
     ReplaceSnapshotRequest,
+    ReassignSnapshotOwnerRequest,
     add_organization_member,
     create_organization,
     login,
@@ -42,6 +43,7 @@ from app.routers.mobile_sync import (
     pull,
     push,
     replace_snapshot,
+    reassign_snapshot_owner,
     remove_organization_member,
 )
 from app.scripts.audit_mobile_restore import audit_restore
@@ -330,6 +332,17 @@ class MobileSyncTest(unittest.TestCase):
         )
 
     def test_full_phone_snapshot_replaces_website_business_data(self) -> None:
+        installer = self.db.scalar(
+            select(User).where(User.username == "installer")
+        )
+        self.db.add(
+            MobileMembership(
+                organization_id=self.token.organization_id,
+                user_id=installer.id,
+                role="installer",
+            )
+        )
+        self.db.commit()
         ids = {
             "provider": "018f0000-0000-7000-8000-200000000001",
             "warehouse": "018f0000-0000-7000-8000-200000000002",
@@ -414,6 +427,7 @@ class MobileSyncTest(unittest.TestCase):
         }
         request = ReplaceSnapshotRequest(
             confirmation="REPLACE_ALL_FROM_PHONE",
+            owner_user_id=installer.id,
             changes=[
                 PushItem(
                     entity_type=name,
@@ -427,6 +441,17 @@ class MobileSyncTest(unittest.TestCase):
         )
         result = replace_snapshot(request, self.db, self.token)
         self.assertEqual(result["counts"]["client"], 1)
+        self.assertEqual(self.db.scalar(select(Connection)).installer_id, installer.id)
+        self.assertEqual(self.db.scalar(select(ExtraWork)).installer_id, installer.id)
+        self.assertEqual(self.db.scalar(select(Expense)).user_id, installer.id)
+        self.assertEqual(
+            self.db.scalar(select(InventoryTransaction)).user_id,
+            installer.id,
+        )
+        self.assertEqual(
+            self.db.scalar(select(FinanceTransaction)).user_id,
+            installer.id,
+        )
         audit_rows, audit_errors = audit_restore(
             self.db,
             self.token.organization_id,
@@ -435,6 +460,13 @@ class MobileSyncTest(unittest.TestCase):
         self.assertTrue(
             all(row["phone"] == row["website"] for row in audit_rows)
         )
+        reassigned = reassign_snapshot_owner(
+            ReassignSnapshotOwnerRequest(owner_user_id=self.token.user_id),
+            self.db,
+            self.token,
+        )
+        self.assertEqual(reassigned["owner_username"], "admin")
+        self.assertEqual(self.db.scalar(select(Connection)).installer_id, self.token.user_id)
         self.assertEqual(self.db.scalar(select(func.count()).select_from(Client)), 1)
         self.assertEqual(
             self.db.scalar(select(func.count()).select_from(Connection)),

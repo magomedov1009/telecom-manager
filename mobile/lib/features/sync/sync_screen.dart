@@ -112,6 +112,18 @@ class _SyncScreenState extends State<SyncScreen> {
         if (effectiveRole == 'admin')
           Card(
             child: ListTile(
+              leading: const Icon(Icons.assignment_ind_outlined),
+              title: const Text('Назначить восстановленные данные'),
+              subtitle: const Text(
+                'Передать подключения, складские операции и финансы выбранному монтажнику',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: busy ? null : reassignSnapshotOwner,
+            ),
+          ),
+        if (effectiveRole == 'admin')
+          Card(
+            child: ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: const Text('Справочники'),
               subtitle: const Text(
@@ -333,6 +345,8 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> replaceServerFromPhone() async {
+    final owner = await selectSnapshotOwner();
+    if (owner == null || !mounted) return;
     final confirmation = TextEditingController();
     final approved = await showDialog<bool>(
       context: context,
@@ -346,6 +360,12 @@ class _SyncScreenState extends State<SyncScreen> {
               'Клиенты, подключения, склады, материалы, расходы, работы и '
               'финансы на сайте будут заменены данными этого телефона. '
               'Пользователи сайта сохранятся.',
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Все рабочие операции будут назначены: '
+              '${owner.fullName} (${owner.username}).',
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -379,7 +399,9 @@ class _SyncScreenState extends State<SyncScreen> {
       statusMessage = 'Отправка полной копии телефона…';
     });
     try {
-      final counts = await service().replaceServerFromPhone();
+      final counts = await service().replaceServerFromPhone(
+        ownerUserId: owner.userId,
+      );
       if (!mounted) return;
       setState(() {
         statusMessage =
@@ -387,6 +409,104 @@ class _SyncScreenState extends State<SyncScreen> {
             'подключений ${counts['connection'] ?? 0}, '
             'складских операций ${counts['inventory_transaction'] ?? 0}.';
       });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<ServerMember?> selectSnapshotOwner() async {
+    try {
+      final members = await service().members();
+      if (!mounted) return null;
+      final ordered = [...members]
+        ..sort((left, right) {
+          final leftPriority = left.role == 'installer' ? 0 : 1;
+          final rightPriority = right.role == 'installer' ? 0 : 1;
+          return leftPriority != rightPriority
+              ? leftPriority.compareTo(rightPriority)
+              : left.fullName.compareTo(right.fullName);
+        });
+      return showDialog<ServerMember>(
+        context: context,
+        builder: (dialogContext) => SimpleDialog(
+          title: const Text('Кому принадлежат данные?'),
+          children: [
+            for (final member in ordered)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(dialogContext, member),
+                child: ListTile(
+                  leading: Icon(
+                    member.role == 'installer'
+                        ? Icons.engineering_outlined
+                        : Icons.person_outline,
+                  ),
+                  title: Text(member.fullName),
+                  subtitle: Text(
+                    '${member.username} · ${roleLabel(member.role)}',
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+      return null;
+    }
+  }
+
+  Future<void> reassignSnapshotOwner() async {
+    final owner = await selectSnapshotOwner();
+    if (owner == null || !mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Назначить все восстановленные операции?'),
+        content: Text(
+          'Подключения, допработы, расходы, складские и финансовые операции '
+          'будут назначены пользователю ${owner.fullName} (${owner.username}).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Назначить'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true) return;
+    setState(() {
+      busy = true;
+      statusMessage = 'Переназначение операций…';
+    });
+    try {
+      final result = await service().reassignSnapshotOwner(owner.userId);
+      if (!mounted) return;
+      final counts = Map<String, Object?>.from(result['counts']! as Map);
+      setState(() {
+        statusMessage =
+            'Данные назначены ${owner.fullName}: подключений '
+            '${counts['connection'] ?? 0}, складских операций '
+            '${counts['inventory_transaction'] ?? 0}, финансовых операций '
+            '${counts['finance_transaction'] ?? 0}.';
+      });
+      widget.onChanged();
     } catch (error) {
       if (mounted) {
         setState(
