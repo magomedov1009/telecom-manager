@@ -288,6 +288,39 @@ void main() {
       contains('Удалённый склад'),
     );
     expect(await repository.syncCursor(), 2);
+
+    await repository.applyRemoteChanges([
+      {
+        'entity_type': 'provider',
+        'entity_id': 'provider-remote',
+        'operation': 'upsert',
+        'version': 2,
+        'payload': {
+          'id': 'provider-remote',
+          'organization_id': 'server-org',
+          'name': 'Обновлённый провайдер',
+          'is_active': 1,
+          'created_at': now,
+          'updated_at': now,
+          'version': 2,
+          'sync_state': 'synced',
+        },
+      },
+    ], 3);
+
+    expect(
+      (await repository.providerCatalog())
+          .singleWhere((item) => item.id == 'provider-remote')
+          .name,
+      'Обновлённый провайдер',
+    );
+    expect(
+      (await repository.warehouses())
+          .singleWhere((item) => item.id == 'warehouse-remote')
+          .name,
+      'Удалённый склад',
+    );
+    expect(await repository.syncCursor(), 3);
     await database.close();
   });
 

@@ -4481,11 +4481,27 @@ class LocalRepository {
             whereArgs: [entityId],
           );
         } else {
-          await transaction.insert(
+          final existing = await transaction.query(
             table,
-            payload,
-            conflictAlgorithm: ConflictAlgorithm.replace,
+            columns: ['id'],
+            where: 'id = ?',
+            whereArgs: [entityId],
+            limit: 1,
           );
+          if (existing.isEmpty) {
+            await transaction.insert(table, payload);
+          } else {
+            // SQLite's INSERT OR REPLACE deletes the old parent row first.
+            // That breaks foreign keys as soon as warehouses, clients or
+            // operations already reference the row. A real UPDATE preserves
+            // the row identity and all dependent data.
+            await transaction.update(
+              table,
+              payload,
+              where: 'id = ?',
+              whereArgs: [entityId],
+            );
+          }
         }
       }
       await transaction.insert('app_settings', {
