@@ -4467,6 +4467,12 @@ class LocalRepository {
           continue;
         }
         final payload = Map<String, Object?>.from(change['payload']! as Map);
+        // The sync envelope is the authoritative mobile identity. Website rows
+        // use different numeric primary keys, so payload.id must never rename a
+        // local parent row and invalidate its foreign-key references.
+        if (payload.containsKey('id')) {
+          payload['id'] = entityId;
+        }
         if (payload.containsKey('organization_id')) {
           payload['organization_id'] = orgId;
         }

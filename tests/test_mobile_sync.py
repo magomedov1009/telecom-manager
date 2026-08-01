@@ -503,6 +503,10 @@ class MobileSyncTest(unittest.TestCase):
             website_client_changes[0].payload["address"],
             "Changed on website",
         )
+        self.assertEqual(
+            website_client_changes[0].payload["id"],
+            ids["client"],
+        )
         stable_page = pull(
             self.db,
             self.token,

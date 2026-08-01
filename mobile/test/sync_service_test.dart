@@ -296,7 +296,9 @@ void main() {
         'operation': 'upsert',
         'version': 2,
         'payload': {
-          'id': 'provider-remote',
+          // Website and mobile IDs intentionally differ. The local primary key
+          // must remain the entity_id from the sync envelope.
+          'id': '99',
           'organization_id': 'server-org',
           'name': 'Обновлённый провайдер',
           'is_active': 1,
@@ -313,6 +315,10 @@ void main() {
           .singleWhere((item) => item.id == 'provider-remote')
           .name,
       'Обновлённый провайдер',
+    );
+    expect(
+      (await repository.providerCatalog()).where((item) => item.id == '99'),
+      isEmpty,
     );
     expect(
       (await repository.warehouses())

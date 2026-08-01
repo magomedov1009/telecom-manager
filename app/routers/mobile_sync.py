@@ -314,6 +314,7 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                 )
             )
             if record is None:
+                payload["id"] = str(item.id)
                 record = MobileSyncRecord(
                     organization_id=organization_id,
                     entity_type=entity_type,
@@ -324,9 +325,12 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                 )
                 db.add(record)
                 db.flush()
-            elif record.payload == payload and record.site_id == item.id:
-                continue
             else:
+                # Keep the phone UUID stable. The website table has its own
+                # numeric primary key stored separately in record.site_id.
+                payload["id"] = record.entity_id
+                if record.payload == payload and record.site_id == item.id:
+                    continue
                 record.payload = payload
                 record.site_id = item.id
                 record.version += 1
