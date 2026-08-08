@@ -52,7 +52,8 @@ class AppUpdateService {
     Map<String, Object?>? apk;
     for (final raw in assets) {
       final asset = Map<String, Object?>.from(raw as Map);
-      if (asset['name'] == 'app-release.apk') {
+      final name = (asset['name'] as String? ?? '').toLowerCase();
+      if (name.endsWith('.apk')) {
         apk = asset;
         break;
       }
