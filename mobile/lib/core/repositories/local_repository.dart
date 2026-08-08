@@ -511,7 +511,8 @@ class ProviderManagementReport {
     required this.installerIncome,
     required this.installerPaidExpenses,
     required this.unpaidExtraWorks,
-    required this.balance,
+    required this.officeOwesInstaller,
+    required this.installerOwesOffice,
     required this.materials,
   });
 
@@ -523,12 +524,11 @@ class ProviderManagementReport {
   final double installerIncome;
   final double installerPaidExpenses;
   final double unpaidExtraWorks;
-  final double balance;
+  final double officeOwesInstaller;
+  final double installerOwesOffice;
   final List<ManagementMaterialItem> materials;
 
   double get officeResult => officeIncome - installerPaidExpenses;
-  double get officeOwesInstaller => balance > 0 ? balance : 0;
-  double get installerOwesOffice => balance < 0 ? -balance : 0;
 }
 
 class SyncQueueItem {
@@ -2085,45 +2085,59 @@ class LocalRepository {
         installerIncome += connection.installerAmount;
       }
 
-      Future<double> expenseSum({required bool cumulative}) async {
-        final rows = await db.rawQuery(
-          '''
-          SELECT COALESCE(SUM(amount), 0) amount FROM expenses
-          WHERE organization_id = ? AND provider_id = ?
-            AND paid_by = 'INSTALLER' AND deleted_at IS NULL
-            ${!cumulative && fromDate != null ? 'AND expense_date >= ?' : ''}
-            ${toDate != null ? 'AND expense_date <= ?' : ''}
-          ''',
-          [orgId, provider.id, if (!cumulative) ?fromDate, ?toDate],
-        );
-        return (rows.single['amount']! as num).toDouble();
-      }
-
-      final installerPaidExpenses = await expenseSum(cumulative: false);
-      final debtExpenses = await expenseSum(cumulative: true);
-      final extraWorkInstaller = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' "
-        'AND amount > 0 THEN amount ELSE 0 END',
-      );
-      final paidFromOffice = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
-      );
-      final unpaidExtraWorks = (extraWorkInstaller - paidFromOffice)
-          .clamp(0, double.infinity)
-          .toDouble();
-      final cumulativeExtraWork = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' "
-        'AND amount > 0 THEN amount ELSE 0 END',
-        cumulative: true,
+      // Office reimbursements settle the oldest installer claims first. Keep
+      // this ledger separate from money the installer has to transfer to the
+      // office; otherwise an office reimbursement can create a false reverse
+      // debt.
+      final claimRows = await db.rawQuery(
+        '''
+        SELECT 'EXPENSE' claim_type, expense_date claim_date, amount
+        FROM expenses
+        WHERE organization_id = ? AND provider_id = ?
+          AND paid_by = 'INSTALLER' AND deleted_at IS NULL
+          ${toDate != null ? 'AND expense_date <= ?' : ''}
+        UNION ALL
+        SELECT 'EXTRA_WORK' claim_type, substr(occurred_at, 1, 10) claim_date,
+               amount
+        FROM finance_transactions
+        WHERE organization_id = ? AND provider_id = ? AND deleted_at IS NULL
+          AND transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER'
+          AND amount > 0
+          ${toExclusive != null ? 'AND occurred_at < ?' : ''}
+        ORDER BY claim_date
+        ''',
+        [orgId, provider.id, ?toDate, orgId, provider.id, ?toExclusive],
       );
       final cumulativePaidFromOffice = await financeSum(
         provider.id,
         "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
         cumulative: true,
       );
+      var paymentRemainder = cumulativePaidFromOffice;
+      var installerPaidExpenses = 0.0;
+      var unpaidExtraWorks = 0.0;
+      var totalInstallerClaims = 0.0;
+      for (final claim in claimRows) {
+        final amount = (claim['amount']! as num).toDouble();
+        totalInstallerClaims += amount;
+        final paid = paymentRemainder.clamp(0, amount).toDouble();
+        paymentRemainder -= paid;
+        final unpaid = amount - paid;
+        final claimDate = claim['claim_date']! as String;
+        final inSelectedPeriod =
+            (fromDate == null || claimDate.compareTo(fromDate) >= 0) &&
+            (toDate == null || claimDate.compareTo(toDate) <= 0);
+        if (!inSelectedPeriod) continue;
+        if (claim['claim_type'] == 'EXPENSE') {
+          installerPaidExpenses += unpaid;
+        } else {
+          unpaidExtraWorks += unpaid;
+        }
+      }
+      final officeOwesInstaller =
+          (totalInstallerClaims - cumulativePaidFromOffice)
+              .clamp(0, double.infinity)
+              .toDouble();
       final cumulativeOfficeIncome = await financeSum(
         provider.id,
         "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' "
@@ -2135,18 +2149,10 @@ class LocalRepository {
         "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
         cumulative: true,
       );
-      final adjustments = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
-        cumulative: true,
-      );
-      final balance =
-          cumulativeExtraWork +
-          debtExpenses -
-          cumulativePaidFromOffice +
-          adjustments -
-          cumulativeOfficeIncome +
-          cumulativePaidToOffice;
+      final installerOwesOffice =
+          (cumulativeOfficeIncome - cumulativePaidToOffice)
+              .clamp(0, double.infinity)
+              .toDouble();
 
       final materialRows = await db.rawQuery(
         '''
@@ -2174,7 +2180,8 @@ class LocalRepository {
           installerIncome: installerIncome,
           installerPaidExpenses: installerPaidExpenses,
           unpaidExtraWorks: unpaidExtraWorks,
-          balance: balance,
+          officeOwesInstaller: officeOwesInstaller,
+          installerOwesOffice: installerOwesOffice,
           materials: materialRows
               .map(
                 (row) => ManagementMaterialItem(

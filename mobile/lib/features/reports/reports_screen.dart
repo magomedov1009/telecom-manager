@@ -241,7 +241,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           metric('Доход офиса', money(report.officeIncome)),
           metric('Доля монтажника', money(report.installerIncome), muted: true),
           metric(
-            'Расходы, оплаченные монтажником',
+            'Расходы, ещё не возмещённые офисом',
             '− ${money(report.installerPaidExpenses)}',
           ),
           metric(
@@ -262,14 +262,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
-          Text(
-            report.officeOwesInstaller > 0
-                ? 'Офис должен монтажнику ${money(report.officeOwesInstaller)}'
-                : report.installerOwesOffice > 0
-                ? 'Монтажник должен офису ${money(report.installerOwesOffice)}'
-                : 'Долгов нет',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
+          if (report.officeOwesInstaller == 0 &&
+              report.installerOwesOffice == 0)
+            const Text(
+              'Долгов нет',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          if (report.officeOwesInstaller > 0)
+            Text(
+              'Офис должен монтажнику ${money(report.officeOwesInstaller)}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          if (report.installerOwesOffice > 0)
+            Text(
+              'Монтажник должен офису ${money(report.installerOwesOffice)}',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
           const Divider(height: 28),
           Text(
             'Использовано материалов',
@@ -384,9 +392,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
       row('Стоимость подключений', report.connectionTotal);
       row('Доход офиса', report.officeIncome);
       row('Доля монтажника', report.installerIncome);
-      row('Расходы монтажника', report.installerPaidExpenses);
+      row('Расходы, не возмещённые офисом', report.installerPaidExpenses);
       row('Итог офиса', report.officeResult);
-      row('Баланс долга', report.balance);
+      row('Офис должен монтажнику', report.officeOwesInstaller);
+      row('Монтажник должен офису', report.installerOwesOffice);
       for (final material in report.materials) {
         row(
           'Материал: ${material.name} (${material.unitName})',

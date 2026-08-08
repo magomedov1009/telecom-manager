@@ -993,7 +993,26 @@ void main() {
     expect(management.installerPaidExpenses, 0);
     expect(management.officeResult, 500);
     expect(management.unpaidExtraWorks, 700);
-    expect(management.officeOwesInstaller, 200);
+    expect(management.officeOwesInstaller, 700);
+    expect(management.installerOwesOffice, 500);
+    await repository.addManualFinanceTransaction(
+      transactionType: 'PAYMENT_FROM_OFFICE',
+      amount: 700,
+      providerId: provider.id,
+    );
+    final db = await database.instance;
+    await db.rawUpdate(
+      "UPDATE finance_transactions SET occurred_at = '2026-07-31T12:00:00.000Z' "
+      "WHERE transaction_type = 'PAYMENT_FROM_OFFICE'",
+    );
+    final paidManagement = (await repository.providerManagementReports(
+      dateFrom: DateTime(2026, 7, 1),
+      dateTo: DateTime(2026, 7, 31),
+      providerId: provider.id,
+    )).single;
+    expect(paidManagement.unpaidExtraWorks, 0);
+    expect(paidManagement.officeOwesInstaller, 0);
+    expect(paidManagement.installerOwesOffice, 500);
     expect(
       await repository.reportDetails(
         section: 'connections',
@@ -1038,7 +1057,7 @@ void main() {
         dateTo: DateTime(2026, 7, 31),
         providerId: provider.id,
       ),
-      hasLength(4),
+      hasLength(5),
     );
   });
 
