@@ -271,22 +271,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
-          if (report.officeOwesInstaller == 0 &&
-              report.installerOwesOffice == 0)
-            const Text(
-              'Долгов нет',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          if (report.officeOwesInstaller > 0)
-            Text(
-              'Офис должен монтажнику ${money(report.officeOwesInstaller)}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          if (report.installerOwesOffice > 0)
-            Text(
-              'Монтажник должен офису ${money(report.installerOwesOffice)}',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+          Text(
+            settlementText(report),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
           const Divider(height: 28),
           Text(
             'Использовано материалов',
@@ -389,43 +377,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
     ),
   );
 
-  List<(String, String, String)> exportRows(
-    List<ProviderManagementReport> reports,
-  ) {
-    final rows = <(String, String, String)>[];
-    for (final report in reports) {
-      void row(String label, Object value) =>
-          rows.add((report.providerName, label, value.toString()));
-      row('Подключений', report.connections.length);
-      row('Стоимость подключений', report.connectionTotal);
-      row('Доход офиса', report.officeIncome);
-      row('Доля монтажника', report.installerIncome);
-      row('Расходы, не возмещённые офисом', report.installerPaidExpenses);
-      row('Итог офиса', report.officeResult);
-      row('Невыплаченные допработы', report.unpaidExtraWorks);
-      row('Офис должен монтажнику', report.officeOwesInstaller);
-      row('Монтажник должен офису', report.installerOwesOffice);
-      for (final material in report.materials) {
-        row(
-          'Материал: ${material.name} (${material.unitName})',
-          material.quantity,
-        );
-      }
-      for (final connection in report.connections) {
-        row(
-          'Подключение ${connection.login} ${shortDate(connection.date)}',
-          'Стоимость ${connection.price}; офис ${connection.officeAmount}; '
-              'монтажник ${connection.installerAmount}; ${connection.address}',
-        );
-      }
-    }
-    return rows;
+  String settlementText(ProviderManagementReport report) {
+    final net = report.installerOwesOffice - report.officeOwesInstaller;
+    if (net.abs() < 0.005) return 'Взаиморасчёт закрыт — долгов нет';
+    return net > 0
+        ? 'Итог: монтажник должен офису ${money(net)}'
+        : 'Итог: офис должен монтажнику ${money(-net)}';
   }
+
+  List<(String, String)> summaryRows(ProviderManagementReport report) => [
+    ('Подключений', report.connections.length.toString()),
+    ('Стоимость подключений', money(report.connectionTotal)),
+    ('Доход офиса', money(report.officeIncome)),
+    ('Доля монтажника', money(report.installerIncome)),
+    ('Расходы, не возмещённые офисом', money(report.installerPaidExpenses)),
+    ('Невыплаченные допработы', money(report.unpaidExtraWorks)),
+    ('Итог офиса за период', money(report.officeResult)),
+    ('Итоговый взаиморасчёт', settlementText(report)),
+  ];
 
   Future<void> export(String format) async {
     final reports = lastReports;
     if (reports == null) return;
-    final rows = exportRows(reports);
     final directory = await getTemporaryDirectory();
     final base =
         '${directory.path}/telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}';
@@ -435,17 +408,44 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final workbook = Excel.createExcel();
       final sheet = workbook['Отчёт'];
       workbook.delete('Sheet1');
-      sheet.appendRow([
-        TextCellValue('Провайдер'),
-        TextCellValue('Показатель'),
-        TextCellValue('Значение'),
-      ]);
-      for (final row in rows) {
+      for (final report in reports) {
+        sheet.appendRow([TextCellValue(report.providerName)]);
         sheet.appendRow([
-          TextCellValue(row.$1),
-          TextCellValue(row.$2),
-          TextCellValue(row.$3),
+          TextCellValue('Показатель'),
+          TextCellValue('Значение'),
         ]);
+        for (final row in summaryRows(report)) {
+          sheet.appendRow([TextCellValue(row.$1), TextCellValue(row.$2)]);
+        }
+        sheet.appendRow([TextCellValue('Использовано материалов')]);
+        for (final material in report.materials) {
+          sheet.appendRow([
+            TextCellValue(material.name),
+            TextCellValue(
+              '${quantity(material.quantity)} ${material.unitName}',
+            ),
+          ]);
+        }
+        sheet.appendRow([TextCellValue('Подключения')]);
+        sheet.appendRow([
+          TextCellValue('Дата / клиент'),
+          TextCellValue('Адрес'),
+          TextCellValue('Стоимость'),
+          TextCellValue('Офис'),
+          TextCellValue('Монтажник'),
+        ]);
+        for (final connection in report.connections) {
+          sheet.appendRow([
+            TextCellValue(
+              '${shortDate(connection.date)} · ${connection.login}',
+            ),
+            TextCellValue(connection.address),
+            DoubleCellValue(connection.price),
+            DoubleCellValue(connection.officeAmount),
+            DoubleCellValue(connection.installerAmount),
+          ]);
+        }
+        sheet.appendRow([]);
       }
       await file.writeAsBytes(workbook.encode()!);
     } else if (format == 'pdf') {
@@ -459,19 +459,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
               : pw.ThemeData.withFont(base: font, bold: font),
           build: (_) => [
             pw.Header(level: 0, text: 'Telecom Manager — отчёт'),
-            pw.TableHelper.fromTextArray(
-              headers: const ['Провайдер', 'Показатель', 'Значение'],
-              data: rows.map((row) => [row.$1, row.$2, row.$3]).toList(),
-            ),
+            ...reports.expand((report) => pdfProviderSection(report)),
           ],
         ),
       );
       await file.writeAsBytes(await document.save());
     } else {
       file = File('$base.csv');
-      final buffer = StringBuffer('\uFEFFПровайдер;Показатель;Значение\n');
-      for (final row in rows) {
-        buffer.writeln('${csv(row.$1)};${csv(row.$2)};${csv(row.$3)}');
+      final buffer = StringBuffer('\uFEFFОтчёт Telecom Manager\n');
+      for (final report in reports) {
+        buffer.writeln(csv(report.providerName));
+        buffer.writeln('Показатель;Значение');
+        for (final row in summaryRows(report)) {
+          buffer.writeln('${csv(row.$1)};${csv(row.$2)}');
+        }
+        buffer.writeln('Использовано материалов');
+        for (final material in report.materials) {
+          buffer.writeln(
+            '${csv(material.name)};${csv('${quantity(material.quantity)} ${material.unitName}')}',
+          );
+        }
+        buffer.writeln('Подключения');
+        buffer.writeln('Дата / клиент;Адрес;Стоимость;Офис;Монтажник');
+        for (final connection in report.connections) {
+          buffer.writeln(
+            '${csv('${shortDate(connection.date)} · ${connection.login}')};'
+            '${csv(connection.address)};${connection.price};'
+            '${connection.officeAmount};${connection.installerAmount}',
+          );
+        }
+        buffer.writeln();
       }
       await file.writeAsString(buffer.toString());
     }
@@ -479,6 +496,67 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ShareParams(files: [XFile(file.path)], text: 'Отчёт Telecom Manager'),
     );
   }
+
+  List<pw.Widget> pdfProviderSection(ProviderManagementReport report) => [
+    pw.Header(level: 1, text: report.providerName),
+    pw.TableHelper.fromTextArray(
+      headers: const ['Показатель', 'Значение'],
+      data: summaryRows(report).map((row) => [row.$1, row.$2]).toList(),
+      cellAlignment: pw.Alignment.centerLeft,
+    ),
+    pw.SizedBox(height: 14),
+    pw.Text(
+      'Использовано материалов',
+      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+    ),
+    pw.SizedBox(height: 5),
+    if (report.materials.isEmpty)
+      pw.Text('Материалы не списывались')
+    else
+      pw.TableHelper.fromTextArray(
+        headers: const ['Материал', 'Количество'],
+        data: report.materials
+            .map(
+              (item) => [
+                item.name,
+                '${quantity(item.quantity)} ${item.unitName}',
+              ],
+            )
+            .toList(),
+      ),
+    pw.SizedBox(height: 14),
+    pw.Text(
+      'Подключения',
+      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+    ),
+    pw.SizedBox(height: 5),
+    if (report.connections.isEmpty)
+      pw.Text('Подключений за период нет')
+    else
+      pw.TableHelper.fromTextArray(
+        headers: const [
+          'Дата / клиент',
+          'Адрес',
+          'Стоимость',
+          'Офис',
+          'Монтажник',
+        ],
+        data: report.connections
+            .map(
+              (item) => [
+                '${shortDate(item.date)}\n${item.login}',
+                item.address,
+                money(item.price),
+                money(item.officeAmount),
+                money(item.installerAmount),
+              ],
+            )
+            .toList(),
+        cellStyle: const pw.TextStyle(fontSize: 8),
+        headerStyle: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+      ),
+    pw.SizedBox(height: 24),
+  ];
 
   String csv(String value) => '"${value.replaceAll('"', '""')}"';
 
