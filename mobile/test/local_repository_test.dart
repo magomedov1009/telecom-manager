@@ -981,6 +981,19 @@ void main() {
     expect(report.income, 2200);
     expect(report.expenses, 200);
     expect(report.profit, 2000);
+    final management = (await repository.providerManagementReports(
+      dateFrom: DateTime(2026, 7, 1),
+      dateTo: DateTime(2026, 7, 31),
+      providerId: provider.id,
+    )).single;
+    expect(management.connections, hasLength(1));
+    expect(management.connectionTotal, 1500);
+    expect(management.officeIncome, 500);
+    expect(management.installerIncome, 1000);
+    expect(management.installerPaidExpenses, 0);
+    expect(management.officeResult, 500);
+    expect(management.unpaidExtraWorks, 700);
+    expect(management.officeOwesInstaller, 200);
     expect(
       await repository.reportDetails(
         section: 'connections',

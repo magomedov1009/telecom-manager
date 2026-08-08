@@ -1,35 +1,26 @@
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/repositories/local_repository.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key, required this.repository});
+
   final LocalRepository repository;
+
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
 }
 
 class _ReportsScreenState extends State<ReportsScreen> {
   String period = 'month';
-  String section = 'connections';
   String? providerId;
   DateTime? customFrom;
   DateTime? customTo;
-  final search = TextEditingController();
-  ReportSummary? lastSummary;
-
-  @override
-  void dispose() {
-    search.dispose();
-    super.dispose();
-  }
+  List<ProviderManagementReport>? lastReports;
 
   (DateTime?, DateTime?) dates() {
     final now = DateTime.now();
@@ -62,10 +53,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
         DateTime(now.year, now.month),
         DateTime(now.year, now.month, now.day),
       ),
+      'previous_month' => (
+        DateTime(now.year, now.month - 1),
+        DateTime(now.year, now.month, 0),
+      ),
       'custom' => (customFrom, customTo),
       _ => (null, null),
     };
   }
+
+  Future<List<ProviderManagementReport>> load() {
+    final range = dates();
+    return widget.repository.providerManagementReports(
+      dateFrom: range.$1,
+      dateTo: range.$2,
+      providerId: providerId,
+    );
+  }
+
+  String money(double value) => '${value.toStringAsFixed(2)} ₽';
+  String quantity(double value) => value == value.roundToDouble()
+      ? value.toInt().toString()
+      : value.toStringAsFixed(2);
+  String shortDate(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}';
 
   Future<void> selectCustomDate({required bool from}) async {
     final value = await showDatePicker(
@@ -90,42 +101,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
-  String shortDate(DateTime? value) => value == null
-      ? 'Выбрать'
-      : '${value.day.toString().padLeft(2, '0')}.'
-            '${value.month.toString().padLeft(2, '0')}.${value.year}';
-
-  Future<ReportSummary> load() {
-    final range = dates();
-    return widget.repository.reportSummary(
-      dateFrom: range.$1,
-      dateTo: range.$2,
-      providerId: providerId,
-    );
-  }
-
-  String money(double value) => '${value.toStringAsFixed(2)} ₽';
-
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Отчёты'),
+      title: const Text('Отчёт для руководителя'),
       actions: [
-        PopupMenuButton<String>(
-          enabled: lastSummary != null,
-          tooltip: 'Экспорт',
+        IconButton(
+          tooltip: 'Экспорт CSV',
+          onPressed: lastReports == null ? null : exportCsv,
           icon: const Icon(Icons.ios_share_outlined),
-          onSelected: export,
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'csv', child: Text('CSV')),
-            PopupMenuItem(value: 'xlsx', child: Text('Excel (.xlsx)')),
-            PopupMenuItem(value: 'pdf', child: Text('PDF')),
-          ],
         ),
       ],
     ),
     body: ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       children: [
         DropdownButtonFormField<String>(
           initialValue: period,
@@ -136,8 +125,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
           items: const [
             DropdownMenuItem(value: 'today', child: Text('Сегодня')),
             DropdownMenuItem(value: 'yesterday', child: Text('Вчера')),
-            DropdownMenuItem(value: 'week', child: Text('Неделя')),
-            DropdownMenuItem(value: 'month', child: Text('Месяц')),
+            DropdownMenuItem(value: 'week', child: Text('Текущая неделя')),
+            DropdownMenuItem(value: 'month', child: Text('Текущий месяц')),
+            DropdownMenuItem(
+              value: 'previous_month',
+              child: Text('Прошлый месяц'),
+            ),
             DropdownMenuItem(
               value: 'custom',
               child: Text('Произвольный период'),
@@ -146,7 +139,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ],
           onChanged: (value) => setState(() {
             period = value!;
-            if (period == 'custom' && customFrom == null && customTo == null) {
+            if (period == 'custom' && customFrom == null) {
               final now = DateTime.now();
               customFrom = DateTime(now.year, now.month, now.day);
               customTo = customFrom;
@@ -158,18 +151,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
           Row(
             children: [
               Expanded(
-                child: OutlinedButton.icon(
+                child: OutlinedButton(
                   onPressed: () => selectCustomDate(from: true),
-                  icon: const Icon(Icons.date_range_outlined),
-                  label: Text('С ${shortDate(customFrom)}'),
+                  child: Text(
+                    'С ${customFrom == null ? 'выбрать' : shortDate(customFrom!)}',
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: OutlinedButton.icon(
+                child: OutlinedButton(
                   onPressed: () => selectCustomDate(from: false),
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text('По ${shortDate(customTo)}'),
+                  child: Text(
+                    'По ${customTo == null ? 'выбрать' : shortDate(customTo!)}',
+                  ),
                 ),
               ),
             ],
@@ -200,243 +195,219 @@ class _ReportsScreenState extends State<ReportsScreen> {
             );
           },
         ),
-        const SizedBox(height: 18),
-        FutureBuilder<ReportSummary>(
+        const SizedBox(height: 16),
+        FutureBuilder<List<ProviderManagementReport>>(
           future: load(),
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text('Не удалось построить отчёт: ${snapshot.error}'),
+                ),
+              );
+            }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final data = snapshot.data!;
-            lastSummary = data;
-            return Column(
-              children: [
-                _row(
-                  'Подключения',
-                  '${data.connections} · ${money(data.connectionAmount)}',
-                ),
-                _row(
-                  'Дополнительные работы',
-                  '${data.extraWorks} · ${money(data.extraWorkAmount)}',
-                ),
-                _row('Общий доход', money(data.income)),
-                _row('Расходы', money(data.expenses)),
-                _row('Прибыль', money(data.profit), important: true),
-                _row('Списано материалов', data.materialSpent.toString()),
-              ],
-            );
-          },
-        ),
-        const SizedBox(height: 18),
-        TextField(
-          controller: search,
-          decoration: const InputDecoration(
-            labelText: 'Поиск в детализации',
-            hintText: 'Договор, адрес, материал или комментарий',
-            prefixIcon: Icon(Icons.search),
-            border: OutlineInputBorder(),
-          ),
-          onChanged: (_) => setState(() {}),
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: section,
-          decoration: const InputDecoration(
-            labelText: 'Детализация',
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem(value: 'providers', child: Text('Провайдеры')),
-            DropdownMenuItem(value: 'connections', child: Text('Подключения')),
-            DropdownMenuItem(value: 'works', child: Text('Допработы')),
-            DropdownMenuItem(value: 'expenses', child: Text('Расходы')),
-            DropdownMenuItem(
-              value: 'inventory',
-              child: Text('Складские списания'),
-            ),
-            DropdownMenuItem(
-              value: 'material_settlements',
-              child: Text('Долги материалов'),
-            ),
-            DropdownMenuItem(value: 'finance', child: Text('Финансы')),
-          ],
-          onChanged: (value) => setState(() => section = value!),
-        ),
-        const SizedBox(height: 10),
-        FutureBuilder<List<ReportDetailItem>>(
-          future: widget.repository.reportDetails(
-            section: section,
-            dateFrom: dates().$1,
-            dateTo: dates().$2,
-            providerId: providerId,
-            search: search.text,
-          ),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return const LinearProgressIndicator();
-            }
+            lastReports = snapshot.data!;
             if (snapshot.data!.isEmpty) {
-              return const Card(
-                child: ListTile(title: Text('Нет записей за период')),
-              );
+              return const Card(child: ListTile(title: Text('Нет данных')));
             }
-            return Column(
-              children: snapshot.data!
-                  .map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Card(
-                        child: ListTile(
-                          title: Text(item.title),
-                          subtitle: Text(item.subtitle),
-                          trailing: Text(
-                            item.value.toStringAsFixed(2),
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            );
+            return Column(children: snapshot.data!.map(providerCard).toList());
           },
         ),
       ],
     ),
   );
 
-  Widget _row(String label, String value, {bool important = false}) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Card(
-      color: important ? const Color(0xFFECFDF3) : null,
-      child: ListTile(
-        title: Text(label),
-        trailing: Text(
-          value,
-          style: TextStyle(
-            fontSize: important ? 19 : 16,
-            fontWeight: FontWeight.w800,
+  Widget providerCard(ProviderManagementReport report) => Card(
+    margin: const EdgeInsets.only(bottom: 16),
+    clipBehavior: Clip.antiAlias,
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            report.providerName,
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
-        ),
+          const SizedBox(height: 12),
+          metric('Подключений за период', report.connections.length.toString()),
+          metric('Стоимость подключений', money(report.connectionTotal)),
+          metric('Доход офиса', money(report.officeIncome)),
+          metric('Доля монтажника', money(report.installerIncome), muted: true),
+          metric(
+            'Расходы, оплаченные монтажником',
+            '− ${money(report.installerPaidExpenses)}',
+          ),
+          metric(
+            'Итог офиса за период',
+            money(report.officeResult),
+            important: true,
+          ),
+          if (report.unpaidExtraWorks > 0)
+            metric(
+              'Невыплаченные допработы за период',
+              money(report.unpaidExtraWorks),
+            ),
+          const Divider(height: 28),
+          Text(
+            'Кто кому должен',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            report.officeOwesInstaller > 0
+                ? 'Офис должен монтажнику ${money(report.officeOwesInstaller)}'
+                : report.installerOwesOffice > 0
+                ? 'Монтажник должен офису ${money(report.installerOwesOffice)}'
+                : 'Долгов нет',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          const Divider(height: 28),
+          Text(
+            'Использовано материалов',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          if (report.materials.isEmpty) const Text('Материалы не списывались'),
+          ...report.materials.map(
+            (item) => ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: Text(item.name),
+              trailing: Text(
+                '${quantity(item.quantity)} ${item.unitName}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+          const Divider(height: 28),
+          Text(
+            'Подключения',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          if (report.connections.isEmpty)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text('Подключений за период нет'),
+            ),
+          ...report.connections.map(connectionCard),
+        ],
       ),
     ),
   );
 
-  Future<void> export(String format) async {
-    final data = lastSummary!;
-    final range = dates();
-    final details = await widget.repository.reportDetails(
-      section: section,
-      dateFrom: range.$1,
-      dateTo: range.$2,
-      providerId: providerId,
-      search: search.text,
-    );
-    final directory = await getTemporaryDirectory();
-    final baseName =
-        'telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}';
-    late final File file;
-    if (format == 'xlsx') {
-      file = File('${directory.path}/$baseName.xlsx');
-      final workbook = Excel.createExcel();
-      final sheet = workbook['Отчёт'];
-      workbook.delete('Sheet1');
-      sheet.appendRow([TextCellValue('Показатель'), TextCellValue('Значение')]);
-      for (final row in _summaryRows(data)) {
-        sheet.appendRow([TextCellValue(row.$1), TextCellValue(row.$2)]);
-      }
-      sheet.appendRow([]);
-      sheet.appendRow([
-        TextCellValue('Название'),
-        TextCellValue('Описание'),
-        TextCellValue('Значение'),
-      ]);
-      for (final item in details) {
-        sheet.appendRow([
-          TextCellValue(item.title),
-          TextCellValue(item.subtitle),
-          DoubleCellValue(item.value),
-        ]);
-      }
-      await file.writeAsBytes(workbook.encode()!);
-    } else if (format == 'pdf') {
-      file = File('${directory.path}/$baseName.pdf');
-      final document = pw.Document();
-      final font = await _loadPdfFont();
-      document.addPage(
-        pw.MultiPage(
-          theme: font == null
-              ? null
-              : pw.ThemeData.withFont(base: font, bold: font),
-          build: (_) => [
-            pw.Header(level: 0, text: 'Telecom Manager — отчёт'),
-            pw.TableHelper.fromTextArray(
-              headers: const ['Показатель', 'Значение'],
-              data: _summaryRows(data).map((row) => [row.$1, row.$2]).toList(),
-            ),
-            pw.SizedBox(height: 18),
-            pw.Header(level: 1, text: 'Детализация'),
-            pw.TableHelper.fromTextArray(
-              headers: const ['Название', 'Описание', 'Значение'],
-              data: details
-                  .map(
-                    (item) => [
-                      item.title,
-                      item.subtitle,
-                      item.value.toStringAsFixed(2),
-                    ],
-                  )
-                  .toList(),
-            ),
-          ],
+  Widget connectionCard(ManagementConnectionItem item) => Container(
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${item.login.isEmpty ? 'Без логина' : item.login} · ${shortDate(item.date)}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
+        if (item.address.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(item.address),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: 3),
+          child: Text(item.connectionType),
+        ),
+        const SizedBox(height: 7),
+        Text('Стоимость: ${money(item.price)}'),
+        Text(
+          'Офису: ${money(item.officeAmount)} · Монтажнику: ${money(item.installerAmount)}',
+        ),
+      ],
+    ),
+  );
+
+  Widget metric(
+    String label,
+    String value, {
+    bool important = false,
+    bool muted = false,
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 7),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: muted
+                  ? Theme.of(context).colorScheme.onSurfaceVariant
+                  : null,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: important ? 17 : 14,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> exportCsv() async {
+    final reports = lastReports;
+    if (reports == null) return;
+    final buffer = StringBuffer('\uFEFFПровайдер;Показатель;Значение\n');
+    for (final report in reports) {
+      void row(String label, Object value) => buffer.writeln(
+        '${csv(report.providerName)};${csv(label)};${csv(value.toString())}',
       );
-      await file.writeAsBytes(await document.save());
-    } else {
-      file = File('${directory.path}/$baseName.csv');
-      final buffer = StringBuffer('\uFEFFПоказатель;Значение\n');
-      for (final row in _summaryRows(data)) {
-        buffer.writeln('${_csv(row.$1)};${_csv(row.$2)}');
-      }
-      buffer.writeln();
-      buffer.writeln('Название;Описание;Значение');
-      for (final item in details) {
-        buffer.writeln(
-          '${_csv(item.title)};${_csv(item.subtitle)};${item.value}',
+      row('Подключений', report.connections.length);
+      row('Стоимость подключений', report.connectionTotal);
+      row('Доход офиса', report.officeIncome);
+      row('Доля монтажника', report.installerIncome);
+      row('Расходы монтажника', report.installerPaidExpenses);
+      row('Итог офиса', report.officeResult);
+      row('Баланс долга', report.balance);
+      for (final material in report.materials) {
+        row(
+          'Материал: ${material.name} (${material.unitName})',
+          material.quantity,
         );
       }
-      await file.writeAsString(buffer.toString());
+      for (final connection in report.connections) {
+        buffer.writeln(
+          '${csv(report.providerName)};${csv('Подключение ${connection.login} ${shortDate(connection.date)}')};${csv('Всего ${connection.price}, офис ${connection.officeAmount}, монтажник ${connection.installerAmount}')}',
+        );
+      }
     }
+    final directory = await getTemporaryDirectory();
+    final file = File(
+      '${directory.path}/telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}.csv',
+    );
+    await file.writeAsString(buffer.toString());
     await SharePlus.instance.share(
       ShareParams(files: [XFile(file.path)], text: 'Отчёт Telecom Manager'),
     );
   }
 
-  List<(String, String)> _summaryRows(ReportSummary data) => [
-    ('Подключения', data.connections.toString()),
-    ('Сумма подключений', data.connectionAmount.toStringAsFixed(2)),
-    ('Допработы', data.extraWorks.toString()),
-    ('Сумма допработ', data.extraWorkAmount.toStringAsFixed(2)),
-    ('Общий доход', data.income.toStringAsFixed(2)),
-    ('Расходы', data.expenses.toStringAsFixed(2)),
-    ('Прибыль', data.profit.toStringAsFixed(2)),
-    ('Списано материалов', data.materialSpent.toString()),
-  ];
-
-  String _csv(String value) => '"${value.replaceAll('"', '""')}"';
-
-  Future<pw.Font?> _loadPdfFont() async {
-    const candidates = [
-      '/system/fonts/Roboto-Regular.ttf',
-      '/system/fonts/NotoSans-Regular.ttf',
-      r'C:\Windows\Fonts\arial.ttf',
-    ];
-    for (final path in candidates) {
-      final file = File(path);
-      if (!await file.exists()) continue;
-      final bytes = await file.readAsBytes();
-      return pw.Font.ttf(ByteData.sublistView(Uint8List.fromList(bytes)));
-    }
-    return null;
-  }
+  String csv(String value) => '"${value.replaceAll('"', '""')}"';
 }

@@ -469,6 +469,68 @@ class ReportDetailItem {
   final double value;
 }
 
+class ManagementConnectionItem {
+  const ManagementConnectionItem({
+    required this.date,
+    required this.login,
+    required this.address,
+    required this.connectionType,
+    required this.price,
+    required this.officeAmount,
+    required this.installerAmount,
+  });
+
+  final DateTime date;
+  final String login;
+  final String address;
+  final String connectionType;
+  final double price;
+  final double officeAmount;
+  final double installerAmount;
+}
+
+class ManagementMaterialItem {
+  const ManagementMaterialItem({
+    required this.name,
+    required this.unitName,
+    required this.quantity,
+  });
+
+  final String name;
+  final String unitName;
+  final double quantity;
+}
+
+class ProviderManagementReport {
+  const ProviderManagementReport({
+    required this.providerId,
+    required this.providerName,
+    required this.connections,
+    required this.connectionTotal,
+    required this.officeIncome,
+    required this.installerIncome,
+    required this.installerPaidExpenses,
+    required this.unpaidExtraWorks,
+    required this.balance,
+    required this.materials,
+  });
+
+  final String providerId;
+  final String providerName;
+  final List<ManagementConnectionItem> connections;
+  final double connectionTotal;
+  final double officeIncome;
+  final double installerIncome;
+  final double installerPaidExpenses;
+  final double unpaidExtraWorks;
+  final double balance;
+  final List<ManagementMaterialItem> materials;
+
+  double get officeResult => officeIncome - installerPaidExpenses;
+  double get officeOwesInstaller => balance > 0 ? balance : 0;
+  double get installerOwesOffice => balance < 0 ? -balance : 0;
+}
+
 class SyncQueueItem {
   const SyncQueueItem({
     required this.entityType,
@@ -1937,6 +1999,195 @@ class LocalRepository {
       expenses: (expenseRows['amount']! as num).toDouble(),
       materialSpent: (materialRows.single['amount']! as num).toDouble(),
     );
+  }
+
+  Future<List<ProviderManagementReport>> providerManagementReports({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? providerId,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final fromDate = dateFrom?.toIso8601String().substring(0, 10);
+    final toDate = dateTo?.toIso8601String().substring(0, 10);
+    final fromTime = dateFrom == null
+        ? null
+        : DateTime(
+            dateFrom.year,
+            dateFrom.month,
+            dateFrom.day,
+          ).toUtc().toIso8601String();
+    final toExclusive = dateTo == null
+        ? null
+        : DateTime(
+            dateTo.year,
+            dateTo.month,
+            dateTo.day + 1,
+          ).toUtc().toIso8601String();
+    final selectedProviders = (await providers())
+        .where((provider) => providerId == null || provider.id == providerId)
+        .toList();
+    final result = <ProviderManagementReport>[];
+
+    Future<double> financeSum(
+      String selectedProviderId,
+      String expression, {
+      bool cumulative = false,
+    }) async {
+      final rows = await db.rawQuery(
+        '''
+        SELECT COALESCE(SUM($expression), 0) amount
+        FROM finance_transactions
+        WHERE organization_id = ? AND provider_id = ? AND deleted_at IS NULL
+          ${!cumulative && fromTime != null ? 'AND occurred_at >= ?' : ''}
+          ${toExclusive != null ? 'AND occurred_at < ?' : ''}
+        ''',
+        [orgId, selectedProviderId, if (!cumulative) ?fromTime, ?toExclusive],
+      );
+      return (rows.single['amount']! as num).toDouble();
+    }
+
+    for (final provider in selectedProviders) {
+      final connectionRows = await db.rawQuery(
+        '''
+        SELECT connection.connection_date, connection.connection_type,
+               connection.price, connection.office_amount,
+               connection.installer_amount, client.login, client.address
+        FROM connections connection
+        JOIN clients client ON client.id = connection.client_id
+        WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+          AND client.deleted_at IS NULL AND client.provider_id = ?
+          ${fromDate != null ? 'AND connection.connection_date >= ?' : ''}
+          ${toDate != null ? 'AND connection.connection_date <= ?' : ''}
+        ORDER BY connection.connection_date DESC, connection.created_at DESC
+        ''',
+        [orgId, provider.id, ?fromDate, ?toDate],
+      );
+      final connections = connectionRows
+          .map(
+            (row) => ManagementConnectionItem(
+              date: DateTime.parse(row['connection_date']! as String),
+              login: (row['login'] as String?) ?? '',
+              address: (row['address'] as String?) ?? '',
+              connectionType: row['connection_type']! as String,
+              price: (row['price']! as num).toDouble(),
+              officeAmount: (row['office_amount']! as num).toDouble(),
+              installerAmount: (row['installer_amount']! as num).toDouble(),
+            ),
+          )
+          .toList();
+      double connectionTotal = 0;
+      double officeIncome = 0;
+      double installerIncome = 0;
+      for (final connection in connections) {
+        connectionTotal += connection.price;
+        officeIncome += connection.officeAmount;
+        installerIncome += connection.installerAmount;
+      }
+
+      Future<double> expenseSum({required bool cumulative}) async {
+        final rows = await db.rawQuery(
+          '''
+          SELECT COALESCE(SUM(amount), 0) amount FROM expenses
+          WHERE organization_id = ? AND provider_id = ?
+            AND paid_by = 'INSTALLER' AND deleted_at IS NULL
+            ${!cumulative && fromDate != null ? 'AND expense_date >= ?' : ''}
+            ${toDate != null ? 'AND expense_date <= ?' : ''}
+          ''',
+          [orgId, provider.id, if (!cumulative) ?fromDate, ?toDate],
+        );
+        return (rows.single['amount']! as num).toDouble();
+      }
+
+      final installerPaidExpenses = await expenseSum(cumulative: false);
+      final debtExpenses = await expenseSum(cumulative: true);
+      final extraWorkInstaller = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' "
+        'AND amount > 0 THEN amount ELSE 0 END',
+      );
+      final paidFromOffice = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
+      );
+      final unpaidExtraWorks = (extraWorkInstaller - paidFromOffice)
+          .clamp(0, double.infinity)
+          .toDouble();
+      final cumulativeExtraWork = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' "
+        'AND amount > 0 THEN amount ELSE 0 END',
+        cumulative: true,
+      );
+      final cumulativePaidFromOffice = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
+        cumulative: true,
+      );
+      final cumulativeOfficeIncome = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' "
+        'AND amount > 0 THEN amount ELSE 0 END',
+        cumulative: true,
+      );
+      final cumulativePaidToOffice = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
+        cumulative: true,
+      );
+      final adjustments = await financeSum(
+        provider.id,
+        "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
+        cumulative: true,
+      );
+      final balance =
+          cumulativeExtraWork +
+          debtExpenses -
+          cumulativePaidFromOffice +
+          adjustments -
+          cumulativeOfficeIncome +
+          cumulativePaidToOffice;
+
+      final materialRows = await db.rawQuery(
+        '''
+        SELECT material.name, material.unit_name,
+               COALESCE(SUM(ABS(movement.quantity)), 0) quantity
+        FROM inventory_transactions movement
+        JOIN materials material ON material.id = movement.material_id
+        WHERE movement.organization_id = ? AND movement.provider_id = ?
+          AND movement.deleted_at IS NULL AND movement.quantity < 0
+          AND movement.operation_type = 'CONNECTION'
+          ${fromTime != null ? 'AND movement.occurred_at >= ?' : ''}
+          ${toExclusive != null ? 'AND movement.occurred_at < ?' : ''}
+        GROUP BY material.id, material.name, material.unit_name
+        ORDER BY material.name
+        ''',
+        [orgId, provider.id, ?fromTime, ?toExclusive],
+      );
+      result.add(
+        ProviderManagementReport(
+          providerId: provider.id,
+          providerName: provider.name,
+          connections: connections,
+          connectionTotal: connectionTotal,
+          officeIncome: officeIncome,
+          installerIncome: installerIncome,
+          installerPaidExpenses: installerPaidExpenses,
+          unpaidExtraWorks: unpaidExtraWorks,
+          balance: balance,
+          materials: materialRows
+              .map(
+                (row) => ManagementMaterialItem(
+                  name: row['name']! as String,
+                  unitName: row['unit_name']! as String,
+                  quantity: (row['quantity']! as num).toDouble(),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
+    return result;
   }
 
   Future<List<ReportDetailItem>> reportDetails({
