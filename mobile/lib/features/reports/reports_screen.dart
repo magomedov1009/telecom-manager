@@ -1,7 +1,10 @@
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/repositories/local_repository.dart';
@@ -106,10 +109,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
     appBar: AppBar(
       title: const Text('Отчёт для руководителя'),
       actions: [
-        IconButton(
-          tooltip: 'Экспорт CSV',
-          onPressed: lastReports == null ? null : exportCsv,
+        PopupMenuButton<String>(
+          enabled: lastReports != null,
+          tooltip: 'Экспорт отчёта',
           icon: const Icon(Icons.ios_share_outlined),
+          onSelected: export,
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'pdf', child: Text('PDF')),
+            PopupMenuItem(value: 'xlsx', child: Text('Excel (.xlsx)')),
+            PopupMenuItem(value: 'csv', child: Text('CSV')),
+          ],
         ),
       ],
     ),
@@ -380,20 +389,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
     ),
   );
 
-  Future<void> exportCsv() async {
-    final reports = lastReports;
-    if (reports == null) return;
-    final buffer = StringBuffer('\uFEFFПровайдер;Показатель;Значение\n');
+  List<(String, String, String)> exportRows(
+    List<ProviderManagementReport> reports,
+  ) {
+    final rows = <(String, String, String)>[];
     for (final report in reports) {
-      void row(String label, Object value) => buffer.writeln(
-        '${csv(report.providerName)};${csv(label)};${csv(value.toString())}',
-      );
+      void row(String label, Object value) =>
+          rows.add((report.providerName, label, value.toString()));
       row('Подключений', report.connections.length);
       row('Стоимость подключений', report.connectionTotal);
       row('Доход офиса', report.officeIncome);
       row('Доля монтажника', report.installerIncome);
       row('Расходы, не возмещённые офисом', report.installerPaidExpenses);
       row('Итог офиса', report.officeResult);
+      row('Невыплаченные допработы', report.unpaidExtraWorks);
       row('Офис должен монтажнику', report.officeOwesInstaller);
       row('Монтажник должен офису', report.installerOwesOffice);
       for (final material in report.materials) {
@@ -403,20 +412,88 @@ class _ReportsScreenState extends State<ReportsScreen> {
         );
       }
       for (final connection in report.connections) {
-        buffer.writeln(
-          '${csv(report.providerName)};${csv('Подключение ${connection.login} ${shortDate(connection.date)}')};${csv('Всего ${connection.price}, офис ${connection.officeAmount}, монтажник ${connection.installerAmount}')}',
+        row(
+          'Подключение ${connection.login} ${shortDate(connection.date)}',
+          'Стоимость ${connection.price}; офис ${connection.officeAmount}; '
+              'монтажник ${connection.installerAmount}; ${connection.address}',
         );
       }
     }
+    return rows;
+  }
+
+  Future<void> export(String format) async {
+    final reports = lastReports;
+    if (reports == null) return;
+    final rows = exportRows(reports);
     final directory = await getTemporaryDirectory();
-    final file = File(
-      '${directory.path}/telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}.csv',
-    );
-    await file.writeAsString(buffer.toString());
+    final base =
+        '${directory.path}/telecom-manager-report-${DateTime.now().millisecondsSinceEpoch}';
+    late final File file;
+    if (format == 'xlsx') {
+      file = File('$base.xlsx');
+      final workbook = Excel.createExcel();
+      final sheet = workbook['Отчёт'];
+      workbook.delete('Sheet1');
+      sheet.appendRow([
+        TextCellValue('Провайдер'),
+        TextCellValue('Показатель'),
+        TextCellValue('Значение'),
+      ]);
+      for (final row in rows) {
+        sheet.appendRow([
+          TextCellValue(row.$1),
+          TextCellValue(row.$2),
+          TextCellValue(row.$3),
+        ]);
+      }
+      await file.writeAsBytes(workbook.encode()!);
+    } else if (format == 'pdf') {
+      file = File('$base.pdf');
+      final document = pw.Document();
+      final font = await loadPdfFont();
+      document.addPage(
+        pw.MultiPage(
+          theme: font == null
+              ? null
+              : pw.ThemeData.withFont(base: font, bold: font),
+          build: (_) => [
+            pw.Header(level: 0, text: 'Telecom Manager — отчёт'),
+            pw.TableHelper.fromTextArray(
+              headers: const ['Провайдер', 'Показатель', 'Значение'],
+              data: rows.map((row) => [row.$1, row.$2, row.$3]).toList(),
+            ),
+          ],
+        ),
+      );
+      await file.writeAsBytes(await document.save());
+    } else {
+      file = File('$base.csv');
+      final buffer = StringBuffer('\uFEFFПровайдер;Показатель;Значение\n');
+      for (final row in rows) {
+        buffer.writeln('${csv(row.$1)};${csv(row.$2)};${csv(row.$3)}');
+      }
+      await file.writeAsString(buffer.toString());
+    }
     await SharePlus.instance.share(
       ShareParams(files: [XFile(file.path)], text: 'Отчёт Telecom Manager'),
     );
   }
 
   String csv(String value) => '"${value.replaceAll('"', '""')}"';
+
+  Future<pw.Font?> loadPdfFont() async {
+    const candidates = [
+      '/system/fonts/Roboto-Regular.ttf',
+      '/system/fonts/NotoSans-Regular.ttf',
+      r'C:\Windows\Fonts\arial.ttf',
+    ];
+    for (final path in candidates) {
+      final file = File(path);
+      if (!await file.exists()) continue;
+      final bytes = await file.readAsBytes();
+      return pw.Font.ttf(ByteData.sublistView(Uint8List.fromList(bytes)));
+    }
+    return null;
+  }
 }
