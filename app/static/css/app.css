@@ -108,6 +108,20 @@ body {
   font-weight: 800;
 }
 
+.tm-login-logo {
+  display: block;
+  width: 112px;
+  height: 112px;
+  object-fit: contain;
+}
+
+.tm-brand-logo {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  object-fit: contain;
+}
+
 .table thead th {
   color: #667085;
   font-size: 0.72rem;

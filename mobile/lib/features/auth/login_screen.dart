@@ -36,10 +36,13 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.router,
-                  size: 64,
-                  color: Theme.of(context).colorScheme.primary,
+                Center(
+                  child: Image.asset(
+                    'assets/branding/telecom-manager-logo.png',
+                    width: 112,
+                    height: 112,
+                    fit: BoxFit.contain,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const Text(

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
@@ -452,13 +453,30 @@ class _ReportsScreenState extends State<ReportsScreen> {
       file = File('$base.pdf');
       final document = pw.Document();
       final font = await loadPdfFont();
+      final logoData = await rootBundle.load(
+        'assets/branding/telecom-manager-logo.png',
+      );
+      final logo = pw.MemoryImage(logoData.buffer.asUint8List());
       document.addPage(
         pw.MultiPage(
           theme: font == null
               ? null
               : pw.ThemeData.withFont(base: font, bold: font),
           build: (_) => [
-            pw.Header(level: 0, text: 'Telecom Manager — отчёт'),
+            pw.Row(
+              children: [
+                pw.Image(logo, width: 42, height: 42),
+                pw.SizedBox(width: 12),
+                pw.Text(
+                  'Telecom Manager — отчёт',
+                  style: pw.TextStyle(
+                    fontSize: 22,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 12),
             ...reports.expand((report) => pdfProviderSection(report)),
           ],
         ),
