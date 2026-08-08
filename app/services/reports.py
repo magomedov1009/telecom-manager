@@ -27,6 +27,7 @@ PERIOD_LABELS = {
     "yesterday": "\u0412\u0447\u0435\u0440\u0430",
     "week": "\u041d\u0435\u0434\u0435\u043b\u044f",
     "month": "\u041c\u0435\u0441\u044f\u0446",
+    "previous_month": "\u041f\u0440\u0448\u043b\u044b\u0439 \u043c\u0435\u0441\u044f\u0446",
     "custom": "\u041f\u0440\u043e\u0438\u0437\u0432\u043e\u043b\u044c\u043d\u044b\u0439 \u043f\u0435\u0440\u0438\u043e\u0434",
 }
 
@@ -80,6 +81,9 @@ def resolve_period(period: str, date_from: date | None, date_to: date | None) ->
         start_date, end_date = today - timedelta(days=today.weekday()), today
     elif period == "month":
         start_date, end_date = today.replace(day=1), today
+    elif period == "previous_month":
+        end_date = today.replace(day=1) - timedelta(days=1)
+        start_date = end_date.replace(day=1)
     elif period == "custom":
         start_date, end_date = date_from or today, date_to or date_from or today
     else:
@@ -390,19 +394,124 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
     cards = []
     for provider in db.scalars(providers):
         finance = get_finance_stats(db, {"date_from": period["date_from"], "date_to": period["date_to"], "provider_id": provider.id}, scope.user if scope is not None else None)
-        income = income_summary(db, period, provider.id, scope)
-        inventory = inventory_summary(db, period, provider.id, scope)
+        provider_connections = list(
+            db.scalars(
+                apply_connection_search(
+                    connection_query(period, provider.id, scope),
+                    search,
+                ).order_by(Connection.connection_date, Connection.id)
+            )
+        )
+        connection_total = sum(
+            (item.price for item in provider_connections),
+            Decimal("0"),
+        )
+        office_total = sum(
+            (item.office_amount for item in provider_connections),
+            Decimal("0"),
+        )
+        installer_total = sum(
+            (item.installer_amount for item in provider_connections),
+            Decimal("0"),
+        )
+        unpaid_expense_query = select(
+            func.coalesce(func.sum(Expense.amount), 0)
+        ).where(
+            Expense.provider_id == provider.id,
+            Expense.paid_by == PaidBy.INSTALLER,
+        )
+        unpaid_expense_query = apply_user_scope(
+            apply_datetime_period(
+                unpaid_expense_query,
+                Expense.created_at,
+                period,
+            ),
+            Expense.user_id,
+            scope,
+        )
+        unpaid_expenses = decimal_scalar(db, unpaid_expense_query)
+
+        extra_work_query_total = select(
+            func.coalesce(func.sum(ExtraWork.installer_amount), 0)
+        ).where(ExtraWork.provider_id == provider.id)
+        extra_work_query_total = apply_user_scope(
+            apply_date_period(
+                extra_work_query_total,
+                ExtraWork.work_date,
+                period,
+            ),
+            ExtraWork.installer_id,
+            scope,
+        )
+        extra_work_accrued = decimal_scalar(db, extra_work_query_total)
+        paid_extra_query = select(
+            func.coalesce(func.sum(FinanceTransaction.amount), 0)
+        ).where(
+            FinanceTransaction.provider_id == provider.id,
+            FinanceTransaction.transaction_type
+            == FinanceTransactionType.PAYMENT_FROM_OFFICE,
+            FinanceTransaction.amount > 0,
+        )
+        paid_extra_query = apply_user_scope(
+            apply_datetime_period(
+                paid_extra_query,
+                FinanceTransaction.created_at,
+                period,
+            ),
+            FinanceTransaction.user_id,
+            scope,
+        )
+        paid_from_office = decimal_scalar(db, paid_extra_query)
+        unpaid_extra_works = max(
+            extra_work_accrued - paid_from_office,
+            Decimal("0"),
+        )
+
+        usage_query = (
+            select(
+                Material,
+                func.coalesce(
+                    func.sum(func.abs(InventoryTransaction.quantity)),
+                    0,
+                ).label("quantity"),
+            )
+            .join(Material, Material.id == InventoryTransaction.material_id)
+            .where(
+                InventoryTransaction.provider_id == provider.id,
+                InventoryTransaction.operation_type
+                == InventoryTransactionType.CONNECTION,
+            )
+            .group_by(Material.id)
+            .order_by(Material.item_type, Material.name)
+        )
+        usage_query = apply_user_scope(
+            apply_datetime_period(
+                usage_query,
+                InventoryTransaction.created_at,
+                period,
+            ),
+            InventoryTransaction.user_id,
+            scope,
+        )
+        material_usage = [
+            {
+                "material": material,
+                "quantity": Decimal(quantity),
+                "unit": get_unit_label(material),
+            }
+            for material, quantity in db.execute(usage_query)
+        ]
         cards.append({
             "provider": provider,
-            "connections": db.scalar(select(func.count()).select_from(apply_connection_search(connection_query(period, provider.id, scope), search).order_by(None).subquery())) or 0,
-            "extra_works": db.scalar(select(func.count()).select_from(apply_extra_work_search(extra_work_query(period, provider.id, scope), search).order_by(None).subquery())) or 0,
-            "connection_income": income["connections"],
-            "extra_work_income": income["extra_works"],
-            "total_income": income["total"],
-            "expenses": finance.expenses_total,
-            "profit": finance.profit,
-            "materials": inventory["materials"],
-            "equipment": inventory["equipment"],
+            "connections": len(provider_connections),
+            "connection_items": provider_connections,
+            "connection_total": connection_total,
+            "office_total": office_total,
+            "installer_total": installer_total,
+            "unpaid_expenses": unpaid_expenses,
+            "office_net": office_total - unpaid_expenses,
+            "unpaid_extra_works": unpaid_extra_works,
+            "material_usage": material_usage,
             "office_owes_me": finance.office_owes_me,
             "i_owe_office": finance.i_owe_office,
             "settlement_closed": finance.office_owes_me == 0 and finance.i_owe_office == 0,
@@ -510,8 +619,30 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
     if tab == "providers":
         rows = []
         for item in data["provider_cards"]:
-            rows.append([item["provider"].name, item["connections"], item["extra_works"], item["connection_income"], item["extra_work_income"], item["total_income"], item["expenses"], item["profit"], item["office_owes_me"], item["i_owe_office"]])
-        return "providers", ["\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440", "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f", "\u0414\u043e\u043f\u0440\u0430\u0431\u043e\u0442\u044b", "\u0414\u043e\u0445\u043e\u0434 \u043f\u043e\u0434\u043a\u043b.", "\u0414\u043e\u0445\u043e\u0434 \u0434\u043e\u043f\u0440.", "\u041e\u0431\u0449\u0438\u0439 \u0434\u043e\u0445\u043e\u0434", "\u0420\u0430\u0441\u0445\u043e\u0434\u044b", "\u041f\u0440\u0438\u0431\u044b\u043b\u044c", "\u041e\u0444\u0438\u0441 \u0434\u043e\u043b\u0436\u0435\u043d", "\u042f \u0434\u043e\u043b\u0436\u0435\u043d"], rows
+            rows.append([
+                item["provider"].name,
+                item["connections"],
+                item["connection_total"],
+                item["office_total"],
+                item["installer_total"],
+                item["unpaid_expenses"],
+                item["office_net"],
+                item["unpaid_extra_works"],
+                item["office_owes_me"],
+                item["i_owe_office"],
+            ])
+        return "providers", [
+            "Провайдер",
+            "Подключения",
+            "Сумма подключений",
+            "Доля офиса",
+            "Доля монтажника",
+            "Расходы не оплачены офисом",
+            "Доход офиса минус расходы",
+            "Допработы к выплате",
+            "Офис должен монтажнику",
+            "Монтажник должен офису",
+        ], rows
     if tab == "connections":
         rows = [[i.connection_date, i.client.provider.name, i.client.login or i.client.contract_number, i.client.address, CONNECTION_TYPE_LABELS.get(i.connection_type, i.connection_type.value), i.price, i.office_amount, i.installer_amount] for i in data["connections"].items]
         return "connections", ["\u0414\u0430\u0442\u0430", "\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440", "\u041b\u043e\u0433\u0438\u043d / \u0434\u043e\u0433\u043e\u0432\u043e\u0440", "\u0410\u0434\u0440\u0435\u0441", "\u0422\u0438\u043f", "\u0421\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c", "\u041e\u0444\u0438\u0441", "\u041c\u043e\u043d\u0442\u0430\u0436\u043d\u0438\u043a"], rows
