@@ -82,6 +82,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String shortDate(DateTime value) =>
       '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year}';
 
+  String reportPeriodLabel() {
+    final range = dates();
+    if (range.$1 == null && range.$2 == null) return 'Период: за всё время';
+    if (range.$1 == null) return 'Период: по ${shortDate(range.$2!)}';
+    if (range.$2 == null) return 'Период: с ${shortDate(range.$1!)}';
+    return 'Период: с ${shortDate(range.$1!)} по ${shortDate(range.$2!)}';
+  }
+
   Future<void> selectCustomDate({required bool from}) async {
     final value = await showDatePicker(
       context: context,
@@ -206,6 +214,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
           },
         ),
         const SizedBox(height: 16),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.date_range_outlined),
+            title: Text(
+              reportPeriodLabel(),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         FutureBuilder<List<ProviderManagementReport>>(
           future: load(),
           builder: (context, snapshot) {
@@ -450,6 +468,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final workbook = Excel.createExcel();
       final sheet = workbook['Отчёт'];
       workbook.delete('Sheet1');
+      sheet.appendRow([TextCellValue(reportPeriodLabel())]);
+      sheet.appendRow([]);
       sheet.appendRow([TextCellValue('ОБЩИЙ ИТОГ ПО ПРОВАЙДЕРАМ')]);
       for (final report in reports) {
         sheet.appendRow([TextCellValue(report.providerName)]);
@@ -524,6 +544,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
             pw.SizedBox(height: 12),
+            pw.Text(
+              reportPeriodLabel(),
+              style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 10),
             pw.Header(level: 1, text: 'Общий итог по провайдерам'),
             ...reports.expand((report) => pdfProviderSummary(report)),
             pw.NewPage(),
@@ -536,6 +561,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     } else {
       file = File('$base.csv');
       final buffer = StringBuffer('\uFEFFОтчёт Telecom Manager\n');
+      buffer.writeln(reportPeriodLabel());
+      buffer.writeln();
       buffer.writeln('ОБЩИЙ ИТОГ ПО ПРОВАЙДЕРАМ');
       for (final report in reports) {
         buffer.writeln(csv(report.providerName));
