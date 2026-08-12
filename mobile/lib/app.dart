@@ -128,6 +128,7 @@ class _AppShellState extends State<AppShell> {
       FinanceScreen(
         key: ValueKey('finance-$refreshKey'),
         repository: widget.repository,
+        role: widget.user.role,
         onChanged: refresh,
       ),
       WorksScreen(

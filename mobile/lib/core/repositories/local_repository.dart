@@ -345,18 +345,27 @@ class FinanceSummary {
 
 class FinanceJournalItem {
   const FinanceJournalItem({
+    required this.id,
     required this.type,
+    required this.providerId,
     required this.providerName,
     required this.amount,
     required this.comment,
     required this.occurredAt,
   });
 
+  final String id;
   final String type;
+  final String? providerId;
   final String? providerName;
   final double amount;
   final String? comment;
   final DateTime occurredAt;
+
+  bool get isManual =>
+      type == 'PAYMENT_TO_OFFICE' ||
+      type == 'PAYMENT_FROM_OFFICE' ||
+      type == 'ADJUSTMENT';
 }
 
 class ExpenseItem {
@@ -2116,10 +2125,8 @@ class LocalRepository {
       var paymentRemainder = cumulativePaidFromOffice;
       var installerPaidExpenses = 0.0;
       var unpaidExtraWorks = 0.0;
-      var totalInstallerClaims = 0.0;
       for (final claim in claimRows) {
         final amount = (claim['amount']! as num).toDouble();
-        totalInstallerClaims += amount;
         final paid = paymentRemainder.clamp(0, amount).toDouble();
         paymentRemainder -= paid;
         final unpaid = amount - paid;
@@ -2134,25 +2141,10 @@ class LocalRepository {
           unpaidExtraWorks += unpaid;
         }
       }
-      final officeOwesInstaller =
-          (totalInstallerClaims - cumulativePaidFromOffice)
-              .clamp(0, double.infinity)
-              .toDouble();
-      final cumulativeOfficeIncome = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' "
-        'AND amount > 0 THEN amount ELSE 0 END',
-        cumulative: true,
+      final sharedFinance = await financeSummary(
+        providerId: provider.id,
+        dateTo: dateTo,
       );
-      final cumulativePaidToOffice = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
-        cumulative: true,
-      );
-      final installerOwesOffice =
-          (cumulativeOfficeIncome - cumulativePaidToOffice)
-              .clamp(0, double.infinity)
-              .toDouble();
 
       final materialRows = await db.rawQuery(
         '''
@@ -2180,8 +2172,8 @@ class LocalRepository {
           installerIncome: installerIncome,
           installerPaidExpenses: installerPaidExpenses,
           unpaidExtraWorks: unpaidExtraWorks,
-          officeOwesInstaller: officeOwesInstaller,
-          installerOwesOffice: installerOwesOffice,
+          officeOwesInstaller: sharedFinance.officeOwesMe,
+          installerOwesOffice: sharedFinance.iOweOffice,
           materials: materialRows
               .map(
                 (row) => ManagementMaterialItem(
@@ -3483,25 +3475,26 @@ class LocalRepository {
     final paidToOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
     );
+    final useRunningBalance = dateFrom == null;
     final paidFromOfficeBalance = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
-      cumulative: true,
+      cumulative: useRunningBalance,
     );
     final paidToOfficeBalance = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
-      cumulative: true,
+      cumulative: useRunningBalance,
     );
     final adjustments = await sum(
       "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
-      cumulative: true,
+      cumulative: useRunningBalance,
     );
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
-      cumulative: true,
+      cumulative: useRunningBalance,
     );
     final officeAccruedBalance = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
-      cumulative: true,
+      cumulative: useRunningBalance,
     );
     final expenseFrom = dateFrom?.toIso8601String().substring(0, 10);
     final expenseTo = dateTo?.toIso8601String().substring(0, 10);
@@ -3541,6 +3534,7 @@ class LocalRepository {
       "paid_by = 'INSTALLER'",
       'deleted_at IS NULL',
       if (providerId != null) 'provider_id = ?',
+      if (!useRunningBalance && expenseFrom != null) 'expense_date >= ?',
       if (expenseTo != null) 'expense_date <= ?',
     ].join(' AND ');
     final debtExpenseRows = await db.rawQuery(
@@ -3548,7 +3542,7 @@ class LocalRepository {
       SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
       WHERE $debtExpenseWhere
       ''',
-      [orgId, ?providerId, ?expenseTo],
+      [orgId, ?providerId, if (!useRunningBalance) ?expenseFrom, ?expenseTo],
     );
     final debtInstallerExpenses = (debtExpenseRows.single['amount']! as num)
         .toDouble();
@@ -3601,7 +3595,8 @@ class LocalRepository {
           ).toUtc().toIso8601String();
     final rows = await db.rawQuery(
       '''
-      SELECT transaction_row.transaction_type, transaction_row.amount,
+      SELECT transaction_row.id, transaction_row.provider_id,
+             transaction_row.transaction_type, transaction_row.amount,
              transaction_row.comment, transaction_row.occurred_at,
              provider.name AS provider_name
       FROM finance_transactions transaction_row
@@ -3619,7 +3614,9 @@ class LocalRepository {
     final result = rows
         .map(
           (row) => FinanceJournalItem(
+            id: row['id']! as String,
             type: row['transaction_type']! as String,
+            providerId: row['provider_id'] as String?,
             providerName: row['provider_name'] as String?,
             amount: (row['amount']! as num).toDouble(),
             comment: row['comment'] as String?,
@@ -3643,7 +3640,7 @@ class LocalRepository {
   Future<void> addManualFinanceTransaction({
     required String transactionType,
     required double amount,
-    String? providerId,
+    required String providerId,
     String? comment,
   }) async {
     const allowed = {'PAYMENT_TO_OFFICE', 'PAYMENT_FROM_OFFICE', 'ADJUSTMENT'};
@@ -3681,6 +3678,96 @@ class LocalRepository {
         entityId: row['id']! as String,
         operation: 'upsert',
         payload: row,
+        now: now,
+      );
+    });
+  }
+
+  Future<void> updateManualFinanceTransaction({
+    required String transactionId,
+    required String transactionType,
+    required double amount,
+    required String providerId,
+    String? comment,
+  }) async {
+    const allowed = {'PAYMENT_TO_OFFICE', 'PAYMENT_FROM_OFFICE', 'ADJUSTMENT'};
+    if (!allowed.contains(transactionType) || amount <= 0) {
+      throw ArgumentError('Некорректная финансовая операция');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'finance_transactions',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [transactionId, orgId],
+      );
+      if (rows.isEmpty) throw StateError('Операция не найдена');
+      if (!allowed.contains(rows.single['transaction_type'])) {
+        throw StateError('Начисление изменяется через исходную запись');
+      }
+      final version = (rows.single['version']! as num).toInt() + 1;
+      final values = <String, Object?>{
+        'provider_id': providerId,
+        'transaction_type': transactionType,
+        'amount': transactionType == 'PAYMENT_TO_OFFICE' ? -amount : amount,
+        'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        'updated_at': now,
+        'version': version,
+        'sync_state': 'pending',
+      };
+      await transaction.update(
+        'finance_transactions',
+        values,
+        where: 'id = ?',
+        whereArgs: [transactionId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'finance_transaction',
+        entityId: transactionId,
+        operation: 'upsert',
+        payload: {...rows.single, ...values},
+        now: now,
+      );
+    });
+  }
+
+  Future<void> deleteManualFinanceTransaction(String transactionId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'finance_transactions',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [transactionId, orgId],
+      );
+      if (rows.isEmpty) throw StateError('Операция не найдена');
+      const allowed = {
+        'PAYMENT_TO_OFFICE',
+        'PAYMENT_FROM_OFFICE',
+        'ADJUSTMENT',
+      };
+      if (!allowed.contains(rows.single['transaction_type'])) {
+        throw StateError('Начисление удаляется вместе с исходной записью');
+      }
+      final deleted = {...rows.single, 'deleted_at': now, 'updated_at': now};
+      await transaction.update(
+        'finance_transactions',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ?',
+        whereArgs: [transactionId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'finance_transaction',
+        entityId: transactionId,
+        operation: 'delete',
+        payload: deleted,
         now: now,
       );
     });

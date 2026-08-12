@@ -6,10 +6,12 @@ class FinanceScreen extends StatefulWidget {
   const FinanceScreen({
     super.key,
     required this.repository,
+    required this.role,
     required this.onChanged,
   });
 
   final LocalRepository repository;
+  final String role;
   final VoidCallback onChanged;
 
   @override
@@ -413,18 +415,38 @@ class _FinanceScreenState extends State<FinanceScreen> {
                       title: Text(labels[item.type] ?? item.type),
                       subtitle: Text(
                         [
-                          if (item.providerName != null) item.providerName!,
+                          item.providerName ?? 'Провайдер не указан',
                           if (item.comment != null) item.comment!,
                         ].join(' · '),
                       ),
-                      trailing: Text(
-                        money(item.amount.abs()),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: item.amount < 0
-                              ? Colors.red.shade700
-                              : Colors.green.shade700,
-                        ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            money(item.amount.abs()),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: item.amount < 0
+                                  ? Colors.red.shade700
+                                  : Colors.green.shade700,
+                            ),
+                          ),
+                          if (widget.role == 'admin' && item.isManual)
+                            PopupMenuButton<String>(
+                              onSelected: (action) =>
+                                  handleManualAction(action, item),
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Изменить'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Удалить'),
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -448,6 +470,46 @@ class _FinanceScreenState extends State<FinanceScreen> {
         label: const Text('Операция'),
       ),
     );
+  }
+
+  Future<void> handleManualAction(
+    String action,
+    FinanceJournalItem item,
+  ) async {
+    if (action == 'edit') {
+      final saved = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => _FinanceOperationSheet(
+          repository: widget.repository,
+          existing: item,
+        ),
+      );
+      if (saved == true) reload();
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить операцию?'),
+        content: const Text(
+          'Она перестанет участвовать в балансе и удалится с сервера после синхронизации.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.repository.deleteManualFinanceTransaction(item.id);
+    reload();
   }
 }
 
@@ -479,9 +541,10 @@ class _FinanceMetric extends StatelessWidget {
 }
 
 class _FinanceOperationSheet extends StatefulWidget {
-  const _FinanceOperationSheet({required this.repository});
+  const _FinanceOperationSheet({required this.repository, this.existing});
 
   final LocalRepository repository;
+  final FinanceJournalItem? existing;
 
   @override
   State<_FinanceOperationSheet> createState() => _FinanceOperationSheetState();
@@ -506,6 +569,13 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
   void initState() {
     super.initState();
     providers = widget.repository.providers();
+    final existing = widget.existing;
+    if (existing != null) {
+      type = existing.type;
+      providerId = existing.providerId;
+      amount.text = existing.amount.abs().toString();
+      comment.text = existing.comment ?? '';
+    }
   }
 
   @override
@@ -562,10 +632,6 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
                     border: OutlineInputBorder(),
                   ),
                   items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('Без провайдера'),
-                    ),
                     ...snapshot.data!.map(
                       (item) => DropdownMenuItem<String?>(
                         value: item.id,
@@ -573,7 +639,7 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
                       ),
                     ),
                   ],
-                  onChanged: (value) => providerId = value,
+                  onChanged: (value) => setState(() => providerId = value),
                 );
               },
             ),
@@ -621,17 +687,31 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
       setState(() => error = 'Введите сумму больше нуля');
       return;
     }
+    if (providerId == null) {
+      setState(() => error = 'Выберите провайдера');
+      return;
+    }
     setState(() {
       saving = true;
       error = null;
     });
     try {
-      await widget.repository.addManualFinanceTransaction(
-        transactionType: type,
-        amount: value,
-        providerId: providerId,
-        comment: comment.text,
-      );
+      if (widget.existing == null) {
+        await widget.repository.addManualFinanceTransaction(
+          transactionType: type,
+          amount: value,
+          providerId: providerId!,
+          comment: comment.text,
+        );
+      } else {
+        await widget.repository.updateManualFinanceTransaction(
+          transactionId: widget.existing!.id,
+          transactionType: type,
+          amount: value,
+          providerId: providerId!,
+          comment: comment.text,
+        );
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (exception) {
       setState(() {

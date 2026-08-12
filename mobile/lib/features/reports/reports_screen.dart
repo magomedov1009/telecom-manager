@@ -224,14 +224,43 @@ class _ReportsScreenState extends State<ReportsScreen> {
             if (snapshot.data!.isEmpty) {
               return const Card(child: ListTile(title: Text('Нет данных')));
             }
-            return Column(children: snapshot.data!.map(providerCard).toList());
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Общий итог по провайдерам',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 10),
+                ...snapshot.data!.map(
+                  (report) => providerCard(report, summaryOnly: true),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Подключения по провайдерам',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 10),
+                ...snapshot.data!.map(
+                  (report) => providerCard(report, detailsOnly: true),
+                ),
+              ],
+            );
           },
         ),
       ],
     ),
   );
 
-  Widget providerCard(ProviderManagementReport report) => Card(
+  Widget providerCard(
+    ProviderManagementReport report, {
+    bool summaryOnly = false,
+    bool detailsOnly = false,
+  }) => Card(
     margin: const EdgeInsets.only(bottom: 16),
     clipBehavior: Clip.antiAlias,
     child: Padding(
@@ -245,70 +274,82 @@ class _ReportsScreenState extends State<ReportsScreen> {
               context,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 12),
-          metric('Подключений за период', report.connections.length.toString()),
-          metric('Стоимость подключений', money(report.connectionTotal)),
-          metric('Доход офиса', money(report.officeIncome)),
-          metric('Доля монтажника', money(report.installerIncome), muted: true),
-          metric(
-            'Расходы, ещё не возмещённые офисом',
-            '− ${money(report.installerPaidExpenses)}',
-          ),
-          metric(
-            'Итог офиса за период',
-            money(report.officeResult),
-            important: true,
-          ),
-          if (report.unpaidExtraWorks > 0)
+          if (!detailsOnly) ...[
+            const SizedBox(height: 12),
             metric(
-              'Невыплаченные допработы за период',
-              money(report.unpaidExtraWorks),
+              'Подключений за период',
+              report.connections.length.toString(),
             ),
-          const Divider(height: 28),
-          Text(
-            'Кто кому должен',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            settlementText(report),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-          const Divider(height: 28),
-          Text(
-            'Использовано материалов',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          if (report.materials.isEmpty) const Text('Материалы не списывались'),
-          ...report.materials.map(
-            (item) => ListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: Text(item.name),
-              trailing: Text(
-                '${quantity(item.quantity)} ${item.unitName}',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+            metric('Стоимость подключений', money(report.connectionTotal)),
+            metric('Доход офиса', money(report.officeIncome)),
+            metric(
+              'Доля монтажника',
+              money(report.installerIncome),
+              muted: true,
+            ),
+            metric(
+              'Расходы, ещё не возмещённые офисом',
+              '− ${money(report.installerPaidExpenses)}',
+            ),
+            metric(
+              'Итог офиса за период',
+              money(report.officeResult),
+              important: true,
+            ),
+            if (report.unpaidExtraWorks > 0)
+              metric(
+                'Невыплаченные допработы за период',
+                money(report.unpaidExtraWorks),
+              ),
+            const Divider(height: 28),
+            Text(
+              'Итог взаиморасчёта за выбранный период',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              settlementText(report),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ],
+          if (!summaryOnly) ...[
+            const Divider(height: 28),
+            Text(
+              'Использовано материалов',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            if (report.materials.isEmpty)
+              const Text('Материалы не списывались'),
+            ...report.materials.map(
+              (item) => ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(item.name),
+                trailing: Text(
+                  '${quantity(item.quantity)} ${item.unitName}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
             ),
-          ),
-          const Divider(height: 28),
-          Text(
-            'Подключения',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          if (report.connections.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 8),
-              child: Text('Подключений за период нет'),
+            const Divider(height: 28),
+            Text(
+              'Подключения',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
-          ...report.connections.map(connectionCard),
+            if (report.connections.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text('Подключений за период нет'),
+              ),
+            ...report.connections.map(connectionCard),
+          ],
         ],
       ),
     ),
@@ -409,6 +450,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final workbook = Excel.createExcel();
       final sheet = workbook['Отчёт'];
       workbook.delete('Sheet1');
+      sheet.appendRow([TextCellValue('ОБЩИЙ ИТОГ ПО ПРОВАЙДЕРАМ')]);
       for (final report in reports) {
         sheet.appendRow([TextCellValue(report.providerName)]);
         sheet.appendRow([
@@ -418,6 +460,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
         for (final row in summaryRows(report)) {
           sheet.appendRow([TextCellValue(row.$1), TextCellValue(row.$2)]);
         }
+        sheet.appendRow([]);
+      }
+      sheet.appendRow([TextCellValue('ПОДКЛЮЧЕНИЯ ПО ПРОВАЙДЕРАМ')]);
+      for (final report in reports) {
+        sheet.appendRow([TextCellValue(report.providerName)]);
         sheet.appendRow([TextCellValue('Использовано материалов')]);
         for (final material in report.materials) {
           sheet.appendRow([
@@ -477,7 +524,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             ),
             pw.SizedBox(height: 12),
-            ...reports.expand((report) => pdfProviderSection(report)),
+            pw.Header(level: 1, text: 'Общий итог по провайдерам'),
+            ...reports.expand((report) => pdfProviderSummary(report)),
+            pw.NewPage(),
+            pw.Header(level: 1, text: 'Подключения по провайдерам'),
+            ...reports.expand((report) => pdfProviderDetails(report)),
           ],
         ),
       );
@@ -485,12 +536,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
     } else {
       file = File('$base.csv');
       final buffer = StringBuffer('\uFEFFОтчёт Telecom Manager\n');
+      buffer.writeln('ОБЩИЙ ИТОГ ПО ПРОВАЙДЕРАМ');
       for (final report in reports) {
         buffer.writeln(csv(report.providerName));
         buffer.writeln('Показатель;Значение');
         for (final row in summaryRows(report)) {
           buffer.writeln('${csv(row.$1)};${csv(row.$2)}');
         }
+        buffer.writeln();
+      }
+      buffer.writeln('ПОДКЛЮЧЕНИЯ ПО ПРОВАЙДЕРАМ');
+      for (final report in reports) {
+        buffer.writeln(csv(report.providerName));
         buffer.writeln('Использовано материалов');
         for (final material in report.materials) {
           buffer.writeln(
@@ -515,13 +572,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  List<pw.Widget> pdfProviderSection(ProviderManagementReport report) => [
+  List<pw.Widget> pdfProviderSummary(ProviderManagementReport report) => [
     pw.Header(level: 1, text: report.providerName),
     pw.TableHelper.fromTextArray(
       headers: const ['Показатель', 'Значение'],
       data: summaryRows(report).map((row) => [row.$1, row.$2]).toList(),
       cellAlignment: pw.Alignment.centerLeft,
     ),
+    pw.SizedBox(height: 16),
+  ];
+
+  List<pw.Widget> pdfProviderDetails(ProviderManagementReport report) => [
+    pw.Header(level: 1, text: report.providerName),
     pw.SizedBox(height: 14),
     pw.Text(
       'Использовано материалов',

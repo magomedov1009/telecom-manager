@@ -485,6 +485,27 @@ void main() {
       expect(summary.availableCash, 1200);
       expect((await repository.financeJournal()).length, 3);
 
+      final payment = (await repository.financeJournal()).firstWhere(
+        (item) => item.type == 'PAYMENT_TO_OFFICE',
+      );
+      expect(payment.providerId, provider.id);
+      await repository.updateManualFinanceTransaction(
+        transactionId: payment.id,
+        transactionType: 'PAYMENT_TO_OFFICE',
+        amount: 400,
+        providerId: provider.id,
+        comment: 'Исправленная сумма',
+      );
+      expect((await repository.financeSummary()).iOweOffice, 100);
+      await repository.deleteManualFinanceTransaction(payment.id);
+      expect((await repository.financeSummary()).iOweOffice, 500);
+      expect(
+        (await repository.financeJournal()).where(
+          (item) => item.type == 'PAYMENT_TO_OFFICE',
+        ),
+        isEmpty,
+      );
+
       final today = DateTime.now();
       final period = await repository.financeSummary(
         providerId: provider.id,
@@ -492,9 +513,9 @@ void main() {
         dateTo: today,
       );
       expect(period.customerReceived, 0);
-      expect(period.paidToOffice, 300);
-      expect(period.iOweOffice, 200);
-      expect(period.availableCash, -300);
+      expect(period.paidToOffice, 0);
+      expect(period.iOweOffice, 0);
+      expect(period.availableCash, 0);
       final filteredJournal = await repository.financeJournal(
         providerId: provider.id,
         transactionType: 'PAYMENT_TO_OFFICE',
@@ -502,8 +523,7 @@ void main() {
         dateTo: today,
         search: 'оплата',
       );
-      expect(filteredJournal, hasLength(1));
-      expect(filteredJournal.single.amount, -300);
+      expect(filteredJournal, isEmpty);
     },
   );
 
@@ -993,8 +1013,8 @@ void main() {
     expect(management.installerPaidExpenses, 0);
     expect(management.officeResult, 500);
     expect(management.unpaidExtraWorks, 700);
-    expect(management.officeOwesInstaller, 700);
-    expect(management.installerOwesOffice, 500);
+    expect(management.officeOwesInstaller, 200);
+    expect(management.installerOwesOffice, 0);
     await repository.addManualFinanceTransaction(
       transactionType: 'PAYMENT_FROM_OFFICE',
       amount: 700,
