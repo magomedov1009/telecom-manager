@@ -1033,6 +1033,14 @@ void main() {
     expect(paidManagement.unpaidExtraWorks, 0);
     expect(paidManagement.officeOwesInstaller, 0);
     expect(paidManagement.installerOwesOffice, 500);
+    final carriedToAugust = (await repository.providerManagementReports(
+      dateFrom: DateTime(2026, 8, 1),
+      dateTo: DateTime(2026, 8, 31),
+      providerId: provider.id,
+    )).single;
+    expect(carriedToAugust.openingInstallerOwesOffice, 500);
+    expect(carriedToAugust.installerOwesOffice, 500);
+    expect(carriedToAugust.connections, isEmpty);
     expect(
       await repository.reportDetails(
         section: 'connections',

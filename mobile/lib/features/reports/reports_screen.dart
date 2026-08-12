@@ -321,12 +321,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             const Divider(height: 28),
             Text(
-              'Итог взаиморасчёта за выбранный период',
+              'Взаиморасчёт на конец выбранного периода',
               style: Theme.of(
                 context,
               ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 6),
+            Text(
+              openingSettlementText(report),
+              style: TextStyle(
+                fontSize: 14,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
             Text(
               settlementText(report),
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
@@ -445,6 +453,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
         : 'Итог: офис должен монтажнику ${money(-net)}';
   }
 
+  String openingSettlementText(ProviderManagementReport report) {
+    final net =
+        report.openingInstallerOwesOffice - report.openingOfficeOwesInstaller;
+    if (net.abs() < 0.005) return 'На начало периода долгов нет';
+    return net > 0
+        ? 'На начало: монтажник должен офису ${money(net)}'
+        : 'На начало: офис должен монтажнику ${money(-net)}';
+  }
+
   List<(String, String)> summaryRows(ProviderManagementReport report) => [
     ('Подключений', report.connections.length.toString()),
     ('Стоимость подключений', money(report.connectionTotal)),
@@ -453,7 +470,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     ('Расходы, не возмещённые офисом', money(report.installerPaidExpenses)),
     ('Невыплаченные допработы', money(report.unpaidExtraWorks)),
     ('Итог офиса за период', money(report.officeResult)),
-    ('Итоговый взаиморасчёт', settlementText(report)),
+    ('Взаиморасчёт на начало периода', openingSettlementText(report)),
+    ('Взаиморасчёт на конец периода', settlementText(report)),
   ];
 
   Future<void> export(String format) async {

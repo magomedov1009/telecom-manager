@@ -520,6 +520,8 @@ class ProviderManagementReport {
     required this.installerIncome,
     required this.installerPaidExpenses,
     required this.unpaidExtraWorks,
+    required this.openingOfficeOwesInstaller,
+    required this.openingInstallerOwesOffice,
     required this.officeOwesInstaller,
     required this.installerOwesOffice,
     required this.materials,
@@ -533,6 +535,8 @@ class ProviderManagementReport {
   final double installerIncome;
   final double installerPaidExpenses;
   final double unpaidExtraWorks;
+  final double openingOfficeOwesInstaller;
+  final double openingInstallerOwesOffice;
   final double officeOwesInstaller;
   final double installerOwesOffice;
   final List<ManagementMaterialItem> materials;
@@ -2145,6 +2149,12 @@ class LocalRepository {
         providerId: provider.id,
         dateTo: dateTo,
       );
+      final openingFinance = dateFrom == null
+          ? null
+          : await financeSummary(
+              providerId: provider.id,
+              dateTo: dateFrom.subtract(const Duration(days: 1)),
+            );
 
       final materialRows = await db.rawQuery(
         '''
@@ -2172,6 +2182,8 @@ class LocalRepository {
           installerIncome: installerIncome,
           installerPaidExpenses: installerPaidExpenses,
           unpaidExtraWorks: unpaidExtraWorks,
+          openingOfficeOwesInstaller: openingFinance?.officeOwesMe ?? 0,
+          openingInstallerOwesOffice: openingFinance?.iOweOffice ?? 0,
           officeOwesInstaller: sharedFinance.officeOwesMe,
           installerOwesOffice: sharedFinance.iOweOffice,
           materials: materialRows
