@@ -36,18 +36,38 @@ class AppUpdateService {
   static const _latestRelease =
       'https://api.github.com/repos/magomedov1009/telecom-manager/releases/latest';
 
-  Future<AppUpdate> check() async {
+  Future<AppUpdate> check({String? serverUrl}) async {
     final package = await PackageInfo.fromPlatform();
-    final response = await http.get(
-      Uri.parse(_latestRelease),
-      headers: const {'Accept': 'application/vnd.github+json'},
-    );
-    if (response.statusCode != 200) {
-      throw StateError(
-        'Не удалось проверить обновление (${response.statusCode})',
-      );
+    final urls = <String>[
+      if (serverUrl != null && serverUrl.trim().isNotEmpty)
+        '${serverUrl.trim().replaceAll(RegExp(r'/+$'), '')}/api/mobile/update',
+      _latestRelease,
+    ];
+    Object? lastError;
+    for (final url in urls) {
+      try {
+        final response = await http
+            .get(
+              Uri.parse(url),
+              headers: const {
+                'Accept': 'application/vnd.github+json',
+                'User-Agent': 'Telecom-Manager-Android',
+              },
+            )
+            .timeout(const Duration(seconds: 12));
+        if (response.statusCode != 200) {
+          throw StateError('HTTP ${response.statusCode}');
+        }
+        return _parse(package.version, response.body);
+      } catch (error) {
+        lastError = error;
+      }
     }
-    final body = jsonDecode(response.body) as Map<String, Object?>;
+    throw StateError('Не удалось проверить обновление: $lastError');
+  }
+
+  AppUpdate _parse(String currentVersion, String responseBody) {
+    final body = jsonDecode(responseBody) as Map<String, Object?>;
     final assets = body['assets'] as List? ?? const [];
     Map<String, Object?>? apk;
     for (final raw in assets) {
@@ -60,7 +80,7 @@ class AppUpdateService {
     }
     if (apk == null) throw StateError('APK не найден в последнем выпуске');
     return AppUpdate(
-      currentVersion: package.version,
+      currentVersion: currentVersion,
       latestVersion: (body['tag_name'] as String).replaceFirst('android-v', ''),
       downloadUrl: apk['browser_download_url']! as String,
     );

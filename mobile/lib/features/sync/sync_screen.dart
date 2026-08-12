@@ -41,13 +41,14 @@ class _SyncScreenState extends State<SyncScreen> {
     super.initState();
     pending = widget.repository.pendingChanges();
     effectiveRole = widget.role;
-    _loadSettings();
-    update = AppUpdateService().check();
+    update = _checkUpdate();
   }
 
-  Future<void> _loadSettings() async {
+  Future<AppUpdate> _checkUpdate() async {
     final preferences = await SharedPreferences.getInstance();
-    serverController.text = preferences.getString('server_url') ?? '';
+    final serverUrl = preferences.getString('server_url') ?? '';
+    serverController.text = serverUrl;
+    return AppUpdateService().check(serverUrl: serverUrl);
   }
 
   @override
@@ -79,7 +80,7 @@ class _SyncScreenState extends State<SyncScreen> {
                     ? LinearProgressIndicator(value: updateProgress)
                     : Text(
                         snapshot.hasError
-                            ? 'Не удалось проверить. Нажмите, чтобы повторить'
+                            ? 'Не удалось проверить: ${snapshot.error}'
                             : info == null
                             ? 'Проверка версии…'
                             : info.available
@@ -317,7 +318,7 @@ class _SyncScreenState extends State<SyncScreen> {
 
   Future<void> checkOrInstallUpdate(AppUpdate? info) async {
     if (info == null || !info.available) {
-      setState(() => update = AppUpdateService().check());
+      setState(() => update = _checkUpdate());
       return;
     }
     try {
