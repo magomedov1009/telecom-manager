@@ -234,6 +234,47 @@ void main() {
     },
   );
 
+  test('stale queued change is rebased and sent automatically', () async {
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final repository = LocalRepository(database);
+    await repository.initialize();
+    final server = FakeSyncServer();
+    final tokenStore = MemoryTokenStore();
+    final service = SyncService(
+      repository: repository,
+      serverUrl: 'https://example.test',
+      client: server.client,
+      tokenStore: tokenStore,
+    );
+    await service.connect(
+      username: 'admin',
+      password: 'secret',
+      deviceName: 'test',
+    );
+    await repository.addProvider('Зависшее изменение');
+    final queued = (await repository.syncQueue()).single;
+    server.records['${queued.entityType}:${queued.entityId}'] = {
+      'entity_type': queued.entityType,
+      'entity_id': queued.entityId,
+      'version': 5,
+      'payload': {'id': queued.entityId, 'name': 'Старая версия'},
+    };
+
+    final result = await service.synchronize();
+
+    expect(result.sent, 1);
+    expect(result.conflicts, 0);
+    expect(await repository.pendingChanges(), 0);
+    expect(
+      server.records['${queued.entityType}:${queued.entityId}']!['version'],
+      6,
+    );
+    await database.close();
+  });
+
   test('remote changes are applied in dependency order', () async {
     final database = AppDatabase(
       factory: databaseFactoryFfi,

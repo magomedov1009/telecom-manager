@@ -90,25 +90,44 @@ class AppUpdateService {
     AppUpdate update, {
     void Function(int received, int total)? onProgress,
   }) async {
-    final response = await http.Request(
-      'GET',
-      Uri.parse(update.downloadUrl),
-    ).send();
-    if (response.statusCode != 200) {
-      throw StateError('Не удалось скачать APK (${response.statusCode})');
-    }
     final directory = await getTemporaryDirectory();
     final file = File(
       '${directory.path}/telecom-manager-${update.latestVersion}.apk',
     );
-    final sink = file.openWrite();
-    var received = 0;
-    await for (final chunk in response.stream) {
-      sink.add(chunk);
-      received += chunk.length;
-      onProgress?.call(received, response.contentLength ?? 0);
+    final canonicalUrl =
+        'https://github.com/magomedov1009/telecom-manager/releases/download/'
+        'android-v${update.latestVersion}/app-release.apk';
+    Object? lastError;
+    for (final url in {update.downloadUrl, canonicalUrl}) {
+      try {
+        final response = await http.Request('GET', Uri.parse(url)).send();
+        if (response.statusCode != 200) {
+          throw StateError('HTTP ${response.statusCode}');
+        }
+        final sink = file.openWrite();
+        var received = 0;
+        await for (final chunk in response.stream) {
+          sink.add(chunk);
+          received += chunk.length;
+          onProgress?.call(received, response.contentLength ?? 0);
+        }
+        await sink.close();
+        final header = await file
+            .openRead(0, 4)
+            .fold<List<int>>(<int>[], (bytes, chunk) => bytes..addAll(chunk));
+        if (header.length < 4 || header[0] != 0x50 || header[1] != 0x4b) {
+          throw StateError('Сервер вернул не APK-файл');
+        }
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (await file.exists()) await file.delete();
+      }
     }
-    await sink.close();
+    if (lastError != null || !await file.exists()) {
+      throw StateError('Не удалось скачать корректный APK: $lastError');
+    }
     final result = await OpenFilex.open(
       file.path,
       type: 'application/vnd.android.package-archive',

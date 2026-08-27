@@ -4769,6 +4769,64 @@ class LocalRepository {
     );
   }
 
+  Future<void> rebaseSyncConflict(
+    String entityType,
+    String entityId,
+    int serverVersion,
+  ) async {
+    final db = await database.instance;
+    const tables = {
+      'provider': 'providers',
+      'warehouse': 'warehouses',
+      'material': 'materials',
+      'client': 'clients',
+      'connection': 'connections',
+      'connection_material': 'connection_materials',
+      'inventory_transaction': 'inventory_transactions',
+      'finance_transaction': 'finance_transactions',
+      'extra_work_type': 'extra_work_types',
+      'extra_work': 'extra_works',
+      'extra_work_material': 'extra_work_materials',
+      'expense': 'expenses',
+    };
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'sync_queue',
+        where: 'entity_type = ? AND entity_id = ?',
+        whereArgs: [entityType, entityId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return;
+      final payload = Map<String, Object?>.from(
+        jsonDecode(rows.single['payload']! as String) as Map,
+      );
+      final localVersion = (payload['version'] as num?)?.toInt() ?? 1;
+      final nextVersion = serverVersion >= localVersion
+          ? serverVersion + 1
+          : localVersion;
+      payload['version'] = nextVersion;
+      await transaction.update(
+        'sync_queue',
+        {
+          'payload': jsonEncode(payload),
+          'attempts': (rows.single['attempts']! as num).toInt() + 1,
+          'last_error': null,
+        },
+        where: 'entity_type = ? AND entity_id = ?',
+        whereArgs: [entityType, entityId],
+      );
+      final table = tables[entityType];
+      if (table != null) {
+        await transaction.update(
+          table,
+          {'version': nextVersion, 'sync_state': 'pending'},
+          where: 'id = ?',
+          whereArgs: [entityId],
+        );
+      }
+    });
+  }
+
   Future<int> syncCursor() async {
     final db = await database.instance;
     final key = 'sync_cursor_${await organizationId}';

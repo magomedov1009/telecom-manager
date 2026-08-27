@@ -255,8 +255,9 @@ class SyncService {
     var sent = 0;
     var received = 0;
     var conflicts = 0;
-    final queue = await repository.syncQueue(limit: 500);
-    if (queue.isNotEmpty) {
+    for (var pushAttempt = 0; pushAttempt < 2; pushAttempt++) {
+      final queue = await repository.syncQueue(limit: 500);
+      if (queue.isEmpty) break;
       final response = await client.post(
         endpoint('/sync/push'),
         headers: headers,
@@ -278,18 +279,29 @@ class SyncService {
         throw StateError('Ошибка отправки (${response.statusCode})');
       }
       final results = jsonDecode(response.body) as List;
+      var shouldRetry = false;
       for (final raw in results) {
         final result = raw as Map<String, Object?>;
         final type = result['entity_type']! as String;
         final id = result['entity_id']! as String;
         if (result['status'] == 'conflict') {
-          conflicts++;
-          await repository.markSyncError(type, id, 'Конфликт версии');
+          if (pushAttempt == 0) {
+            await repository.rebaseSyncConflict(
+              type,
+              id,
+              (result['server_version']! as num).toInt(),
+            );
+            shouldRetry = true;
+          } else {
+            conflicts++;
+            await repository.markSyncError(type, id, 'Конфликт версии');
+          }
         } else {
           sent++;
           await repository.acknowledgeSync(type, id);
         }
       }
+      if (!shouldRetry) break;
     }
     var cursor = await repository.syncCursor();
     var hasMore = true;

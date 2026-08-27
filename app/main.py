@@ -38,17 +38,11 @@ def create_app() -> FastAPI:
     @application.get("/api/mobile/update", response_class=JSONResponse)
     async def mobile_update(request: Request) -> dict:
         return {
-            "tag_name": "android-v1.0.23",
+            "tag_name": "android-v1.0.24",
             "assets": [
                 {
                     "name": "app-release.apk",
-                    "browser_download_url": str(
-                        request.base_url.replace(
-                            path="/static/mobile/app-release.apk",
-                            query="",
-                            fragment="",
-                        )
-                    ),
+                    "browser_download_url": "https://github.com/magomedov1009/telecom-manager/releases/download/android-v1.0.24/app-release.apk",
                 }
             ],
         }
