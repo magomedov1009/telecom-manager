@@ -2110,6 +2110,16 @@ class LocalRepository {
           AND paid_by = 'INSTALLER' AND deleted_at IS NULL
           ${toDate != null ? 'AND expense_date <= ?' : ''}
         UNION ALL
+        SELECT 'CONNECTION_COMPENSATION' claim_type,
+               connection.connection_date claim_date,
+               MAX(connection.installer_amount + connection.office_amount - connection.price, 0) amount
+        FROM connections connection
+        JOIN clients client ON client.id = connection.client_id
+        WHERE connection.organization_id = ? AND client.provider_id = ?
+          AND connection.deleted_at IS NULL AND client.deleted_at IS NULL
+          AND connection.installer_amount + connection.office_amount > connection.price
+          ${toDate != null ? 'AND connection.connection_date <= ?' : ''}
+        UNION ALL
         SELECT 'EXTRA_WORK' claim_type, substr(occurred_at, 1, 10) claim_date,
                amount
         FROM finance_transactions
@@ -2119,7 +2129,17 @@ class LocalRepository {
           ${toExclusive != null ? 'AND occurred_at < ?' : ''}
         ORDER BY claim_date
         ''',
-        [orgId, provider.id, ?toDate, orgId, provider.id, ?toExclusive],
+        [
+          orgId,
+          provider.id,
+          ?toDate,
+          orgId,
+          provider.id,
+          ?toDate,
+          orgId,
+          provider.id,
+          ?toExclusive,
+        ],
       );
       final cumulativePaidFromOffice = await financeSum(
         provider.id,
@@ -2141,7 +2161,7 @@ class LocalRepository {
         if (!inSelectedPeriod) continue;
         if (claim['claim_type'] == 'EXPENSE') {
           installerPaidExpenses += unpaid;
-        } else {
+        } else if (claim['claim_type'] == 'EXTRA_WORK') {
           unpaidExtraWorks += unpaid;
         }
       }
@@ -3510,6 +3530,24 @@ class LocalRepository {
     );
     final expenseFrom = dateFrom?.toIso8601String().substring(0, 10);
     final expenseTo = dateTo?.toIso8601String().substring(0, 10);
+    final compensationRows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(MAX(
+        connection.installer_amount + connection.office_amount - connection.price,
+        0
+      )), 0) AS amount
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
+        AND client.deleted_at IS NULL
+        ${providerId != null ? 'AND client.provider_id = ?' : ''}
+        ${!useRunningBalance && expenseFrom != null ? 'AND connection.connection_date >= ?' : ''}
+        ${expenseTo != null ? 'AND connection.connection_date <= ?' : ''}
+      ''',
+      [orgId, ?providerId, if (!useRunningBalance) ?expenseFrom, ?expenseTo],
+    );
+    final connectionCompensation = (compensationRows.single['amount']! as num)
+        .toDouble();
     final expenseWhere = [
       'organization_id = ?',
       "paid_by = 'INSTALLER'",
@@ -3560,6 +3598,7 @@ class LocalRepository {
         .toDouble();
     final balance =
         extraWorkInstaller +
+        connectionCompensation +
         debtInstallerExpenses -
         paidFromOfficeBalance +
         adjustments -

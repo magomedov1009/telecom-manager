@@ -98,7 +98,11 @@ def calculate_finance(price: Decimal, installer_amount: str | None, office_amoun
     office = parse_decimal(office_amount or "0", "\u041e\u0444\u0438\u0441 \u043f\u043e\u043b\u0443\u0447\u0430\u0435\u0442")
     if office > price:
         raise ConnectionError("\u041e\u0444\u0438\u0441 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0431\u043e\u043b\u044c\u0448\u0435, \u0447\u0435\u043c \u043f\u043e\u043b\u0443\u0447\u0435\u043d\u043e \u043e\u0442 \u043a\u043b\u0438\u0435\u043d\u0442\u0430")
-    installer = price - office
+    installer = (
+        parse_decimal(installer_amount, "\u041c\u043e\u043d\u0442\u0430\u0436\u043d\u0438\u043a\u0443 \u043e\u0441\u0442\u0430\u0435\u0442\u0441\u044f")
+        if installer_amount is not None
+        else price - office
+    )
     return installer, office
 
 def get_reference_data(db: Session) -> tuple[list[Warehouse], list[Material], list[Provider]]:

@@ -4,10 +4,10 @@ from decimal import Decimal
 from math import ceil
 from urllib.parse import urlencode
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.clients import Connection, ExtraWork
+from app.models.clients import Client, Connection, ExtraWork
 from app.models.enums import FinanceTransactionType, PaidBy
 from app.models.clients import Provider
 from app.models.finance import Expense, FinanceTransaction
@@ -336,6 +336,30 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
         extra_work_installer_accrued_query = extra_work_installer_accrued_query.where(FinanceTransaction.provider_id == int(provider_id))
     extra_work_installer_accrued = Decimal(db.scalar(apply_period(extra_work_installer_accrued_query, debt_start, period_end)) or 0)
 
+    connection_shortfall = (
+        Connection.installer_amount + Connection.office_amount - Connection.price
+    )
+    connection_compensation = case(
+        (connection_shortfall > 0, connection_shortfall),
+        else_=0,
+    )
+    connection_compensation_query = (
+        select(func.coalesce(func.sum(connection_compensation), 0))
+        .join(Client, Client.id == Connection.client_id)
+    )
+    connection_compensation_query = apply_user_scope(
+        connection_compensation_query, Connection.installer_id, scope
+    )
+    if provider_id:
+        connection_compensation_query = connection_compensation_query.where(
+            Client.provider_id == int(provider_id)
+        )
+    if period_end is not None:
+        connection_compensation_query = connection_compensation_query.where(
+            Connection.connection_date <= period_end.date()
+        )
+    connection_compensation_total = Decimal(db.scalar(connection_compensation_query) or 0)
+
     debt_installer_expenses_query = select(func.coalesce(func.sum(Expense.amount), 0)).where(
         Expense.paid_by == PaidBy.INSTALLER,
     )
@@ -348,6 +372,7 @@ def get_finance_stats(db: Session, filters: dict | None = None, user: User | Non
 
     balance = (
         extra_work_installer_accrued
+        + connection_compensation_total
         + debt_installer_expenses
         - paid_from_office_balance
         + adjustments

@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     @application.get("/api/mobile/update", response_class=JSONResponse)
     async def mobile_update(request: Request) -> dict:
         return {
-            "tag_name": "android-v1.0.22",
+            "tag_name": "android-v1.0.23",
             "assets": [
                 {
                     "name": "app-release.apk",

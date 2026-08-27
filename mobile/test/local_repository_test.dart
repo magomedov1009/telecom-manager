@@ -527,6 +527,41 @@ void main() {
     },
   );
 
+  test('free office connection creates compensation debt', () async {
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: 'free-office-1',
+      login: '101336537',
+      address: 'Бесплатная заявка офиса',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'WITHOUT_MATERIALS',
+      connectionDate: DateTime(2026, 8, 27),
+      price: 0,
+      officeAmount: 0,
+      installerAmount: 1000,
+      materials: const [],
+    );
+
+    var summary = await repository.financeSummary(providerId: provider.id);
+    expect(summary.officeOwesMe, 1000);
+    expect(summary.iOweOffice, 0);
+
+    await repository.addManualFinanceTransaction(
+      transactionType: 'PAYMENT_FROM_OFFICE',
+      amount: 1000,
+      providerId: provider.id,
+      comment: 'Компенсация бесплатного подключения',
+    );
+    summary = await repository.financeSummary(providerId: provider.id);
+    expect(summary.officeOwesMe, 0);
+    expect(summary.iOweOffice, 0);
+  });
+
   test('deleting connection restores stock and reverses finance', () async {
     final provider = (await repository.providers()).first;
     final warehouse = (await repository.warehouses()).first;

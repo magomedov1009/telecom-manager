@@ -7,14 +7,16 @@ from sqlalchemy.orm import Session
 
 import app.models  # noqa: F401 - registers all metadata
 from app.db.base import Base
-from app.models.clients import Provider
+from app.models.clients import Client, Connection, Provider
 from app.models.enums import (
+    ConnectionType,
     ExpenseCategory,
     FinanceTransactionType,
     PaidBy,
     UserRole,
 )
 from app.models.finance import Expense, FinanceTransaction
+from app.models.inventory import Warehouse
 from app.models.users import User
 from app.services.finance import (
     get_expense_summary,
@@ -132,6 +134,44 @@ class FinanceMathTest(unittest.TestCase):
         self.assertTrue(
             all(item.provider_id == 1 for item in get_finance_items(self.db, filters))
         )
+
+    def test_free_connection_fee_is_office_debt(self) -> None:
+        filters = {
+            "date_from": date(2026, 7, 1),
+            "date_to": date(2026, 7, 31),
+            "provider_id": 1,
+        }
+        balance_before = get_finance_stats(self.db, filters).balance
+        warehouse = Warehouse(id=1, name="Main", provider_id=1, active=True)
+        client = Client(
+            id=1,
+            provider_id=1,
+            contract_number="free-1",
+            login="101336537",
+            address="Free office request",
+        )
+        self.db.add_all([warehouse, client])
+        self.db.flush()
+        self.db.add(
+            Connection(
+                id=1,
+                client_id=client.id,
+                warehouse_id=warehouse.id,
+                installer_id=1,
+                connection_type=ConnectionType.WITHOUT_MATERIALS,
+                connection_date=date(2026, 7, 20),
+                price=Decimal("0"),
+                office_amount=Decimal("0"),
+                installer_amount=Decimal("1000"),
+            )
+        )
+        self.db.commit()
+
+        stats = get_finance_stats(self.db, filters)
+
+        self.assertEqual(stats.balance, balance_before + Decimal("1000"))
+        self.assertEqual(stats.office_owes_me, Decimal("0"))
+        self.assertEqual(stats.i_owe_office, Decimal("100.00"))
 
 
 if __name__ == "__main__":

@@ -6,12 +6,14 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+/tmp_pytest_deps/
 
 logs/*
 !logs/.gitkeep
 
 app/static/uploads/*
 !app/static/uploads/.gitkeep
+app/static/mobile/*.apk
 
 .DS_Store
 Thumbs.db
