@@ -510,6 +510,40 @@ class ManagementMaterialItem {
   final double quantity;
 }
 
+class ManagementExtraWorkItem {
+  const ManagementExtraWorkItem({
+    required this.date,
+    required this.name,
+    required this.amount,
+    required this.officeAmount,
+    required this.installerAmount,
+    required this.comment,
+  });
+
+  final DateTime date;
+  final String name;
+  final double amount;
+  final double officeAmount;
+  final double installerAmount;
+  final String? comment;
+}
+
+class ManagementExpenseItem {
+  const ManagementExpenseItem({
+    required this.date,
+    required this.category,
+    required this.description,
+    required this.amount,
+    required this.paidBy,
+  });
+
+  final DateTime date;
+  final String category;
+  final String description;
+  final double amount;
+  final String paidBy;
+}
+
 class ProviderManagementReport {
   const ProviderManagementReport({
     required this.providerId,
@@ -525,6 +559,8 @@ class ProviderManagementReport {
     required this.officeOwesInstaller,
     required this.installerOwesOffice,
     required this.materials,
+    required this.extraWorks,
+    required this.expenses,
   });
 
   final String providerId;
@@ -540,6 +576,8 @@ class ProviderManagementReport {
   final double officeOwesInstaller;
   final double installerOwesOffice;
   final List<ManagementMaterialItem> materials;
+  final List<ManagementExtraWorkItem> extraWorks;
+  final List<ManagementExpenseItem> expenses;
 
   double get officeResult => officeIncome - installerPaidExpenses;
 }
@@ -2192,6 +2230,33 @@ class LocalRepository {
         ''',
         [orgId, provider.id, ?fromTime, ?toExclusive],
       );
+      final extraWorkRows = await db.rawQuery(
+        '''
+        SELECT work.work_date, work.amount, work.office_amount,
+               work.installer_amount, work.comment, type.name
+        FROM extra_works work
+        JOIN extra_work_types type ON type.id = work.work_type_id
+        WHERE work.organization_id = ? AND work.provider_id = ?
+          AND work.deleted_at IS NULL AND type.deleted_at IS NULL
+          ${fromDate != null ? 'AND work.work_date >= ?' : ''}
+          ${toDate != null ? 'AND work.work_date <= ?' : ''}
+        ORDER BY work.work_date DESC, work.created_at DESC
+        ''',
+        [orgId, provider.id, ?fromDate, ?toDate],
+      );
+      final expenseRows = await db.rawQuery(
+        '''
+        SELECT expense.expense_date, expense.category, expense.description,
+               expense.amount, expense.paid_by
+        FROM expenses expense
+        WHERE expense.organization_id = ? AND expense.provider_id = ?
+          AND expense.deleted_at IS NULL
+          ${fromDate != null ? 'AND expense.expense_date >= ?' : ''}
+          ${toDate != null ? 'AND expense.expense_date <= ?' : ''}
+        ORDER BY expense.expense_date DESC, expense.created_at DESC
+        ''',
+        [orgId, provider.id, ?fromDate, ?toDate],
+      );
       result.add(
         ProviderManagementReport(
           providerId: provider.id,
@@ -2212,6 +2277,29 @@ class LocalRepository {
                   name: row['name']! as String,
                   unitName: row['unit_name']! as String,
                   quantity: (row['quantity']! as num).toDouble(),
+                ),
+              )
+              .toList(),
+          extraWorks: extraWorkRows
+              .map(
+                (row) => ManagementExtraWorkItem(
+                  date: DateTime.parse(row['work_date']! as String),
+                  name: row['name']! as String,
+                  amount: (row['amount']! as num).toDouble(),
+                  officeAmount: (row['office_amount']! as num).toDouble(),
+                  installerAmount: (row['installer_amount']! as num).toDouble(),
+                  comment: row['comment'] as String?,
+                ),
+              )
+              .toList(),
+          expenses: expenseRows
+              .map(
+                (row) => ManagementExpenseItem(
+                  date: DateTime.parse(row['expense_date']! as String),
+                  category: row['category']! as String,
+                  description: (row['description'] as String?) ?? '',
+                  amount: (row['amount']! as num).toDouble(),
+                  paidBy: row['paid_by']! as String,
                 ),
               )
               .toList(),

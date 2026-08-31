@@ -39,6 +39,22 @@
       {% else %}<div class="text-secondary">Материалы за период не списывались</div>{% endfor %}
     </div>
 
+    <h4 class="h6 text-uppercase text-secondary">Допработы за период</h4>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead><tr><th>Дата</th><th>Работа</th><th>Комментарий</th><th class="text-end">Стоимость</th><th class="text-end">Офису</th><th class="text-end">Монтажнику</th></tr></thead>
+        <tbody>{% for item in card.extra_work_items %}<tr><td>{{ item.work_date.strftime('%d.%m.%Y') }}</td><td>{{ item.work_type.name }}</td><td>{{ item.comment or '—' }}</td><td class="text-end">{{ money(item.amount) }}</td><td class="text-end">{{ money(item.office_amount) }}</td><td class="text-end">{{ money(item.installer_amount) }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-secondary py-3">Допработ нет</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+
+    <h4 class="h6 text-uppercase text-secondary">Расходы за период</h4>
+    <div class="table-responsive mb-4">
+      <table class="table table-sm table-striped align-middle mb-0">
+        <thead><tr><th>Дата</th><th>Категория</th><th>Описание</th><th class="text-end">Сумма</th><th>Оплатил</th></tr></thead>
+        <tbody>{% for item in card.expense_items %}<tr><td>{{ item.created_at.strftime('%d.%m.%Y') }}</td><td>{{ data.expense_labels.get(item.category, item.category.value) }}</td><td>{{ item.comment or '—' }}</td><td class="text-end text-danger">{{ money(item.amount) }}</td><td>{{ data.paid_by_labels.get(item.paid_by, item.paid_by.value) }}</td></tr>{% else %}<tr><td colspan="5" class="text-center text-secondary py-3">Расходов нет</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+
     <h4 class="h6 text-uppercase text-secondary">Подключения за период</h4>
     <div class="table-responsive">
       <table class="table table-sm table-striped align-middle mb-0">

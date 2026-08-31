@@ -364,6 +364,32 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
             const Divider(height: 28),
             Text(
+              'Допработы',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            if (report.extraWorks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('Допработ за период нет'),
+              ),
+            ...report.extraWorks.map(extraWorkCard),
+            const Divider(height: 28),
+            Text(
+              'Расходы',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            if (report.expenses.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('Расходов за период нет'),
+              ),
+            ...report.expenses.map(expenseCard),
+            const Divider(height: 28),
+            Text(
               'Подключения',
               style: Theme.of(
                 context,
@@ -412,6 +438,71 @@ class _ReportsScreenState extends State<ReportsScreen> {
       ],
     ),
   );
+
+  Widget extraWorkCard(ManagementExtraWorkItem item) => Container(
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${item.name} · ${shortDate(item.date)}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        if (item.comment?.isNotEmpty == true)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(item.comment!),
+          ),
+        const SizedBox(height: 7),
+        Text('Стоимость: ${money(item.amount)}'),
+        Text(
+          'Офису: ${money(item.officeAmount)} · Монтажнику: ${money(item.installerAmount)}',
+        ),
+      ],
+    ),
+  );
+
+  Widget expenseCard(ManagementExpenseItem item) => Container(
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '${expenseCategory(item.category)} · ${shortDate(item.date)}',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        if (item.description.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Text(item.description),
+          ),
+        const SizedBox(height: 7),
+        Text('Сумма: ${money(item.amount)}'),
+        Text('Оплатил: ${item.paidBy == 'OFFICE' ? 'Офис' : 'Монтажник'}'),
+      ],
+    ),
+  );
+
+  String expenseCategory(String value) =>
+      const {
+        'fuel': 'Бензин',
+        'tools': 'Инструмент',
+        'materials': 'Материалы',
+        'transport': 'Транспорт',
+        'rent': 'Аренда',
+        'other': 'Прочее',
+      }[value] ??
+      value;
 
   Widget metric(
     String label,
@@ -512,6 +603,42 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
           ]);
         }
+        sheet.appendRow([TextCellValue('Допработы')]);
+        sheet.appendRow([
+          TextCellValue('Дата'),
+          TextCellValue('Работа'),
+          TextCellValue('Комментарий'),
+          TextCellValue('Стоимость'),
+          TextCellValue('Офис'),
+          TextCellValue('Монтажник'),
+        ]);
+        for (final item in report.extraWorks) {
+          sheet.appendRow([
+            TextCellValue(shortDate(item.date)),
+            TextCellValue(item.name),
+            TextCellValue(item.comment ?? ''),
+            DoubleCellValue(item.amount),
+            DoubleCellValue(item.officeAmount),
+            DoubleCellValue(item.installerAmount),
+          ]);
+        }
+        sheet.appendRow([TextCellValue('Расходы')]);
+        sheet.appendRow([
+          TextCellValue('Дата'),
+          TextCellValue('Категория'),
+          TextCellValue('Описание'),
+          TextCellValue('Сумма'),
+          TextCellValue('Оплатил'),
+        ]);
+        for (final item in report.expenses) {
+          sheet.appendRow([
+            TextCellValue(shortDate(item.date)),
+            TextCellValue(expenseCategory(item.category)),
+            TextCellValue(item.description),
+            DoubleCellValue(item.amount),
+            TextCellValue(item.paidBy == 'OFFICE' ? 'Офис' : 'Монтажник'),
+          ]);
+        }
         sheet.appendRow([TextCellValue('Подключения')]);
         sheet.appendRow([
           TextCellValue('Дата / клиент'),
@@ -599,6 +726,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
             '${csv(material.name)};${csv('${quantity(material.quantity)} ${material.unitName}')}',
           );
         }
+        buffer.writeln('Допработы');
+        buffer.writeln('Дата;Работа;Комментарий;Стоимость;Офис;Монтажник');
+        for (final item in report.extraWorks) {
+          buffer.writeln(
+            '${csv(shortDate(item.date))};${csv(item.name)};'
+            '${csv(item.comment ?? '')};${item.amount};'
+            '${item.officeAmount};${item.installerAmount}',
+          );
+        }
+        buffer.writeln('Расходы');
+        buffer.writeln('Дата;Категория;Описание;Сумма;Оплатил');
+        for (final item in report.expenses) {
+          buffer.writeln(
+            '${csv(shortDate(item.date))};${csv(expenseCategory(item.category))};'
+            '${csv(item.description)};${item.amount};'
+            '${item.paidBy == 'OFFICE' ? 'Офис' : 'Монтажник'}',
+          );
+        }
         buffer.writeln('Подключения');
         buffer.writeln('Дата / клиент;Адрес;Стоимость;Офис;Монтажник');
         for (final connection in report.connections) {
@@ -648,6 +793,64 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ],
             )
             .toList(),
+      ),
+    pw.SizedBox(height: 14),
+    pw.Text(
+      'Допработы',
+      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+    ),
+    pw.SizedBox(height: 5),
+    if (report.extraWorks.isEmpty)
+      pw.Text('Допработ за период нет')
+    else
+      pw.TableHelper.fromTextArray(
+        headers: const [
+          'Дата',
+          'Работа',
+          'Комментарий',
+          'Стоимость',
+          'Офис',
+          'Монтажник',
+        ],
+        data: report.extraWorks
+            .map(
+              (item) => [
+                shortDate(item.date),
+                item.name,
+                item.comment ?? '',
+                money(item.amount),
+                money(item.officeAmount),
+                money(item.installerAmount),
+              ],
+            )
+            .toList(),
+        cellStyle: const pw.TextStyle(fontSize: 8),
+        headerStyle: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+      ),
+    pw.SizedBox(height: 14),
+    pw.Text(
+      'Расходы',
+      style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+    ),
+    pw.SizedBox(height: 5),
+    if (report.expenses.isEmpty)
+      pw.Text('Расходов за период нет')
+    else
+      pw.TableHelper.fromTextArray(
+        headers: const ['Дата', 'Категория', 'Описание', 'Сумма', 'Оплатил'],
+        data: report.expenses
+            .map(
+              (item) => [
+                shortDate(item.date),
+                expenseCategory(item.category),
+                item.description,
+                money(item.amount),
+                item.paidBy == 'OFFICE' ? 'Офис' : 'Монтажник',
+              ],
+            )
+            .toList(),
+        cellStyle: const pw.TextStyle(fontSize: 8),
+        headerStyle: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
       ),
     pw.SizedBox(height: 14),
     pw.Text(

@@ -414,6 +414,20 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
             (item.installer_amount for item in provider_connections),
             Decimal("0"),
         )
+        provider_extra_works = list(
+            db.scalars(
+                apply_extra_work_search(
+                    extra_work_query(period, provider.id, scope), search
+                ).order_by(ExtraWork.work_date.desc(), ExtraWork.id.desc())
+            )
+        )
+        provider_expenses = list(
+            db.scalars(
+                apply_expense_search(
+                    expense_query(period, provider.id, scope), search
+                ).order_by(Expense.created_at.desc(), Expense.id.desc())
+            )
+        )
         unpaid_expense_query = select(
             func.coalesce(func.sum(Expense.amount), 0)
         ).where(
@@ -505,6 +519,8 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
             "provider": provider,
             "connections": len(provider_connections),
             "connection_items": provider_connections,
+            "extra_work_items": provider_extra_works,
+            "expense_items": provider_expenses,
             "connection_total": connection_total,
             "office_total": office_total,
             "installer_total": installer_total,

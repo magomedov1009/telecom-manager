@@ -1042,6 +1042,12 @@ void main() {
       providerId: provider.id,
     )).single;
     expect(management.connections, hasLength(1));
+    expect(management.extraWorks, hasLength(1));
+    expect(management.extraWorks.single.name, workType.name);
+    expect(management.extraWorks.single.amount, 700);
+    expect(management.expenses, hasLength(1));
+    expect(management.expenses.single.description, 'Топливо');
+    expect(management.expenses.single.paidBy, 'OFFICE');
     expect(management.connectionTotal, 1500);
     expect(management.officeIncome, 500);
     expect(management.installerIncome, 1000);
