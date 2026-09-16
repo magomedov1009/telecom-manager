@@ -618,6 +618,34 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
     finance_page = filtered_finance(db, period, provider_id, clean_search, page, sort, direction, per_page, scope)
     inv_page = inventory_page(inventory, clean_search, page, sort, direction, per_page)
     settlements = material_settlements(db, period, provider_id, clean_search, scope)
+    material_settlement_history_query = select(MaterialDebtSettlement)
+    material_settlement_history_query = apply_datetime_period(
+        material_settlement_history_query, MaterialDebtSettlement.created_at, period
+    )
+    material_settlement_history_query = apply_user_scope(
+        material_settlement_history_query, MaterialDebtSettlement.user_id, scope
+    )
+    if provider_id:
+        material_settlement_history_query = material_settlement_history_query.where(
+            (MaterialDebtSettlement.debtor_provider_id == provider_id)
+            | (MaterialDebtSettlement.creditor_provider_id == provider_id)
+        )
+    provider_names = {item.id: item.name for item in db.scalars(select(Provider))}
+    material_names = {
+        item.id: (item.name, get_unit_label(item)) for item in db.scalars(select(Material))
+    }
+    material_settlement_history = [
+        {
+            "created_at": item.created_at,
+            "debtor": provider_names.get(item.debtor_provider_id, "—"),
+            "creditor": provider_names.get(item.creditor_provider_id, "—"),
+            "material": material_names.get(item.material_id, ("—", ""))[0],
+            "unit": material_names.get(item.material_id, ("—", ""))[1],
+            "quantity": item.quantity,
+            "comment": item.comment,
+        }
+        for item in db.scalars(material_settlement_history_query.order_by(MaterialDebtSettlement.created_at.desc()))
+    ]
     settlement_page = paginate_rows(settlements, page, "name", "asc", per_page)
     page_map = {"connections": connections, "extra_works": extra_works, "expenses": expenses, "finance": finance_page, "inventory": inv_page, "material_settlements": settlement_page}
     page_data = page_map.get(active_tab)
@@ -637,6 +665,7 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
         "inventory": inventory,
         "inventory_page": inv_page,
         "material_settlements": settlement_page,
+        "material_settlement_history": material_settlement_history,
         "finance": finance,
         "income": income,
         "connection_total": total_for(db, connections_query, Connection.price),
@@ -694,18 +723,39 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
     if tab == "material_settlements":
         rows = [
             [
+                "Текущий долг",
+                "",
                 row["debtor"].name,
                 row["creditor"].name,
                 row["material"].name,
                 row["connections"],
                 row["transfers"],
                 row["offset"],
+                "",
                 row["quantity"],
                 row["unit"],
+                "",
             ]
             for row in data["material_settlements"].items
         ]
-        return "material-settlements", ["Кто должен", "Кому должен", "Материал", "Подключения", "Перемещения", "Встречный зачет", "Итого", "Ед. изм."], rows
+        rows.extend([
+            [
+                "Списание",
+                item["created_at"],
+                item["debtor"],
+                item["creditor"],
+                item["material"],
+                "",
+                "",
+                "",
+                item["quantity"],
+                "",
+                item["unit"],
+                item["comment"] or "",
+            ]
+            for item in data["material_settlement_history"]
+        ])
+        return "material-settlements", ["Операция", "Дата", "Кто должен", "Кому должен", "Материал", "Подключения", "Перемещения", "Встречный зачет", "Списано", "Итого", "Ед. изм.", "Комментарий"], rows
     rows = [[i.created_at, FINANCE_TYPE_LABELS.get(i.transaction_type, i.transaction_type.value), i.provider.name if i.provider else "", i.amount, i.comment or "", i.user.full_name if i.user else ""] for i in data["finance_page"].items]
     return "finance", ["\u0414\u0430\u0442\u0430", "\u0422\u0438\u043f", "\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440", "\u0421\u0443\u043c\u043c\u0430", "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c"], rows
 

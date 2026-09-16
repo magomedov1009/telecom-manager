@@ -399,34 +399,6 @@ void main() {
     },
   );
 
-  test('material debt can be closed without changing warehouse stock', () async {
-    final providers = await repository.providers();
-    final warehouse = (await repository.warehouses()).first;
-    final material = (await repository.materials()).first;
-    await repository.addTransfer(
-      sourceWarehouseId: warehouse.id,
-      destinationWarehouseId: (await repository.warehouses())
-          .firstWhere((item) => item.id != warehouse.id)
-          .id,
-      materialId: material.id,
-      quantity: 1,
-    );
-    final debt = (await repository.materialSettlements()).single;
-    final stockBefore = (await repository.inventoryBalances(
-      warehouseId: warehouse.id,
-    )).firstWhere((item) => item.materialId == material.id).quantity;
-
-    await repository.settleMaterialDebt(debt: debt, quantity: 1);
-
-    expect(await repository.materialSettlements(), isEmpty);
-    final stockAfter = (await repository.inventoryBalances(
-      warehouseId: warehouse.id,
-    )).firstWhere((item) => item.materialId == material.id).quantity;
-    expect(stockAfter, stockBefore);
-    expect(await repository.pendingChanges(), greaterThan(0));
-    expect(providers, isNotEmpty);
-  });
-
   test(
     'connection with another provider warehouse creates material debt',
     () async {
@@ -466,6 +438,27 @@ void main() {
       expect(debt.creditorName, warehouse.name);
       expect(debt.debtorName, clientProvider.name);
       expect(debt.quantity, 2);
+
+      final stockBefore = (await repository.inventoryBalances(
+        warehouseId: warehouse.id,
+      )).firstWhere((item) => item.materialId == material.id).quantity;
+      await repository.settleMaterialDebt(
+        debt: debt,
+        quantity: 1,
+        comment: 'Закрыто между офисами',
+      );
+      final remainingDebt = (await repository.materialSettlements()).single;
+      expect(remainingDebt.quantity, 1);
+      final journal = await repository.materialSettlementJournal();
+      expect(journal, hasLength(1));
+      expect(journal.single.quantity, 1);
+      final stockAfter = (await repository.inventoryBalances(
+        warehouseId: warehouse.id,
+      )).firstWhere((item) => item.materialId == material.id).quantity;
+      expect(stockAfter, stockBefore);
+
+      await repository.deleteMaterialSettlement(journal.single.id);
+      expect((await repository.materialSettlements()).single.quantity, 2);
     },
   );
 

@@ -26,7 +26,29 @@ class _SettlementsScreenState extends State<SettlementsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Долги по материалам')),
+      appBar: AppBar(
+        title: const Text('Долги по материалам'),
+        actions: [
+          IconButton(
+            tooltip: 'Журнал списаний',
+            icon: const Icon(Icons.history),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      _SettlementJournalScreen(repository: widget.repository),
+                ),
+              );
+              if (mounted) {
+                setState(
+                  () => settlements = widget.repository.materialSettlements(),
+                );
+              }
+            },
+          ),
+        ],
+      ),
       body: FutureBuilder<List<MaterialSettlement>>(
         future: settlements,
         builder: (context, snapshot) {
@@ -132,10 +154,11 @@ class _SettlementsScreenState extends State<SettlementsScreen> {
         quantity: value,
         comment: commentController.text,
       );
-      if (mounted)
+      if (mounted) {
         setState(() => settlements = widget.repository.materialSettlements());
+      }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -143,9 +166,108 @@ class _SettlementsScreenState extends State<SettlementsScreen> {
             ),
           ),
         );
+      }
     } finally {
       quantityController.dispose();
       commentController.dispose();
     }
   }
+}
+
+class _SettlementJournalScreen extends StatefulWidget {
+  const _SettlementJournalScreen({required this.repository});
+  final LocalRepository repository;
+  @override
+  State<_SettlementJournalScreen> createState() =>
+      _SettlementJournalScreenState();
+}
+
+class _SettlementJournalScreenState extends State<_SettlementJournalScreen> {
+  late Future<List<MaterialSettlementJournalItem>> items;
+  @override
+  void initState() {
+    super.initState();
+    items = widget.repository.materialSettlementJournal();
+  }
+
+  String amount(double value) =>
+      value == value.roundToDouble() ? value.toInt().toString() : '$value';
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Журнал списаний долгов')),
+    body: FutureBuilder<List<MaterialSettlementJournalItem>>(
+      future: items,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.data!.isEmpty) {
+          return const Center(child: Text('Списаний ещё не было'));
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: snapshot.data!.length,
+          itemBuilder: (context, index) {
+            final item = snapshot.data![index];
+            return Card(
+              child: ListTile(
+                title: Text('${item.debtorName} → ${item.creditorName}'),
+                subtitle: Text(
+                  '${item.materialName} · ${item.date.day.toString().padLeft(2, '0')}.${item.date.month.toString().padLeft(2, '0')}.${item.date.year}${item.comment?.isNotEmpty == true ? '\n${item.comment}' : ''}',
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '${amount(item.quantity)} ${item.unitName}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: 'Удалить',
+                      onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (dialogContext) => AlertDialog(
+                            title: const Text('Удалить списание?'),
+                            content: const Text(
+                              'Списание будет отменено, а долг по материалу восстановлен.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, false),
+                                child: const Text('Отмена'),
+                              ),
+                              FilledButton(
+                                onPressed: () =>
+                                    Navigator.pop(dialogContext, true),
+                                child: const Text('Удалить'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed != true) {
+                          return;
+                        }
+                        await widget.repository.deleteMaterialSettlement(
+                          item.id,
+                        );
+                        if (mounted) {
+                          setState(
+                            () => items = widget.repository
+                                .materialSettlementJournal(),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ),
+  );
 }

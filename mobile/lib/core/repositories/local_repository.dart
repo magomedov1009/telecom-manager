@@ -318,6 +318,27 @@ class MaterialSettlement {
   final double quantity;
 }
 
+class MaterialSettlementJournalItem {
+  const MaterialSettlementJournalItem({
+    required this.id,
+    required this.date,
+    required this.debtorName,
+    required this.creditorName,
+    required this.materialName,
+    required this.unitName,
+    required this.quantity,
+    required this.comment,
+  });
+  final String id;
+  final DateTime date;
+  final String debtorName;
+  final String creditorName;
+  final String materialName;
+  final String unitName;
+  final double quantity;
+  final String? comment;
+}
+
 class FinanceSummary {
   const FinanceSummary({
     required this.customerReceived,
@@ -3510,7 +3531,16 @@ class LocalRepository {
       ''',
       [orgId, orgId, orgId],
     );
-    final net = <String, ({double amount, Map<String, Object?> row})>{};
+    final net =
+        <
+          String,
+          ({
+            double amount,
+            String first,
+            String second,
+            Map<String, Object?> row,
+          })
+        >{};
     for (final row in rows) {
       final creditorId = row['creditor_id']! as String;
       final debtorId = row['debtor_id']! as String;
@@ -3523,31 +3553,31 @@ class LocalRepository {
       final previous = net[key];
       net[key] = (
         amount: (previous?.amount ?? 0) + signed,
-        row: forward
-            ? row
-            : {
-                ...row,
-                'creditor_name': row['debtor_name'],
-                'debtor_name': row['creditor_name'],
-              },
+        first: first,
+        second: second,
+        row: row,
       );
     }
     return net.values.where((item) => item.amount.abs() > 0.000001).map((item) {
       final positive = item.amount > 0;
       return MaterialSettlement(
-        creditorId:
-            (positive ? item.row['creditor_id'] : item.row['debtor_id'])
-                as String,
-        debtorId:
-            (positive ? item.row['debtor_id'] : item.row['creditor_id'])
-                as String,
+        creditorId: positive ? item.first : item.second,
+        debtorId: positive ? item.second : item.first,
         materialId: item.row['material_id']! as String,
-        creditorName:
-            (positive ? item.row['creditor_name'] : item.row['debtor_name'])
-                as String,
-        debtorName:
-            (positive ? item.row['debtor_name'] : item.row['creditor_name'])
-                as String,
+        creditorName: positive
+            ? item.row['creditor_id'] == item.first
+                  ? item.row['creditor_name']! as String
+                  : item.row['debtor_name']! as String
+            : item.row['creditor_id'] == item.second
+            ? item.row['creditor_name']! as String
+            : item.row['debtor_name']! as String,
+        debtorName: positive
+            ? item.row['debtor_id'] == item.second
+                  ? item.row['debtor_name']! as String
+                  : item.row['creditor_name']! as String
+            : item.row['debtor_id'] == item.first
+            ? item.row['debtor_name']! as String
+            : item.row['creditor_name']! as String,
         materialName: item.row['material_name']! as String,
         unitName: item.row['unit_name']! as String,
         quantity: item.amount.abs(),
@@ -3560,8 +3590,9 @@ class LocalRepository {
     required double quantity,
     String? comment,
   }) async {
-    if (quantity <= 0)
+    if (quantity <= 0) {
       throw ArgumentError('Количество должно быть больше нуля');
+    }
     if (quantity > debt.quantity + 0.000001) {
       throw ArgumentError('Нельзя списать больше текущего долга');
     }
@@ -3585,6 +3616,78 @@ class LocalRepository {
     await db.transaction((transaction) async {
       await transaction.insert('material_debt_settlements', row);
       await _queueRow(transaction, orgId, 'material_debt_settlement', row, now);
+    });
+  }
+
+  Future<List<MaterialSettlementJournalItem>>
+  materialSettlementJournal() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT settlement.id, settlement.occurred_at, settlement.quantity,
+             settlement.comment, debtor.name AS debtor_name,
+             creditor.name AS creditor_name, material.name AS material_name,
+             material.unit_name
+      FROM material_debt_settlements settlement
+      JOIN providers debtor ON debtor.id = settlement.debtor_provider_id
+      JOIN providers creditor ON creditor.id = settlement.creditor_provider_id
+      JOIN materials material ON material.id = settlement.material_id
+      WHERE settlement.organization_id = ? AND settlement.deleted_at IS NULL
+      ORDER BY settlement.occurred_at DESC
+    ''',
+      [orgId],
+    );
+    return rows
+        .map(
+          (row) => MaterialSettlementJournalItem(
+            id: row['id']! as String,
+            date: DateTime.parse(row['occurred_at']! as String),
+            debtorName: row['debtor_name']! as String,
+            creditorName: row['creditor_name']! as String,
+            materialName: row['material_name']! as String,
+            unitName: row['unit_name']! as String,
+            quantity: (row['quantity']! as num).toDouble(),
+            comment: row['comment'] as String?,
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> deleteMaterialSettlement(String id) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'material_debt_settlements',
+        where: 'id = ? AND organization_id = ?',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw ArgumentError('Операция не найдена');
+      final row = rows.single;
+      final version = (row['version']! as num).toInt() + 1;
+      await transaction.update(
+        'material_debt_settlements',
+        {
+          'deleted_at': now,
+          'updated_at': now,
+          'version': version,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'material_debt_settlement',
+        entityId: id,
+        operation: 'delete',
+        payload: {...row, 'deleted_at': now, 'version': version},
+        now: now,
+      );
     });
   }
 
