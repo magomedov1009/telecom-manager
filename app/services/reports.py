@@ -16,7 +16,7 @@ from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransaction
 from app.models.finance import Expense, FinanceTransaction
 from app.models.users import User
 from app.services.access import AccessScope, apply_user_scope, get_access_scope
-from app.models.inventory import InventoryTransaction, Material, Warehouse
+from app.models.inventory import InventoryTransaction, Material, MaterialDebtSettlement, Warehouse
 from app.services.expenses import make_expense_row
 from app.services.finance import get_finance_stats
 from app.services.inventory import get_unit_label
@@ -325,9 +325,29 @@ def material_settlements(
             key = (int(debtor_id), int(creditor_id), int(material_id))
             values = directional.setdefault(
                 key,
-                {"connections": Decimal("0"), "transfers": Decimal("0")},
+                {"connections": Decimal("0"), "transfers": Decimal("0"), "settlements": Decimal("0")},
             )
             values[source_name] += Decimal(quantity)
+
+    settlement_query = select(
+        MaterialDebtSettlement.debtor_provider_id,
+        MaterialDebtSettlement.creditor_provider_id,
+        MaterialDebtSettlement.material_id,
+        func.coalesce(func.sum(MaterialDebtSettlement.quantity), 0),
+    ).group_by(
+        MaterialDebtSettlement.debtor_provider_id,
+        MaterialDebtSettlement.creditor_provider_id,
+        MaterialDebtSettlement.material_id,
+    )
+    settlement_query = apply_datetime_period(settlement_query, MaterialDebtSettlement.created_at, period)
+    settlement_query = apply_user_scope(settlement_query, MaterialDebtSettlement.user_id, scope)
+    for debtor_id, creditor_id, material_id, quantity in db.execute(settlement_query):
+        key = (int(debtor_id), int(creditor_id), int(material_id))
+        values = directional.setdefault(
+            key,
+            {"connections": Decimal("0"), "transfers": Decimal("0"), "settlements": Decimal("0")},
+        )
+        values["settlements"] += Decimal(quantity)
 
     providers = {item.id: item for item in db.scalars(select(Provider))}
     materials = {item.id: item for item in db.scalars(select(Material))}
@@ -340,14 +360,14 @@ def material_settlements(
         processed.add(pair_key)
         forward = directional.get(
             (debtor_id, creditor_id, material_id),
-            {"connections": Decimal("0"), "transfers": Decimal("0")},
+            {"connections": Decimal("0"), "transfers": Decimal("0"), "settlements": Decimal("0")},
         )
         reverse = directional.get(
             (creditor_id, debtor_id, material_id),
-            {"connections": Decimal("0"), "transfers": Decimal("0")},
+            {"connections": Decimal("0"), "transfers": Decimal("0"), "settlements": Decimal("0")},
         )
-        forward_total = forward["connections"] + forward["transfers"]
-        reverse_total = reverse["connections"] + reverse["transfers"]
+        forward_total = forward["connections"] + forward["transfers"] - forward["settlements"]
+        reverse_total = reverse["connections"] + reverse["transfers"] - reverse["settlements"]
         if forward_total == reverse_total:
             continue
         if forward_total < reverse_total:
@@ -372,7 +392,7 @@ def material_settlements(
                 "material": material,
                 "connections": forward["connections"],
                 "transfers": forward["transfers"],
-                "offset": reverse_total,
+                "offset": reverse_total + forward["settlements"],
                 "quantity": forward_total - reverse_total,
                 "unit": get_unit_label(material),
             }

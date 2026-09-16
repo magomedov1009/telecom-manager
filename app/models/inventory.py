@@ -51,6 +51,26 @@ class Material(BaseModel):
     )
 
 
+class MaterialDebtSettlement(BaseModel):
+    """A non-stock settlement of a material debt between two providers."""
+
+    __tablename__ = "material_debt_settlements"
+    debtor_provider_id: Mapped[int] = mapped_column(
+        ForeignKey("providers.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    creditor_provider_id: Mapped[int] = mapped_column(
+        ForeignKey("providers.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    material_id: Mapped[int] = mapped_column(
+        ForeignKey("materials.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True, nullable=False
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+
 class InventoryTransaction(BaseModel):
     __tablename__ = "inventory_transactions"
     __table_args__ = (

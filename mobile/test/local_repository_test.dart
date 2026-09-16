@@ -399,6 +399,34 @@ void main() {
     },
   );
 
+  test('material debt can be closed without changing warehouse stock', () async {
+    final providers = await repository.providers();
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addTransfer(
+      sourceWarehouseId: warehouse.id,
+      destinationWarehouseId: (await repository.warehouses())
+          .firstWhere((item) => item.id != warehouse.id)
+          .id,
+      materialId: material.id,
+      quantity: 1,
+    );
+    final debt = (await repository.materialSettlements()).single;
+    final stockBefore = (await repository.inventoryBalances(
+      warehouseId: warehouse.id,
+    )).firstWhere((item) => item.materialId == material.id).quantity;
+
+    await repository.settleMaterialDebt(debt: debt, quantity: 1);
+
+    expect(await repository.materialSettlements(), isEmpty);
+    final stockAfter = (await repository.inventoryBalances(
+      warehouseId: warehouse.id,
+    )).firstWhere((item) => item.materialId == material.id).quantity;
+    expect(stockAfter, stockBefore);
+    expect(await repository.pendingChanges(), greaterThan(0));
+    expect(providers, isNotEmpty);
+  });
+
   test(
     'connection with another provider warehouse creates material debt',
     () async {

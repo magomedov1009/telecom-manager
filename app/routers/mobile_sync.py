@@ -23,7 +23,7 @@ from app.models.clients import (
     ExtraWorkType, Provider,
 )
 from app.models.finance import Expense, FinanceTransaction
-from app.models.inventory import InventoryTransaction, Material, Warehouse
+from app.models.inventory import InventoryTransaction, Material, MaterialDebtSettlement, Warehouse
 from app.models.enums import (
     ConnectionType,
     ExpenseCategory,
@@ -206,6 +206,11 @@ def _translate_site_foreign_keys(
             "expense_id": "expense",
             "extra_work_id": "extra_work",
         },
+        "material_debt_settlement": {
+            "debtor_provider_id": "provider",
+            "creditor_provider_id": "provider",
+            "material_id": "material",
+        },
     }
     for field, target_type in references.get(entity_type, {}).items():
         value = payload.get(field)
@@ -258,6 +263,9 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
             "warehouse_id", "counterpart_warehouse_id", "provider_id", "material_id",
             "connection_id", "operation_type", "quantity", "comment",
         )),
+        ("material_debt_settlement", MaterialDebtSettlement, (
+            "debtor_provider_id", "creditor_provider_id", "material_id", "quantity", "comment",
+        )),
         ("finance_transaction", FinanceTransaction, (
             "provider_id", "connection_id", "expense_id", "extra_work_id",
             "transaction_type", "accrual_to", "amount", "comment",
@@ -297,6 +305,8 @@ def _bootstrap_site_data(db: Session, organization_id: int) -> None:
                 payload["description"] = expense_data["description"]
                 payload["comment"] = expense_data["comment"] or None
                 payload["expense_date"] = item.created_at.date().isoformat()
+            elif entity_type == "material_debt_settlement":
+                payload["occurred_at"] = item.created_at.isoformat()
             _translate_site_foreign_keys(
                 db,
                 organization_id,
@@ -895,6 +905,21 @@ def _publish_record_to_site(
             comment=data.get("comment"),
             created_at=datetime.fromisoformat(data["occurred_at"]),
         )
+    elif entity_type == "material_debt_settlement":
+        debtor_id = _site_id(db, org_id, "provider", data.get("debtor_provider_id"))
+        creditor_id = _site_id(db, org_id, "provider", data.get("creditor_provider_id"))
+        material_id = _site_id(db, org_id, "material", data.get("material_id"))
+        if debtor_id is None or creditor_id is None or material_id is None:
+            return False
+        item = MaterialDebtSettlement(
+            debtor_provider_id=debtor_id,
+            creditor_provider_id=creditor_id,
+            material_id=material_id,
+            user_id=user_id,
+            quantity=Decimal(str(data["quantity"])),
+            comment=data.get("comment"),
+            created_at=datetime.fromisoformat(data["occurred_at"]),
+        )
     else:
         return True
     db.add(item)
@@ -921,6 +946,7 @@ def _publish_pending_to_site(
         "extra_work_material": 40,
         "inventory_transaction": 40,
         "finance_transaction": 40,
+        "material_debt_settlement": 50,
     }
     records = list(
         db.scalars(
@@ -943,6 +969,7 @@ def _clear_site_business_data(db: Session) -> None:
     """Clear business tables while preserving website users and mobile auth."""
     for model in (
         FinanceTransaction,
+        MaterialDebtSettlement,
         InventoryTransaction,
         ConnectionMaterial,
         ExtraWorkMaterial,
@@ -971,6 +998,7 @@ def _reassign_snapshot_site_owner(
         "expense": (Expense, "user_id"),
         "inventory_transaction": (InventoryTransaction, "user_id"),
         "finance_transaction": (FinanceTransaction, "user_id"),
+        "material_debt_settlement": (MaterialDebtSettlement, "user_id"),
     }
     counts: dict[str, int] = {}
     for entity_type, (model, owner_field) in targets.items():
@@ -1006,6 +1034,7 @@ SITE_MODELS = {
     "connection_material": ConnectionMaterial,
     "inventory_transaction": InventoryTransaction,
     "finance_transaction": FinanceTransaction,
+    "material_debt_settlement": MaterialDebtSettlement,
     "extra_work_type": ExtraWorkType,
     "extra_work": ExtraWork,
     "extra_work_material": ExtraWorkMaterial,
@@ -1118,6 +1147,12 @@ def _update_record_on_site(
         item.transaction_type = FinanceTransactionType(data["transaction_type"])
         item.accrual_to = PaidBy(data["accrual_to"]) if data.get("accrual_to") else None
         item.comment = data.get("comment")
+    elif kind == "material_debt_settlement":
+        item.debtor_provider_id = _site_id(db, org_id, "provider", data.get("debtor_provider_id"))
+        item.creditor_provider_id = _site_id(db, org_id, "provider", data.get("creditor_provider_id"))
+        item.material_id = _site_id(db, org_id, "material", data.get("material_id"))
+        item.quantity = Decimal(str(data["quantity"]))
+        item.comment = data.get("comment")
     db.flush()
     return True
 
@@ -1131,7 +1166,7 @@ def push(
     membership = current_membership(db, token)
     operational_types = {
         "client", "connection", "connection_material",
-        "inventory_transaction", "finance_transaction",
+        "inventory_transaction", "finance_transaction", "material_debt_settlement",
         "extra_work", "extra_work_material", "expense",
     }
     if membership.role != "admin" and any(item.entity_type not in operational_types for item in payload.changes):

@@ -298,6 +298,9 @@ class ConnectionMaterialInput {
 
 class MaterialSettlement {
   const MaterialSettlement({
+    required this.creditorId,
+    required this.debtorId,
+    required this.materialId,
     required this.creditorName,
     required this.debtorName,
     required this.materialName,
@@ -305,6 +308,9 @@ class MaterialSettlement {
     required this.quantity,
   });
 
+  final String creditorId;
+  final String debtorId;
+  final String materialId;
   final String creditorName;
   final String debtorName;
   final String materialName;
@@ -3457,35 +3463,44 @@ class LocalRepository {
     final rows = await db.rawQuery(
       '''
       WITH debt_movements AS (
-        SELECT transaction_row.warehouse_id,
+        SELECT source.provider_id AS creditor_id,
                transaction_row.material_id,
                transaction_row.provider_id AS debtor_id,
                -transaction_row.quantity AS quantity
         FROM inventory_transactions transaction_row
+        JOIN warehouses source ON source.id = transaction_row.warehouse_id
         WHERE transaction_row.organization_id = ?
           AND transaction_row.deleted_at IS NULL
           AND transaction_row.operation_type IN ('CONNECTION', 'ADJUSTMENT')
           AND transaction_row.provider_id IS NOT NULL
         UNION ALL
-        SELECT transaction_row.warehouse_id,
+        SELECT source.provider_id AS creditor_id,
                transaction_row.material_id,
                destination.provider_id AS debtor_id,
                -transaction_row.quantity AS quantity
         FROM inventory_transactions transaction_row
+        JOIN warehouses source ON source.id = transaction_row.warehouse_id
         JOIN warehouses destination
           ON destination.id = transaction_row.counterpart_warehouse_id
         WHERE transaction_row.organization_id = ?
           AND transaction_row.deleted_at IS NULL
           AND transaction_row.operation_type = 'TRANSFER_OUT'
           AND transaction_row.quantity < 0
+        UNION ALL
+        SELECT settlement.creditor_provider_id AS creditor_id,
+               settlement.material_id,
+               settlement.debtor_provider_id AS debtor_id,
+               -settlement.quantity AS quantity
+        FROM material_debt_settlements settlement
+        WHERE settlement.organization_id = ?
+          AND settlement.deleted_at IS NULL
       )
       SELECT creditor.id AS creditor_id, creditor.name AS creditor_name,
              debtor.id AS debtor_id, debtor.name AS debtor_name,
              material.id AS material_id, material.name AS material_name,
              material.unit_name, SUM(debt_movements.quantity) AS quantity
       FROM debt_movements
-      JOIN warehouses source ON source.id = debt_movements.warehouse_id
-      JOIN providers creditor ON creditor.id = source.provider_id
+      JOIN providers creditor ON creditor.id = debt_movements.creditor_id
       JOIN providers debtor ON debtor.id = debt_movements.debtor_id
       JOIN materials material ON material.id = debt_movements.material_id
       WHERE creditor.id <> debtor.id
@@ -3493,7 +3508,7 @@ class LocalRepository {
                material.id, material.name, material.unit_name
       HAVING ABS(SUM(debt_movements.quantity)) > 0.000001
       ''',
-      [orgId, orgId],
+      [orgId, orgId, orgId],
     );
     final net = <String, ({double amount, Map<String, Object?> row})>{};
     for (final row in rows) {
@@ -3520,6 +3535,13 @@ class LocalRepository {
     return net.values.where((item) => item.amount.abs() > 0.000001).map((item) {
       final positive = item.amount > 0;
       return MaterialSettlement(
+        creditorId:
+            (positive ? item.row['creditor_id'] : item.row['debtor_id'])
+                as String,
+        debtorId:
+            (positive ? item.row['debtor_id'] : item.row['creditor_id'])
+                as String,
+        materialId: item.row['material_id']! as String,
         creditorName:
             (positive ? item.row['creditor_name'] : item.row['debtor_name'])
                 as String,
@@ -3531,6 +3553,39 @@ class LocalRepository {
         quantity: item.amount.abs(),
       );
     }).toList()..sort((a, b) => a.debtorName.compareTo(b.debtorName));
+  }
+
+  Future<void> settleMaterialDebt({
+    required MaterialSettlement debt,
+    required double quantity,
+    String? comment,
+  }) async {
+    if (quantity <= 0)
+      throw ArgumentError('Количество должно быть больше нуля');
+    if (quantity > debt.quantity + 0.000001) {
+      throw ArgumentError('Нельзя списать больше текущего долга');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'debtor_provider_id': debt.debtorId,
+      'creditor_provider_id': debt.creditorId,
+      'material_id': debt.materialId,
+      'quantity': quantity,
+      'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+      'occurred_at': now,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      await transaction.insert('material_debt_settlements', row);
+      await _queueRow(transaction, orgId, 'material_debt_settlement', row, now);
+    });
   }
 
   Future<FinanceSummary> financeSummary({
@@ -4807,6 +4862,7 @@ class LocalRepository {
       'connections': 'connection',
       'connection_materials': 'connection_material',
       'inventory_transactions': 'inventory_transaction',
+      'material_debt_settlements': 'material_debt_settlement',
       'finance_transactions': 'finance_transaction',
       'extra_work_types': 'extra_work_type',
       'extra_works': 'extra_work',
@@ -4871,6 +4927,7 @@ class LocalRepository {
       'connection': 'connections',
       'connection_material': 'connection_materials',
       'inventory_transaction': 'inventory_transactions',
+      'material_debt_settlement': 'material_debt_settlements',
       'finance_transaction': 'finance_transactions',
       'extra_work_type': 'extra_work_types',
       'extra_work': 'extra_works',
@@ -4946,6 +5003,7 @@ class LocalRepository {
       'connection': 'connections',
       'connection_material': 'connection_materials',
       'inventory_transaction': 'inventory_transactions',
+      'material_debt_settlement': 'material_debt_settlements',
       'finance_transaction': 'finance_transactions',
       'extra_work_type': 'extra_work_types',
       'extra_work_types': 'extra_work_types',
@@ -4970,6 +5028,7 @@ class LocalRepository {
       'connection_material': 40,
       'extra_work_material': 40,
       'inventory_transaction': 40,
+      'material_debt_settlement': 50,
       'finance_transaction': 40,
     };
     final ordered = [...changes]

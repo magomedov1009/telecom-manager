@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 12,
+        version: 13,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -153,6 +153,7 @@ class AppDatabase {
     await _createConnectionMaterials(db);
     await _createFinanceTables(db);
     await _createWorkAndExpenseTables(db);
+    await _createMaterialDebtSettlements(db);
     await _createUsersTable(db);
     await db.execute('''
       CREATE TABLE sync_queue (
@@ -260,6 +261,9 @@ class AppDatabase {
         'CREATE UNIQUE INDEX ix_organizations_remote '
         'ON organizations(remote_server_url, remote_organization_id)',
       );
+    }
+    if (oldVersion < 13) {
+      await _createMaterialDebtSettlements(db);
     }
   }
 
@@ -390,6 +394,30 @@ class AppDatabase {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS ix_expenses_org_date ON expenses(organization_id, expense_date)',
+    );
+  }
+
+  Future<void> _createMaterialDebtSettlements(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS material_debt_settlements (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        debtor_provider_id TEXT NOT NULL REFERENCES providers(id),
+        creditor_provider_id TEXT NOT NULL REFERENCES providers(id),
+        material_id TEXT NOT NULL REFERENCES materials(id),
+        quantity REAL NOT NULL CHECK (quantity > 0),
+        comment TEXT,
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending',
+        CHECK (debtor_provider_id <> creditor_provider_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_material_debt_settlements_org ON material_debt_settlements(organization_id, occurred_at)',
     );
   }
 
