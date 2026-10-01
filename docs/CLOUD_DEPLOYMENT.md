@@ -54,6 +54,19 @@ docker compose -f docker-compose.cloud.yml run --rm app alembic upgrade head
 `127.0.0.1:8000`. В приложение указывается адрес `https://cloud.example.ru`
 без `/login` и `/api/mobile`.
 
+Например, для Caddy создайте `/etc/caddy/Caddyfile`, заменив домен на свой:
+
+```text
+cloud.example.ru {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}
+```
+
+DNS домена должен указывать на VPS, а входящие порты 80 и 443 должны быть
+доступны. После настройки HTTPS проверьте страницы `/privacy-policy` и
+`/account-deletion` перед публикацией приложения.
+
 ## ЮMoney
 
 В настройках HTTP-уведомлений ЮMoney задайте только один адрес:
