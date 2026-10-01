@@ -11,6 +11,10 @@ class MobileOrganization(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     hosting_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="cloud")
     is_legacy_workspace: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+    )
 
 
 class MobileMembership(BaseModel):

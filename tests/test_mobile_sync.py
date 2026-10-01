@@ -34,6 +34,7 @@ from app.models.users import User
 from app.routers.mobile_sync import (
     AddMemberRequest,
     CreateOrganizationRequest,
+    DeleteAccountRequest,
     LoginRequest,
     RegisterRequest,
     PushItem,
@@ -42,6 +43,7 @@ from app.routers.mobile_sync import (
     ReassignSnapshotOwnerRequest,
     add_organization_member,
     create_organization,
+    delete_cloud_account,
     login,
     organization_members,
     organizations,
@@ -236,6 +238,35 @@ class MobileSyncTest(unittest.TestCase):
             self.assertFalse(organization.is_legacy_workspace)
             self.assertEqual(response.role, "admin")
             self.assertEqual(subscription.status, "trial")
+        finally:
+            settings.hosting_mode = previous_mode
+
+    def test_cloud_owner_can_delete_own_organization(self) -> None:
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            registered = register(
+                RegisterRequest(
+                    organization_name="Удаляемая компания",
+                    full_name="Владелец",
+                    username="delete-owner",
+                    password="safe-password",
+                    device_name="phone",
+                ),
+                self.db,
+            )
+            token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == registered.organization_id
+                )
+            )
+            response = delete_cloud_account(
+                DeleteAccountRequest(confirmation="DELETE_MY_CLOUD_ACCOUNT"),
+                self.db,
+                token,
+            )
+            self.assertEqual(response.status_code, 204)
+            self.assertIsNone(self.db.get(MobileOrganization, registered.organization_id))
         finally:
             settings.hosting_mode = previous_mode
 

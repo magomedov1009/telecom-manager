@@ -4,7 +4,7 @@ import hashlib
 import secrets
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
@@ -89,6 +89,10 @@ class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=100)
     password: str = Field(min_length=6, max_length=128)
     device_name: str = Field(min_length=1, max_length=120)
+
+
+class DeleteAccountRequest(BaseModel):
+    confirmation: Literal["DELETE_MY_CLOUD_ACCOUNT"]
 
 
 class AddMemberRequest(BaseModel):
@@ -507,6 +511,7 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
                 # A brand-new shared cloud must start as a trial workspace.
                 # A self-hosted install remains unrestricted by design.
                 is_legacy_workspace=settings.hosting_mode != "cloud",
+                owner_user_id=user.id if settings.hosting_mode == "cloud" else None,
             )
             db.add(organization)
             db.flush()
@@ -590,6 +595,7 @@ def register(payload: RegisterRequest, db: DbSession) -> LoginResponse:
         name=payload.organization_name.strip(),
         hosting_mode="cloud",
         is_legacy_workspace=False,
+        owner_user_id=user.id,
     )
     db.add(organization)
     db.flush()
@@ -611,6 +617,38 @@ def register(payload: RegisterRequest, db: DbSession) -> LoginResponse:
         ),
         db,
     )
+
+
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+def delete_cloud_account(
+    payload: DeleteAccountRequest,
+    db: DbSession,
+    token: Annotated[MobileDeviceToken, Depends(current_token)],
+) -> Response:
+    """Delete a customer-owned cloud workspace after explicit confirmation."""
+    organization = db.get(MobileOrganization, token.organization_id)
+    if (
+        organization is None
+        or settings.hosting_mode != "cloud"
+        or organization.is_legacy_workspace
+        or organization.owner_user_id != token.user_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Удаление доступно только владельцу новой облачной организации",
+        )
+    user = db.get(User, token.user_id)
+    db.delete(organization)
+    db.flush()
+    remaining_memberships = db.scalar(
+        select(func.count()).select_from(MobileMembership).where(
+            MobileMembership.user_id == token.user_id
+        )
+    ) or 0
+    if remaining_memberships == 0 and user is not None:
+        db.delete(user)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def current_membership(
@@ -690,7 +728,11 @@ def create_organization(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Введите название")
-    organization = MobileOrganization(name=name, hosting_mode="cloud")
+    organization = MobileOrganization(
+        name=name,
+        hosting_mode="cloud",
+        owner_user_id=token.user_id,
+    )
     db.add(organization)
     db.flush()
     db.add(

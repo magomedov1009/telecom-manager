@@ -272,6 +272,16 @@ class SyncService {
     return url;
   }
 
+  Future<void> deleteCloudAccount() async {
+    final response = await client.delete(
+      endpoint('/account'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({'confirmation': 'DELETE_MY_CLOUD_ACCOUNT'}),
+    );
+    if (response.statusCode != 204) _serverError(response);
+    await tokenStore.clear();
+  }
+
   Never _serverError(http.Response response) {
     var message = 'Ошибка сервера (${response.statusCode})';
     try {

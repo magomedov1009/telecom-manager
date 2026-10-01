@@ -151,6 +151,26 @@ class _SyncScreenState extends State<SyncScreen> {
             );
           },
         ),
+        FutureBuilder<ServerSubscription?>(
+          future: subscription,
+          builder: (context, snapshot) {
+            final item = snapshot.data;
+            if (item == null || item.hostingMode != 'cloud') {
+              return const SizedBox.shrink();
+            }
+            return Card(
+              child: ListTile(
+                leading: const Icon(Icons.delete_forever_outlined),
+                title: const Text('Удалить облачный аккаунт'),
+                subtitle: const Text(
+                  'Безвозвратно удаляет серверные данные организации',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: busy ? null : deleteCloudAccount,
+              ),
+            );
+          },
+        ),
         if (effectiveRole == 'admin')
           Card(
             color: Theme.of(context).colorScheme.errorContainer,
@@ -417,6 +437,59 @@ class _SyncScreenState extends State<SyncScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> deleteCloudAccount() async {
+    final confirmation = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Удалить облачный аккаунт?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'На сервере будут безвозвратно удалены организация, пользователи и синхронизированные данные. Локальная копия на телефоне останется до удаления данных приложения.',
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: confirmation,
+              decoration: const InputDecoration(labelText: 'Введите УДАЛИТЬ'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              confirmation.text.trim().toUpperCase() == 'УДАЛИТЬ',
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    confirmation.dispose();
+    if (approved != true) return;
+    try {
+      setState(() => busy = true);
+      await service().deleteCloudAccount();
+      if (mounted) widget.onLogout();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
