@@ -1,6 +1,7 @@
 """SQLAlchemy models."""
 
 from app.models.base import BaseModel
+from app.models.billing import CloudSubscription
 from app.models.clients import Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
 from app.models.enums import (
     ConnectionType,
@@ -20,6 +21,7 @@ from app.models.users import User
 __all__ = [
     "BaseModel",
     "Client",
+    "CloudSubscription",
     "Connection",
     "ConnectionMaterial",
     "ConnectionType",

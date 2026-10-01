@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -9,6 +9,8 @@ from app.models.base import BaseModel
 class MobileOrganization(BaseModel):
     __tablename__ = "mobile_organizations"
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    hosting_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="cloud")
+    is_legacy_workspace: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class MobileMembership(BaseModel):

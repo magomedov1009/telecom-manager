@@ -18,6 +18,12 @@ class Settings(BaseSettings):
 
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
+    # Billing is enabled only for the shared cloud.  A self-hosted copy stays
+    # independent of the commercial service and does not require a payment.
+    hosting_mode: str = Field(default="self_hosted", alias="HOSTING_MODE")
+    cloud_trial_days: int = Field(default=14, alias="CLOUD_TRIAL_DAYS")
+    yoomoney_payment_url: str | None = Field(default=None, alias="YOOMONEY_PAYMENT_URL")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

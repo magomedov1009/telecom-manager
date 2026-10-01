@@ -18,6 +18,8 @@ from app.models.mobile_sync import (
     MobileSyncChange,
     MobileSyncRecord,
 )
+from app.models.billing import CloudSubscription
+from app.core.config import settings
 from app.models.clients import (
     Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial,
     ExtraWorkType, Provider,
@@ -51,6 +53,15 @@ class OrganizationOption(BaseModel):
     id: int
     name: str
     role: str
+
+
+class SubscriptionResponse(BaseModel):
+    hosting_mode: str
+    plan_code: str
+    status: str
+    expires_at: datetime | None = None
+    payment_url: str | None = None
+    can_sync: bool
 
 
 class LoginResponse(BaseModel):
@@ -126,6 +137,40 @@ class PullResponse(BaseModel):
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _subscription_for(db: Session, organization: MobileOrganization) -> CloudSubscription | None:
+    """Return commercial access without ever restricting legacy/self-hosted data."""
+    if settings.hosting_mode != "cloud" or organization.is_legacy_workspace:
+        return None
+    subscription = db.scalar(
+        select(CloudSubscription).where(
+            CloudSubscription.organization_id == organization.id
+        )
+    )
+    if subscription is None:
+        now = datetime.now(UTC)
+        subscription = CloudSubscription(
+            organization_id=organization.id,
+            plan_code="trial",
+            status="trial",
+            starts_at=now,
+            expires_at=now + timedelta(days=settings.cloud_trial_days),
+        )
+        db.add(subscription)
+        db.flush()
+    return subscription
+
+
+def _subscription_can_sync(
+    organization: MobileOrganization,
+    subscription: CloudSubscription | None,
+) -> bool:
+    if settings.hosting_mode != "cloud" or organization.is_legacy_workspace:
+        return True
+    if subscription is None or subscription.status not in {"trial", "active"}:
+        return False
+    return subscription.expires_at is None or subscription.expires_at >= datetime.now(UTC)
 
 
 def _value(value):
@@ -417,7 +462,10 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
     if not memberships:
         organization = db.scalar(select(MobileOrganization).order_by(MobileOrganization.id))
         if organization is None:
-            organization = MobileOrganization(name="Основная организация")
+            organization = MobileOrganization(
+                name="Основная организация",
+                is_legacy_workspace=True,
+            )
             db.add(organization)
             db.flush()
         membership = MobileMembership(
@@ -445,6 +493,7 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
     else:
         membership = memberships[0]
     organization = db.get(MobileOrganization, membership.organization_id)
+    _subscription_for(db, organization)
     _bootstrap_site_data(db, membership.organization_id)
     raw_token = secrets.token_urlsafe(48)
     db.add(
@@ -552,7 +601,7 @@ def create_organization(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Введите название")
-    organization = MobileOrganization(name=name)
+    organization = MobileOrganization(name=name, hosting_mode="cloud")
     db.add(organization)
     db.flush()
     db.add(
@@ -562,8 +611,39 @@ def create_organization(
             role="admin",
         )
     )
+    _subscription_for(db, organization)
     db.commit()
     return OrganizationOption(id=organization.id, name=name, role="admin")
+
+
+@router.get("/subscription", response_model=SubscriptionResponse)
+def subscription_status(
+    db: DbSession,
+    token: Annotated[MobileDeviceToken, Depends(current_token)],
+) -> SubscriptionResponse:
+    """Subscription status for the selected cloud workspace.
+
+    The app opens payment_url in the external browser.  Payment confirmation
+    will be implemented as a separately authenticated YooMoney webhook.
+    """
+    organization = db.get(MobileOrganization, token.organization_id)
+    subscription = _subscription_for(db, organization)
+    db.commit()
+    if subscription is None:
+        return SubscriptionResponse(
+            hosting_mode="self_hosted" if settings.hosting_mode != "cloud" else "legacy",
+            plan_code="lifetime",
+            status="active",
+            can_sync=True,
+        )
+    return SubscriptionResponse(
+        hosting_mode=organization.hosting_mode,
+        plan_code=subscription.plan_code,
+        status=subscription.status,
+        expires_at=subscription.expires_at,
+        payment_url=settings.yoomoney_payment_url,
+        can_sync=_subscription_can_sync(organization, subscription),
+    )
 
 
 @router.get(

@@ -25,6 +25,7 @@ from app.models.mobile_sync import (
     MobileSyncChange,
     MobileSyncRecord,
 )
+from app.models.billing import CloudSubscription
 from fastapi import HTTPException
 from app.models.users import User
 from app.routers.mobile_sync import (
@@ -45,6 +46,7 @@ from app.routers.mobile_sync import (
     replace_snapshot,
     reassign_snapshot_owner,
     remove_organization_member,
+    subscription_status,
 )
 from app.scripts.audit_mobile_restore import audit_restore
 
@@ -119,6 +121,12 @@ class MobileSyncTest(unittest.TestCase):
         self.assertGreaterEqual(len(provider_changes), 1)
         self.assertEqual(provider_changes[-1].payload["name"], "ELLKO")
         self.assertEqual(len(pull(self.db, self.token, cursor=first_page.cursor, limit=200).changes), 0)
+
+    def test_legacy_workspace_keeps_unlimited_sync_access(self) -> None:
+        result = subscription_status(self.db, self.token)
+        self.assertTrue(result.can_sync)
+        self.assertEqual(result.plan_code, "lifetime")
+        self.assertIsNone(self.db.scalar(select(CloudSubscription)))
 
     def test_installer_cannot_change_catalogs(self) -> None:
         membership = self.db.scalar(select(MobileMembership))
