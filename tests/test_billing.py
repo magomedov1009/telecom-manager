@@ -192,3 +192,39 @@ class BillingTest(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 410)
         self.assertEqual(self.db.get(CloudPayment, payment.id).status, "expired")
 
+    def test_notification_for_expired_order_does_not_activate_subscription(self) -> None:
+        payment = CloudPayment(
+            organization_id=self.organization.id,
+            public_token="expired-payment-token",
+            label="TMexpired-payment",
+            plan_code="monthly",
+            amount=199,
+            status="pending",
+            created_at=datetime.now(UTC) - timedelta(minutes=61),
+        )
+        self.db.add(payment)
+        self.db.commit()
+        values = {
+            "notification_type": "card-incoming",
+            "operation_id": "expired-operation",
+            "amount": "193.03",
+            "withdraw_amount": "199.00",
+            "currency": "643",
+            "datetime": "2026-10-01T10:00:00Z",
+            "sender": "",
+            "codepro": "false",
+            "label": payment.label,
+            "unaccepted": "false",
+        }
+        values["sign"] = _notification_signature(values)
+
+        class NotificationRequest:
+            async def form(self):
+                return values
+
+        with self.assertRaises(HTTPException) as raised:
+            asyncio.run(yoomoney_notification(NotificationRequest(), self.db))
+        self.assertEqual(raised.exception.status_code, 410)
+        self.assertEqual(self.db.get(CloudPayment, payment.id).status, "expired")
+        self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+
