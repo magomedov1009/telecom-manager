@@ -312,6 +312,60 @@ void main() {
     await database.close();
   });
 
+  test('registers a new cloud organization and stores its token', () async {
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final repository = LocalRepository(database);
+    await repository.initialize();
+    final tokens = MemoryTokenStore();
+    final service = SyncService(
+      repository: repository,
+      serverUrl: 'https://cloud.example.test',
+      tokenStore: tokens,
+      client: MockClient((request) async {
+        expect(request.url.path, '/api/mobile/register');
+        expect(
+          (jsonDecode(request.body) as Map)['organization_name'],
+          'Новая компания',
+        );
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'token': 'new-cloud-token',
+              'organization_id': 55,
+              'organization_name': 'Новая компания',
+              'user_id': 9,
+              'username': 'new-owner',
+              'full_name': 'Новый владелец',
+              'role': 'admin',
+              'organizations': [
+                {'id': 55, 'name': 'Новая компания', 'role': 'admin'},
+              ],
+            }),
+          ),
+          201,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+      }),
+    );
+    final connection = await service.register(
+      organizationName: 'Новая компания',
+      fullName: 'Новый владелец',
+      username: 'new-owner',
+      password: 'safe-password',
+      deviceName: 'test',
+    );
+    expect(connection.organizationId, 55);
+    expect(tokens.token, 'new-cloud-token');
+    expect(
+      (await repository.remoteOrganizationBinding())!.remoteOrganizationId,
+      '55',
+    );
+    await database.close();
+  });
+
   test('remote changes are applied in dependency order', () async {
     final database = AppDatabase(
       factory: databaseFactoryFfi,

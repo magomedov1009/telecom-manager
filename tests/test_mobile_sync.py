@@ -35,6 +35,7 @@ from app.routers.mobile_sync import (
     AddMemberRequest,
     CreateOrganizationRequest,
     LoginRequest,
+    RegisterRequest,
     PushItem,
     PushRequest,
     ReplaceSnapshotRequest,
@@ -48,6 +49,7 @@ from app.routers.mobile_sync import (
     push,
     replace_snapshot,
     reassign_snapshot_owner,
+    register,
     remove_organization_member,
     subscription_status,
 )
@@ -208,6 +210,32 @@ class MobileSyncTest(unittest.TestCase):
             self.assertNotEqual(response.organization_id, self.token.organization_id)
             organization = self.db.get(MobileOrganization, response.organization_id)
             self.assertFalse(organization.is_legacy_workspace)
+        finally:
+            settings.hosting_mode = previous_mode
+
+    def test_cloud_registration_creates_isolated_trial_organization(self) -> None:
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            response = register(
+                RegisterRequest(
+                    organization_name="Новая компания",
+                    full_name="Владелец компании",
+                    username="new-owner",
+                    password="safe-password",
+                    device_name="new-phone",
+                ),
+                self.db,
+            )
+            organization = self.db.get(MobileOrganization, response.organization_id)
+            subscription = self.db.scalar(
+                select(CloudSubscription).where(
+                    CloudSubscription.organization_id == organization.id
+                )
+            )
+            self.assertFalse(organization.is_legacy_workspace)
+            self.assertEqual(response.role, "admin")
+            self.assertEqual(subscription.status, "trial")
         finally:
             settings.hosting_mode = previous_mode
 

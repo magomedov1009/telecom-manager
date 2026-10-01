@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.core.security import verify_password
+from app.core.security import hash_password, verify_password
 from app.db.session import get_db
 from app.models.mobile_sync import (
     MobileDeviceToken,
@@ -34,6 +34,7 @@ from app.models.enums import (
     InventoryTransactionType,
     MaterialUnit,
     PaidBy,
+    UserRole,
 )
 from app.models.users import User
 from app.services.expenses import pack_comment, unpack_comment
@@ -80,6 +81,14 @@ class LoginResponse(BaseModel):
 
 class CreateOrganizationRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+
+
+class RegisterRequest(BaseModel):
+    organization_name: str = Field(min_length=1, max_length=255)
+    full_name: str = Field(min_length=1, max_length=255)
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=6, max_length=128)
+    device_name: str = Field(min_length=1, max_length=120)
 
 
 class AddMemberRequest(BaseModel):
@@ -554,6 +563,53 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
             )
             for item in memberships
         ],
+    )
+
+
+@router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterRequest, db: DbSession) -> LoginResponse:
+    """Create an isolated customer account on the shared cloud only."""
+    if settings.hosting_mode != "cloud":
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Самостоятельная регистрация доступна только в облаке",
+        )
+    username = payload.username.strip()
+    if db.scalar(select(User.id).where(User.username == username)) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такой логин уже занят")
+    user = User(
+        username=username,
+        full_name=payload.full_name.strip(),
+        hashed_password=hash_password(payload.password, secrets.token_urlsafe(16)),
+        role=UserRole.ADMIN,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    organization = MobileOrganization(
+        name=payload.organization_name.strip(),
+        hosting_mode="cloud",
+        is_legacy_workspace=False,
+    )
+    db.add(organization)
+    db.flush()
+    db.add(
+        MobileMembership(
+            organization_id=organization.id,
+            user_id=user.id,
+            role="admin",
+        )
+    )
+    _subscription_for(db, organization)
+    db.commit()
+    return login(
+        LoginRequest(
+            username=username,
+            password=payload.password,
+            device_name=payload.device_name,
+            organization_id=organization.id,
+        ),
+        db,
     )
 
 

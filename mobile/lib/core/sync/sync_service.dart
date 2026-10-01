@@ -181,6 +181,37 @@ class SyncService {
       throw StateError('Сервер отклонил вход (${response.statusCode})');
     }
     final body = jsonDecode(response.body) as Map<String, Object?>;
+    return _storeConnection(body, username: username, password: password);
+  }
+
+  Future<ServerConnection> register({
+    required String organizationName,
+    required String fullName,
+    required String username,
+    required String password,
+    required String deviceName,
+  }) async {
+    final response = await client.post(
+      endpoint('/register'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'organization_name': organizationName,
+        'full_name': fullName,
+        'username': username,
+        'password': password,
+        'device_name': deviceName,
+      }),
+    );
+    if (response.statusCode != 201) _serverError(response);
+    final body = jsonDecode(response.body) as Map<String, Object?>;
+    return _storeConnection(body, username: username, password: password);
+  }
+
+  Future<ServerConnection> _storeConnection(
+    Map<String, Object?> body, {
+    required String username,
+    required String password,
+  }) async {
     await tokenStore.write(body['token']! as String);
     await repository.bindRemoteOrganization(
       serverUrl: normalizedServerUrl,

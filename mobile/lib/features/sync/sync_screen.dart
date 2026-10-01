@@ -336,6 +336,11 @@ class _SyncScreenState extends State<SyncScreen> {
                   icon: const Icon(Icons.link),
                   label: const Text('Подключить устройство'),
                 ),
+                TextButton.icon(
+                  onPressed: busy ? null : registerCloudOrganization,
+                  icon: const Icon(Icons.add_business_outlined),
+                  label: const Text('Создать организацию в облаке'),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: busy ? null : synchronize,
@@ -674,6 +679,110 @@ class _SyncScreenState extends State<SyncScreen> {
         () => statusMessage = error.toString().replaceFirst('Bad state: ', ''),
       );
     } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> registerCloudOrganization() async {
+    final organization = TextEditingController();
+    final fullName = TextEditingController();
+    final login = TextEditingController();
+    final newPassword = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Новая облачная организация'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: organization,
+                decoration: const InputDecoration(
+                  labelText: 'Название компании',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: fullName,
+                decoration: const InputDecoration(labelText: 'Ваше имя'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: login,
+                decoration: const InputDecoration(labelText: 'Логин'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: newPassword,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Пароль (минимум 6 символов)',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true) {
+      organization.dispose();
+      fullName.dispose();
+      login.dispose();
+      newPassword.dispose();
+      return;
+    }
+    try {
+      final normalizedUrl = SyncService.normalizeServerUrl(
+        serverController.text,
+      );
+      if (normalizedUrl.isEmpty) {
+        throw StateError('Укажите адрес облачного сервера');
+      }
+      serverController.text = normalizedUrl;
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setString('server_url', normalizedUrl);
+      setState(() => busy = true);
+      await service().register(
+        organizationName: organization.text,
+        fullName: fullName.text,
+        username: login.text,
+        password: newPassword.text,
+        deviceName: 'Android Telecom Manager',
+      );
+      final syncResult = await service().synchronize();
+      final localUser = await widget.repository.currentUser();
+      if (mounted) {
+        setState(() {
+          effectiveRole = localUser?.role ?? effectiveRole;
+          pending = widget.repository.pendingChanges();
+          subscription = _loadSubscription();
+          statusMessage =
+              'Организация создана. Получено с сервера: ${syncResult.received}.';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () =>
+              statusMessage = error.toString().replaceFirst('Bad state: ', ''),
+        );
+      }
+    } finally {
+      organization.dispose();
+      fullName.dispose();
+      login.dispose();
+      newPassword.dispose();
       if (mounted) setState(() => busy = false);
     }
   }
