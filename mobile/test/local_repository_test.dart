@@ -15,7 +15,7 @@ void main() {
       factory: databaseFactoryFfi,
       overridePath: inMemoryDatabasePath,
     );
-    repository = LocalRepository(database);
+    repository = LocalRepository(database, seedDemoCatalog: true);
     await repository.initialize();
   });
 
@@ -29,6 +29,21 @@ void main() {
     expect(summary.warehouses, 2);
     expect(summary.materials, 2);
     expect(summary.pendingChanges, 10);
+  });
+
+  test('a new production workspace has no preset providers', () async {
+    await database.close();
+    final cleanDatabase = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final cleanRepository = LocalRepository(cleanDatabase);
+    await cleanRepository.initialize();
+
+    expect(await cleanRepository.providers(), isEmpty);
+    expect(await cleanRepository.warehouses(), isEmpty);
+    expect(await cleanRepository.materials(), isEmpty);
+    await cleanDatabase.close();
   });
 
   test('receipt updates stock and sync queue atomically', () async {

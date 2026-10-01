@@ -625,9 +625,12 @@ class SyncQueueItem {
 }
 
 class LocalRepository {
-  LocalRepository(this.database);
+  LocalRepository(this.database, {this.seedDemoCatalog = false});
 
   final AppDatabase database;
+
+  /// Used only by tests and development previews. Production starts clean.
+  final bool seedDemoCatalog;
   final Uuid _uuid = const Uuid();
 
   Future<void> initialize() async {
@@ -637,7 +640,9 @@ class LocalRepository {
           await db.rawQuery('SELECT COUNT(*) FROM organizations'),
         ) ??
         0;
-    if (count == 0) await _seedLocalWorkspace(db);
+    if (count == 0) {
+      await _seedLocalWorkspace(db, includeDemoCatalog: seedDemoCatalog);
+    }
     final orgId = await organizationId;
     await db.insert('app_settings', {
       'key': 'current_organization_id',
@@ -5221,7 +5226,10 @@ class LocalRepository {
     });
   }
 
-  Future<void> _seedLocalWorkspace(Database db) async {
+  Future<void> _seedLocalWorkspace(
+    Database db, {
+    required bool includeDemoCatalog,
+  }) async {
     final now = DateTime.now().toUtc().toIso8601String();
     final orgId = _uuid.v7();
     final ellkoId = _uuid.v7();
@@ -5329,6 +5337,9 @@ class LocalRepository {
         },
       ),
     ];
+    if (!includeDemoCatalog) {
+      entities.removeRange(1, entities.length);
+    }
     await db.transaction((transaction) async {
       for (final entity in entities) {
         await transaction.insert(entity.$1, entity.$2);
