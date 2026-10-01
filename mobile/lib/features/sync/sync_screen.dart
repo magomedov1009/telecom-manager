@@ -141,9 +141,9 @@ class _SyncScreenState extends State<SyncScreen> {
                       ? 'Синхронизация не зависит от подписки'
                       : '${item.status == 'trial' ? 'Пробный период' : 'Тариф'} $expires',
                 ),
-                trailing: !isSelfHosted && item.paymentUrl != null
+                trailing: !isSelfHosted && item.checkoutAvailable
                     ? TextButton(
-                        onPressed: () => openPayment(item.paymentUrl!),
+                        onPressed: () => choosePlan(item),
                         child: const Text('Продлить'),
                       )
                     : null,
@@ -372,6 +372,44 @@ class _SyncScreenState extends State<SyncScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось открыть страницу оплаты')),
+        );
+      }
+    }
+  }
+
+  Future<void> choosePlan(ServerSubscription subscription) async {
+    final options = <(String, String)>[
+      if (subscription.monthlyPrice != null)
+        ('monthly', 'Месяц — ${subscription.monthlyPrice} ₽'),
+      if (subscription.yearlyPrice != null)
+        ('yearly', 'Год — ${subscription.yearlyPrice} ₽'),
+    ];
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Выберите тариф'),
+        children: options
+            .map(
+              (option) => SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, option.$1),
+                child: Text(option.$2),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (selected == null) return;
+    try {
+      final checkout = await service().createCheckout(selected);
+      if (!await launchUrl(checkout, mode: LaunchMode.externalApplication)) {
+        throw StateError('Не удалось открыть страницу оплаты');
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.toString().replaceFirst('Bad state: ', '')),
+          ),
         );
       }
     }

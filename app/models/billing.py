@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String
+from decimal import Decimal
+
+from sqlalchemy import DateTime, ForeignKey, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import BaseModel
@@ -26,3 +28,21 @@ class CloudSubscription(BaseModel):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     payment_provider: Mapped[str | None] = mapped_column(String(32))
     payment_reference: Mapped[str | None] = mapped_column(String(255), unique=True)
+
+
+class CloudPayment(BaseModel):
+    """One immutable checkout attempt, reconciled by a YooMoney notification."""
+
+    __tablename__ = "cloud_payments"
+
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("mobile_organizations.id", ondelete="CASCADE"),
+        index=True,
+    )
+    public_token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    plan_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    provider_operation_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

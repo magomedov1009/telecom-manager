@@ -22,7 +22,13 @@ class Settings(BaseSettings):
     # independent of the commercial service and does not require a payment.
     hosting_mode: str = Field(default="self_hosted", alias="HOSTING_MODE")
     cloud_trial_days: int = Field(default=14, alias="CLOUD_TRIAL_DAYS")
-    yoomoney_payment_url: str | None = Field(default=None, alias="YOOMONEY_PAYMENT_URL")
+    cloud_monthly_price: int = Field(default=0, alias="CLOUD_MONTHLY_PRICE")
+    cloud_yearly_price: int = Field(default=0, alias="CLOUD_YEARLY_PRICE")
+    yoomoney_wallet: str | None = Field(default=None, alias="YOOMONEY_WALLET")
+    yoomoney_notification_secret: str | None = Field(
+        default=None,
+        alias="YOOMONEY_NOTIFICATION_SECRET",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

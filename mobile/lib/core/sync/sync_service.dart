@@ -91,6 +91,9 @@ class ServerSubscription {
     required this.status,
     required this.expiresAt,
     required this.paymentUrl,
+    required this.checkoutAvailable,
+    required this.monthlyPrice,
+    required this.yearlyPrice,
     required this.canSync,
   });
 
@@ -99,6 +102,9 @@ class ServerSubscription {
   final String status;
   final DateTime? expiresAt;
   final String? paymentUrl;
+  final bool checkoutAvailable;
+  final int? monthlyPrice;
+  final int? yearlyPrice;
   final bool canSync;
 
   factory ServerSubscription.fromJson(Map<String, Object?> json) =>
@@ -110,6 +116,9 @@ class ServerSubscription {
             ? null
             : DateTime.parse(json['expires_at']! as String).toLocal(),
         paymentUrl: json['payment_url'] as String?,
+        checkoutAvailable: json['checkout_available'] as bool? ?? false,
+        monthlyPrice: (json['monthly_price'] as num?)?.toInt(),
+        yearlyPrice: (json['yearly_price'] as num?)?.toInt(),
         canSync: json['can_sync']! as bool,
       );
 }
@@ -215,6 +224,21 @@ class SyncService {
     return ServerSubscription.fromJson(
       Map<String, Object?>.from(jsonDecode(response.body) as Map),
     );
+  }
+
+  Future<Uri> createCheckout(String planCode) async {
+    final response = await client.post(
+      endpoint('/subscription/checkout'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({'plan_code': planCode}),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    final body = Map<String, Object?>.from(jsonDecode(response.body) as Map);
+    final url = Uri.tryParse(body['checkout_url']?.toString() ?? '');
+    if (url == null || !url.hasScheme) {
+      throw StateError('Сервер вернул неверную ссылку на оплату');
+    }
+    return url;
   }
 
   Never _serverError(http.Response response) {

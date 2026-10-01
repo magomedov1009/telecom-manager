@@ -61,6 +61,9 @@ class SubscriptionResponse(BaseModel):
     status: str
     expires_at: datetime | None = None
     payment_url: str | None = None
+    checkout_available: bool = False
+    monthly_price: int | None = None
+    yearly_price: int | None = None
     can_sync: bool
 
 
@@ -636,12 +639,21 @@ def subscription_status(
             status="active",
             can_sync=True,
         )
+    checkout_available = bool(
+        settings.hosting_mode == "cloud"
+        and settings.yoomoney_wallet
+        and settings.cloud_monthly_price > 0
+        and settings.cloud_yearly_price > 0
+    )
     return SubscriptionResponse(
         hosting_mode=organization.hosting_mode,
         plan_code=subscription.plan_code,
         status=subscription.status,
         expires_at=subscription.expires_at,
-        payment_url=settings.yoomoney_payment_url,
+        payment_url=None,
+        checkout_available=checkout_available,
+        monthly_price=settings.cloud_monthly_price if checkout_available else None,
+        yearly_price=settings.cloud_yearly_price if checkout_available else None,
         can_sync=_subscription_can_sync(organization, subscription),
     )
 

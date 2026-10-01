@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Оплата подписки — {{ app_name }}</title>
+    <style>body{margin:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#182230}.card{max-width:480px;margin:48px auto;padding:28px;background:#fff;border:1px solid #e4e7ec;border-radius:20px;box-shadow:0 8px 24px #10182812}h1{font-size:24px;margin:0 0 10px}.muted{color:#667085}.price{font-size:32px;font-weight:700;margin:24px 0}.pay{display:block;width:100%;padding:14px;border:0;border-radius:10px;background:#155eef;color:#fff;font-size:16px;font-weight:700;cursor:pointer}.option{display:block;margin:12px 0}</style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Подписка {{ app_name }}</h1>
+      <p class="muted">Организация: {{ organization.name }}</p>
+      <p class="muted">Тариф: {{ plan_label }}</p>
+      <div class="price">{{ payment.amount }} ₽</div>
+      <form method="post" action="https://yoomoney.ru/quickpay/confirm">
+        <input type="hidden" name="receiver" value="{{ wallet }}">
+        <input type="hidden" name="label" value="{{ payment.label }}">
+        <input type="hidden" name="quickpay-form" value="button">
+        <input type="hidden" name="sum" value="{{ payment.amount }}" data-type="number">
+        <input type="hidden" name="targets" value="Подписка {{ app_name }}">
+        <input type="hidden" name="successURL" value="{{ success_url }}">
+        <label class="option"><input type="radio" name="paymentType" value="AC" checked> Банковской картой</label>
+        <label class="option"><input type="radio" name="paymentType" value="PC"> Из кошелька ЮMoney</label>
+        <button class="pay" type="submit">Перейти к оплате</button>
+      </form>
+    </main>
+  </body>
+</html>
