@@ -192,7 +192,7 @@ class BillingTest(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 410)
         self.assertEqual(self.db.get(CloudPayment, payment.id).status, "expired")
 
-    def test_notification_for_expired_order_does_not_activate_subscription(self) -> None:
+    def test_late_notification_for_expired_order_honors_confirmed_payment(self) -> None:
         payment = CloudPayment(
             organization_id=self.organization.id,
             public_token="expired-payment-token",
@@ -222,9 +222,8 @@ class BillingTest(unittest.TestCase):
             async def form(self):
                 return values
 
-        with self.assertRaises(HTTPException) as raised:
-            asyncio.run(yoomoney_notification(NotificationRequest(), self.db))
-        self.assertEqual(raised.exception.status_code, 410)
-        self.assertEqual(self.db.get(CloudPayment, payment.id).status, "expired")
-        self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+        response = asyncio.run(yoomoney_notification(NotificationRequest(), self.db))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.db.get(CloudPayment, payment.id).status, "paid")
+        self.assertEqual(self.db.scalar(select(CloudSubscription)).status, "active")
 

@@ -184,18 +184,9 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ не найден")
     if payment.status == "paid":
         return Response(status_code=status.HTTP_200_OK)
-    if payment.status != "pending":
-        raise HTTPException(
-            status.HTTP_410_GONE,
-            "Заказ на оплату больше не действует",
-        )
-    expires_at = _utc(payment.created_at) + timedelta(
-        minutes=max(1, settings.cloud_payment_link_minutes)
-    )
-    if expires_at <= datetime.now(UTC):
-        payment.status = "expired"
-        db.commit()
-        raise HTTPException(status.HTTP_410_GONE, "Срок действия заказа на оплату истёк")
+    # YooMoney may deliver a valid confirmation late. Once its signature,
+    # amount, currency and operation id are verified below, honor the payment
+    # even if the checkout URL expired or was superseded in the meantime.
     operation_id = values.get("operation_id")
     if not operation_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Не указан номер операции")
