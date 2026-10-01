@@ -193,6 +193,8 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Уведомления не настроены")
     form = await request.form()
     values = {str(key): str(value) for key, value in form.items()}
+    if not values or not any(values.values()) or values.get("test_notification") == "true":
+        return Response(status_code=status.HTTP_200_OK)
     received_sign = values.get("sign", "")
     expected_sign = _notification_signature(values)
     if not hmac.compare_digest(received_sign, expected_sign):
