@@ -190,7 +190,10 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
         )
         db.add(subscription)
     now = datetime.now(UTC)
-    base = subscription.expires_at if subscription.expires_at and subscription.expires_at > now else now
+    previous_expiry = subscription.expires_at
+    if previous_expiry is not None and previous_expiry.tzinfo is None:
+        previous_expiry = previous_expiry.replace(tzinfo=UTC)
+    base = previous_expiry if previous_expiry and previous_expiry > now else now
     subscription.plan_code = payment.plan_code
     subscription.status = "active"
     subscription.starts_at = subscription.starts_at or now

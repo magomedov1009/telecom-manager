@@ -173,7 +173,25 @@ def _subscription_can_sync(
         return True
     if subscription is None or subscription.status not in {"trial", "active"}:
         return False
-    return subscription.expires_at is None or subscription.expires_at >= datetime.now(UTC)
+    if subscription.expires_at is None:
+        return True
+    expires_at = subscription.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=UTC)
+    return expires_at >= datetime.now(UTC)
+
+
+def require_sync_access(db: Session, token: MobileDeviceToken) -> None:
+    """Block only expired paid-cloud workspaces; never remove their data."""
+    organization = db.get(MobileOrganization, token.organization_id)
+    if organization is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
+    subscription = _subscription_for(db, organization)
+    if not _subscription_can_sync(organization, subscription):
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "Срок облачной подписки закончился. Продлите её, чтобы синхронизировать данные.",
+        )
 
 
 def _value(value):
@@ -1255,6 +1273,7 @@ def push(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> list[PushResult]:
+    require_sync_access(db, token)
     membership = current_membership(db, token)
     operational_types = {
         "client", "connection", "connection_material",
@@ -1328,6 +1347,7 @@ def replace_snapshot(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> dict:
+    require_sync_access(db, token)
     require_admin(db, token)
     owner_user_id = payload.owner_user_id or token.user_id
     _organization_member_user(
@@ -1401,6 +1421,7 @@ def reassign_snapshot_owner(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> dict:
+    require_sync_access(db, token)
     require_admin(db, token)
     owner = _organization_member_user(
         db,
@@ -1427,6 +1448,7 @@ def pull(
     cursor: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> PullResponse:
+    require_sync_access(db, token)
     current_membership(db, token)
     _bootstrap_site_data(db, token.organization_id)
     db.flush()

@@ -1,10 +1,12 @@
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
 
 import app.models  # noqa: F401
 from app.core.security import hash_password
+from app.core.config import settings
 from app.db.base import Base
 from app.models.enums import UserRole
 from app.models.clients import (
@@ -127,6 +129,33 @@ class MobileSyncTest(unittest.TestCase):
         self.assertTrue(result.can_sync)
         self.assertEqual(result.plan_code, "lifetime")
         self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+
+    def test_expired_cloud_workspace_cannot_sync(self) -> None:
+        previous_mode = settings.hosting_mode
+        previous_trial = settings.cloud_trial_days
+        try:
+            settings.hosting_mode = "cloud"
+            settings.cloud_trial_days = 14
+            organization = create_organization(
+                CreateOrganizationRequest(name="Облачный клиент"),
+                self.db,
+                self.token,
+            )
+            self.token.organization_id = organization.id
+            self.db.commit()
+            subscription = self.db.scalar(
+                select(CloudSubscription).where(
+                    CloudSubscription.organization_id == organization.id
+                )
+            )
+            subscription.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            self.db.commit()
+            with self.assertRaises(HTTPException) as error:
+                push(PushRequest(changes=[]), self.db, self.token)
+            self.assertEqual(error.exception.status_code, 402)
+        finally:
+            settings.hosting_mode = previous_mode
+            settings.cloud_trial_days = previous_trial
 
     def test_installer_cannot_change_catalogs(self) -> None:
         membership = self.db.scalar(select(MobileMembership))

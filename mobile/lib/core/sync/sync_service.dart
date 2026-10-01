@@ -341,7 +341,7 @@ class SyncService {
         }),
       );
       if (response.statusCode != 200) {
-        throw StateError('Ошибка отправки (${response.statusCode})');
+        _serverError(response);
       }
       final results = jsonDecode(response.body) as List;
       var shouldRetry = false;
@@ -376,7 +376,7 @@ class SyncService {
         headers: headers,
       );
       if (response.statusCode != 200) {
-        throw StateError('Ошибка получения (${response.statusCode})');
+        _serverError(response);
       }
       final body = jsonDecode(response.body) as Map<String, Object?>;
       final changes = (body['changes']! as List)
