@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         default=None,
         alias="YOOMONEY_NOTIFICATION_SECRET",
     )
+    support_email: str | None = Field(default=None, alias="SUPPORT_EMAIL")
 
     model_config = SettingsConfigDict(
         env_file=".env",

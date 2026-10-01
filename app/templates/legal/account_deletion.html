@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Удаление аккаунта — {{ app_name }}</title><style>body{max-width:800px;margin:32px auto;padding:0 20px;font:16px/1.55 Arial,sans-serif;color:#182230}h1{font-size:28px}</style></head><body>
+<h1>Удаление облачного аккаунта</h1>
+<ol><li>Откройте приложение {{ app_name }} и войдите в облачную организацию.</li><li>Перейдите в раздел «Синхронизация».</li><li>Выберите «Удалить облачный аккаунт».</li><li>Введите слово «УДАЛИТЬ» и подтвердите действие.</li></ol>
+<p>Удаление доступно владельцу организации. Оно удаляет серверные данные организации, пользователей и подписку, а также локальную копию этой облачной организации на телефоне. Другие локальные организации не затрагиваются.</p>
+{% if support_email %}<p>Если доступа к приложению нет, напишите: <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>{% endif %}
+</body></html>

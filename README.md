@@ -201,6 +201,7 @@ admin / admin123
 - `docs/MOBILE_PARITY_AUDIT.md` — проверка паритета Android и сайта.
 - `docs/SELF_HOSTED_INSTALL.md` — самостоятельная установка на сервер клиента.
 - `docs/CLOUD_DEPLOYMENT.md` — отдельное развёртывание платного общего облака.
+- `docs/GOOGLE_PLAY_CHECKLIST.md` — подготовка карточки и релиза для Google Play.
 - `docs/COMMERCIAL_LAUNCH_PLAN.md` — облачные тарифы и коммерческий запуск.
 - `mobile/README.md` — установка, автономный режим и сборка Android.
 
