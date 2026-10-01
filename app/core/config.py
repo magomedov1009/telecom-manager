@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         default=None,
         alias="YOOMONEY_NOTIFICATION_SECRET",
     )
+    yoomoney_fallback_notification_url: str | None = Field(
+        default=None,
+        alias="YOOMONEY_FALLBACK_NOTIFICATION_URL",
+    )
     support_email: str | None = Field(default=None, alias="SUPPORT_EMAIL")
 
     model_config = SettingsConfigDict(

@@ -6,11 +6,14 @@ short opaque checkout link, then opens it in the system browser.
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+import asyncio
 import hashlib
 import hmac
 import secrets
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
@@ -166,6 +169,23 @@ def _notification_signature(values: dict[str, str]) -> str:
     ).hexdigest()
 
 
+def _forward_yoomoney_notification(url: str, values: dict[str, str]) -> bool:
+    body = urlencode(values).encode("utf-8")
+    request = UrlRequest(
+        url,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            return response.status == 200
+    except HTTPError as error:
+        return error.code == 200
+    except (URLError, TimeoutError):
+        return False
+
+
 @router.post("/api/billing/yoomoney/notification", status_code=status.HTTP_200_OK)
 async def yoomoney_notification(request: Request, db: DbSession) -> Response:
     """Accept one signed YooMoney notification and extend access once."""
@@ -177,11 +197,27 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
     expected_sign = _notification_signature(values)
     if not hmac.compare_digest(received_sign, expected_sign):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверная подпись уведомления")
+    label = values.get("label", "")
+    payment = db.scalar(select(CloudPayment).where(CloudPayment.label == label))
+    if payment is None:
+        # Telecom Manager owns the TM label namespace. All other correctly
+        # signed labels can be dispatched to another YooMoney integration.
+        fallback_url = settings.yoomoney_fallback_notification_url
+        if label.startswith("TM") or not fallback_url:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ не найден")
+        forwarded = await asyncio.to_thread(
+            _forward_yoomoney_notification,
+            fallback_url,
+            values,
+        )
+        if not forwarded:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "Не удалось доставить уведомление в связанный сервис",
+            )
+        return Response(status_code=status.HTTP_200_OK)
     if values.get("currency") != "643" or values.get("unaccepted") != "false":
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неподходящий статус платежа")
-    payment = db.scalar(select(CloudPayment).where(CloudPayment.label == values.get("label", "")))
-    if payment is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ не найден")
     if payment.status == "paid":
         return Response(status_code=status.HTTP_200_OK)
     # YooMoney may deliver a valid confirmation late. Once its signature,
