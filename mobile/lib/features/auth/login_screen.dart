@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/repositories/local_repository.dart';
+import 'cloud_access_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
@@ -108,6 +109,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 FilledButton(
                   onPressed: loading ? null : login,
                   child: Text(loading ? 'Вход…' : 'Войти'),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.cloud_outlined),
+                  label: const Text('Войти или зарегистрироваться в облаке'),
+                  onPressed: loading
+                      ? null
+                      : () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => CloudAccessScreen(
+                              repository: widget.repository,
+                              onConnected: widget.onLogin,
+                            ),
+                          ),
+                        ),
                 ),
                 const SizedBox(height: 12),
                 const Text(
