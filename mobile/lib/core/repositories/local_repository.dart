@@ -1696,6 +1696,55 @@ class LocalRepository {
     }, 'provider');
   }
 
+  /// Creates the minimum useful workspace in one transaction for a new user.
+  Future<void> createFirstProviderAndWarehouse({
+    required String providerName,
+    required String warehouseName,
+  }) async {
+    final cleanProvider = _requiredName(providerName);
+    final cleanWarehouse = _requiredName(warehouseName);
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final providerId = _uuid.v7();
+    final provider = <String, Object?>{
+      'id': providerId,
+      'organization_id': orgId,
+      'name': cleanProvider,
+      'is_active': 1,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    final warehouse = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'provider_id': providerId,
+      'name': cleanWarehouse,
+      'is_active': 1,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      final count = Sqflite.firstIntValue(
+        await transaction.rawQuery(
+          'SELECT COUNT(*) FROM providers WHERE organization_id = ? AND deleted_at IS NULL',
+          [orgId],
+        ),
+      );
+      if (count != 0) {
+        throw StateError('Первый провайдер уже создан');
+      }
+      await transaction.insert('providers', provider);
+      await _queueRow(transaction, orgId, 'provider', provider, now);
+      await transaction.insert('warehouses', warehouse);
+      await _queueRow(transaction, orgId, 'warehouse', warehouse, now);
+    });
+  }
+
   Future<void> addWarehouse({
     required String name,
     required String providerId,

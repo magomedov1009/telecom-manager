@@ -8,6 +8,7 @@ import 'features/clients/clients_screen.dart';
 import 'features/sync/sync_screen.dart';
 import 'features/works/works_screen.dart';
 import 'features/auth/login_screen.dart';
+import 'features/onboarding/first_setup_screen.dart';
 
 class TelecomManagerApp extends StatelessWidget {
   const TelecomManagerApp({super.key, required this.repository});
@@ -51,16 +52,23 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   UserItem? user;
   bool loading = true;
+  bool setupRequired = false;
   @override
   void initState() {
     super.initState();
-    widget.repository.currentUser().then((value) {
-      if (mounted) {
-        setState(() {
-          user = value;
-          loading = false;
-        });
-      }
+    loadSession();
+  }
+
+  Future<void> loadSession() async {
+    final value = await widget.repository.currentUser();
+    final providers = value == null
+        ? const <LookupItem>[]
+        : await widget.repository.providers();
+    if (!mounted) return;
+    setState(() {
+      user = value;
+      setupRequired = value != null && providers.isEmpty;
+      loading = false;
     });
   }
 
@@ -72,7 +80,13 @@ class _AuthGateState extends State<_AuthGate> {
     if (user == null) {
       return LoginScreen(
         repository: widget.repository,
-        onLogin: (value) => setState(() => user = value),
+        onLogin: (_) => loadSession(),
+      );
+    }
+    if (setupRequired) {
+      return FirstSetupScreen(
+        repository: widget.repository,
+        onComplete: () => setState(() => setupRequired = false),
       );
     }
     return AppShell(
@@ -80,7 +94,12 @@ class _AuthGateState extends State<_AuthGate> {
       user: user!,
       onLogout: () async {
         await widget.repository.logout();
-        if (mounted) setState(() => user = null);
+        if (mounted) {
+          setState(() {
+            user = null;
+            setupRequired = false;
+          });
+        }
       },
     );
   }

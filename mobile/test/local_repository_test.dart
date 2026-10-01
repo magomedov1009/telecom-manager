@@ -43,6 +43,12 @@ void main() {
     expect(await cleanRepository.providers(), isEmpty);
     expect(await cleanRepository.warehouses(), isEmpty);
     expect(await cleanRepository.materials(), isEmpty);
+    await cleanRepository.createFirstProviderAndWarehouse(
+      providerName: 'Свой провайдер',
+      warehouseName: 'Главный склад',
+    );
+    expect((await cleanRepository.providers()).single.name, 'Свой провайдер');
+    expect((await cleanRepository.warehouses()).single.name, 'Главный склад');
     await cleanDatabase.close();
   });
 
