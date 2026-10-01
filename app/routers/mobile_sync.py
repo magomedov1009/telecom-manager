@@ -754,8 +754,8 @@ def subscription_status(
 ) -> SubscriptionResponse:
     """Subscription status for the selected cloud workspace.
 
-    The app opens payment_url in the external browser.  Payment confirmation
-    will be implemented as a separately authenticated YooMoney webhook.
+    The app creates a one-time checkout URL, opens it in the external browser,
+    and YooMoney confirms successful payments through its signed notification.
     """
     organization = db.get(MobileOrganization, token.organization_id)
     subscription = _subscription_for(db, organization)
@@ -770,8 +770,7 @@ def subscription_status(
     checkout_available = bool(
         settings.hosting_mode == "cloud"
         and settings.yoomoney_wallet
-        and settings.cloud_monthly_price > 0
-        and settings.cloud_yearly_price > 0
+        and (settings.cloud_monthly_price > 0 or settings.cloud_yearly_price > 0)
     )
     return SubscriptionResponse(
         hosting_mode=organization.hosting_mode,
