@@ -52,6 +52,28 @@ void main() {
     await cleanDatabase.close();
   });
 
+  test(
+    'deleting a cloud workspace preserves a separate local workspace',
+    () async {
+      await repository.bindRemoteOrganization(
+        serverUrl: 'https://cloud.example.test',
+        remoteOrganizationId: '12',
+        organizationName: 'Облачная компания',
+        username: 'cloud-owner',
+        fullName: 'Владелец',
+        role: 'admin',
+        password: 'safe-password',
+      );
+      await repository.addProvider('Облачный провайдер');
+      await repository.deleteCurrentRemoteOrganization();
+
+      final organizations = await repository.organizations();
+      expect(organizations, hasLength(1));
+      expect(organizations.single.name, 'Локальная организация');
+      expect(await repository.remoteOrganizationBinding(), isNull);
+    },
+  );
+
   test('receipt updates stock and sync queue atomically', () async {
     final warehouses = await repository.warehouses();
     final materials = await repository.materials();

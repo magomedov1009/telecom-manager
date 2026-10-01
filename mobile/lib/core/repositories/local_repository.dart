@@ -846,6 +846,78 @@ class LocalRepository {
     return id;
   }
 
+  /// Removes only the current cloud workspace after its server account was
+  /// deleted. Other local organizations on the same phone are preserved.
+  Future<void> deleteCurrentRemoteOrganization() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final organization = await db.query(
+      'organizations',
+      columns: ['remote_server_url'],
+      where: 'id = ?',
+      whereArgs: [orgId],
+      limit: 1,
+    );
+    if (organization.isEmpty ||
+        organization.single['remote_server_url'] == null) {
+      throw StateError('Текущая организация не является облачной');
+    }
+    await db.transaction((transaction) async {
+      const tables = [
+        'sync_queue',
+        'finance_transactions',
+        'inventory_transactions',
+        'connection_materials',
+        'extra_work_materials',
+        'material_debt_settlements',
+        'connections',
+        'extra_works',
+        'expenses',
+        'clients',
+        'warehouses',
+        'providers',
+        'materials',
+        'extra_work_types',
+        'users',
+      ];
+      for (final table in tables) {
+        await transaction.delete(
+          table,
+          where: 'organization_id = ?',
+          whereArgs: [orgId],
+        );
+      }
+      await transaction.delete(
+        'organizations',
+        where: 'id = ?',
+        whereArgs: [orgId],
+      );
+      await transaction.delete(
+        'app_settings',
+        where: 'key IN (?, ?, ?, ?)',
+        whereArgs: [
+          'current_user_id',
+          'active_sync_server_url',
+          'active_sync_remote_id',
+          'sync_cursor_$orgId',
+        ],
+      );
+      final remaining = await transaction.query('organizations', limit: 1);
+      if (remaining.isNotEmpty) {
+        await transaction.insert('app_settings', {
+          'key': 'current_organization_id',
+          'value': remaining.single['id']! as String,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      } else {
+        await transaction.delete(
+          'app_settings',
+          where: 'key = ?',
+          whereArgs: ['current_organization_id'],
+        );
+      }
+    });
+  }
+
   Future<bool> syncTargetMatches(String serverUrl) async {
     final binding = await remoteOrganizationBinding();
     if (binding == null) return false;

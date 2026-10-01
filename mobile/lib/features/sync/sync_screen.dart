@@ -479,6 +479,7 @@ class _SyncScreenState extends State<SyncScreen> {
     try {
       setState(() => busy = true);
       await service().deleteCloudAccount();
+      await widget.repository.deleteCurrentRemoteOrganization();
       if (mounted) widget.onLogout();
     } catch (error) {
       if (mounted) {
