@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from starlette.requests import Request
+from fastapi import HTTPException
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ from app.models.users import User
 from app.routers.billing import (
     CheckoutRequest,
     _notification_signature,
+    checkout_page,
     create_checkout,
     yoomoney_notification,
 )
@@ -75,12 +77,14 @@ class BillingTest(unittest.TestCase):
             settings.yoomoney_notification_secret,
             settings.cloud_monthly_price,
             settings.cloud_yearly_price,
+            settings.cloud_payment_link_minutes,
         )
         settings.hosting_mode = "cloud"
         settings.yoomoney_wallet = "41001111222333"
         settings.yoomoney_notification_secret = "test-secret"
         settings.cloud_monthly_price = 199
         settings.cloud_yearly_price = 1990
+        settings.cloud_payment_link_minutes = 60
         self.app = create_app()
 
     def tearDown(self) -> None:
@@ -90,6 +94,7 @@ class BillingTest(unittest.TestCase):
             settings.yoomoney_notification_secret,
             settings.cloud_monthly_price,
             settings.cloud_yearly_price,
+            settings.cloud_payment_link_minutes,
         ) = self.old
         self.db.close()
         self.engine.dispose()
@@ -146,4 +151,44 @@ class BillingTest(unittest.TestCase):
         retry = asyncio.run(yoomoney_notification(NotificationRequest(), self.db))
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(self.db.scalar(select(CloudSubscription)).plan_code, "monthly")
+
+    def test_new_checkout_supersedes_previous_pending_link(self) -> None:
+        request = Request(
+            {
+                "type": "http", "method": "POST", "scheme": "https",
+                "path": "/api/mobile/subscription/checkout", "raw_path": b"/api/mobile/subscription/checkout",
+                "query_string": b"", "headers": [], "client": ("testclient", 50000),
+                "server": ("testserver", 443), "root_path": "", "app": self.app,
+                "router": self.app.router,
+            }
+        )
+        create_checkout(CheckoutRequest(plan_code="monthly"), request, self.db, self.token)
+        create_checkout(CheckoutRequest(plan_code="yearly"), request, self.db, self.token)
+        payments = list(self.db.scalars(select(CloudPayment).order_by(CloudPayment.id)))
+        self.assertEqual([payment.status for payment in payments], ["superseded", "pending"])
+
+    def test_expired_checkout_link_is_disabled(self) -> None:
+        payment = CloudPayment(
+            organization_id=self.organization.id,
+            public_token="expired-token",
+            label="TMexpired",
+            plan_code="monthly",
+            amount=199,
+            status="pending",
+            created_at=datetime.now(UTC) - timedelta(minutes=61),
+        )
+        self.db.add(payment)
+        self.db.commit()
+        request = Request(
+            {
+                "type": "http", "method": "GET", "scheme": "https", "path": "/billing/checkout/expired-token",
+                "raw_path": b"/billing/checkout/expired-token", "query_string": b"", "headers": [],
+                "client": ("testclient", 50000), "server": ("testserver", 443), "root_path": "", "app": self.app,
+                "router": self.app.router,
+            }
+        )
+        with self.assertRaises(HTTPException) as raised:
+            checkout_page("expired-token", request, self.db)
+        self.assertEqual(raised.exception.status_code, 410)
+        self.assertEqual(self.db.get(CloudPayment, payment.id).status, "expired")
 

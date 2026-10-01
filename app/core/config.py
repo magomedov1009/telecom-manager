@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     cloud_trial_days: int = Field(default=14, alias="CLOUD_TRIAL_DAYS")
     cloud_monthly_price: int = Field(default=0, alias="CLOUD_MONTHLY_PRICE")
     cloud_yearly_price: int = Field(default=0, alias="CLOUD_YEARLY_PRICE")
+    cloud_payment_link_minutes: int = Field(
+        default=60, alias="CLOUD_PAYMENT_LINK_MINUTES"
+    )
     yoomoney_wallet: str | None = Field(default=None, alias="YOOMONEY_WALLET")
     yoomoney_notification_secret: str | None = Field(
         default=None,

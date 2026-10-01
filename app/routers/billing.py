@@ -71,6 +71,11 @@ def _ensure_cloud_checkout(organization: MobileOrganization) -> None:
         )
 
 
+def _utc(value: datetime) -> datetime:
+    """Normalize values returned by PostgreSQL and SQLite for comparisons."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 @router.post("/api/mobile/subscription/checkout", response_model=CheckoutResponse)
 def create_checkout(
     payload: CheckoutRequest,
@@ -82,6 +87,15 @@ def create_checkout(
     if organization is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
     _ensure_cloud_checkout(organization)
+    # A customer should only ever have one active payment form. This avoids
+    # accidentally paying twice after pressing the button more than once.
+    for pending in db.scalars(
+        select(CloudPayment).where(
+            CloudPayment.organization_id == organization.id,
+            CloudPayment.status == "pending",
+        )
+    ):
+        pending.status = "superseded"
     payment = CloudPayment(
         organization_id=organization.id,
         public_token=secrets.token_urlsafe(32),
@@ -103,6 +117,13 @@ def checkout_page(token: str, request: Request, db: DbSession) -> HTMLResponse:
     payment = db.scalar(select(CloudPayment).where(CloudPayment.public_token == token))
     if payment is None or payment.status != "pending":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Ссылка на оплату не найдена или уже использована")
+    expires_at = _utc(payment.created_at) + timedelta(
+        minutes=max(1, settings.cloud_payment_link_minutes)
+    )
+    if expires_at <= datetime.now(UTC):
+        payment.status = "expired"
+        db.commit()
+        raise HTTPException(status.HTTP_410_GONE, "Срок действия ссылки на оплату истёк")
     if not settings.yoomoney_wallet:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Оплата пока не настроена")
     organization = db.get(MobileOrganization, payment.organization_id)
