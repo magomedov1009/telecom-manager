@@ -481,11 +481,23 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         )
     )
     if not memberships:
-        organization = db.scalar(select(MobileOrganization).order_by(MobileOrganization.id))
+        # In the shared cloud a user with no membership must never be placed
+        # into another customer's first workspace.
+        organization = None
+        if settings.hosting_mode != "cloud":
+            organization = db.scalar(
+                select(MobileOrganization).order_by(MobileOrganization.id)
+            )
         if organization is None:
             organization = MobileOrganization(
-                name="Основная организация",
-                is_legacy_workspace=True,
+                name=(
+                    "Основная организация"
+                    if settings.hosting_mode != "cloud"
+                    else f"Организация {user.full_name}"
+                ),
+                # A brand-new shared cloud must start as a trial workspace.
+                # A self-hosted install remains unrestricted by design.
+                is_legacy_workspace=settings.hosting_mode != "cloud",
             )
             db.add(organization)
             db.flush()

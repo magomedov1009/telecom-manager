@@ -24,6 +24,7 @@ from app.models.enums import InventoryItemType, MaterialUnit
 from app.models.mobile_sync import (
     MobileDeviceToken,
     MobileMembership,
+    MobileOrganization,
     MobileSyncChange,
     MobileSyncRecord,
 )
@@ -182,6 +183,33 @@ class MobileSyncTest(unittest.TestCase):
         )
         self.assertEqual(result[0].status, "accepted")
         self.assertEqual(self.db.scalar(select(func.count()).select_from(Provider)), 0)
+
+    def test_cloud_login_without_membership_creates_a_separate_workspace(self) -> None:
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            newcomer = User(
+                username="new-cloud-user",
+                full_name="Новый клиент",
+                hashed_password=hash_password("secret"),
+                role=UserRole.ADMIN,
+                is_active=True,
+            )
+            self.db.add(newcomer)
+            self.db.commit()
+            response = login(
+                LoginRequest(
+                    username="new-cloud-user",
+                    password="secret",
+                    device_name="new-device",
+                ),
+                self.db,
+            )
+            self.assertNotEqual(response.organization_id, self.token.organization_id)
+            organization = self.db.get(MobileOrganization, response.organization_id)
+            self.assertFalse(organization.is_legacy_workspace)
+        finally:
+            settings.hosting_mode = previous_mode
 
     def test_installer_cannot_change_catalogs(self) -> None:
         membership = self.db.scalar(select(MobileMembership))
