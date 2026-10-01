@@ -202,10 +202,10 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
     label = values.get("label", "")
     payment = db.scalar(select(CloudPayment).where(CloudPayment.label == label))
     if payment is None:
-        # Telecom Manager owns the TM label namespace. All other correctly
-        # signed labels can be dispatched to another YooMoney integration.
+        # Dispatch by exact known order label so another project's label
+        # format does not need to be known by Telecom Manager.
         fallback_url = settings.yoomoney_fallback_notification_url
-        if label.startswith("TM") or not fallback_url:
+        if not fallback_url:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ не найден")
         forwarded = await asyncio.to_thread(
             _forward_yoomoney_notification,
