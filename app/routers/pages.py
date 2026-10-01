@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import SESSION_COOKIE_NAME, create_session_token, verify_password
 from app.db.session import get_db
-from app.dependencies.auth import can_open_finance, can_open_reports, get_current_user_optional, require_admin_user
+from app.dependencies.auth import can_access_web_application, can_open_finance, can_open_reports, get_current_user_optional, require_admin_user
 from app.models.clients import Client, Connection, ExtraWork, Provider
 from app.models.enums import ConnectionType, ExpenseCategory, FinanceTransactionType, InventoryItemType, InventoryTransactionType, PaidBy
 from app.models.finance import Expense, FinanceTransaction
@@ -88,6 +88,15 @@ def login(
             request,
             "auth/login.html",
             {"error": "Неверный логин или пароль", "username": username},
+        )
+    if not can_access_web_application(db, user.id):
+        return render(
+            request,
+            "auth/login.html",
+            {
+                "error": "Для этой облачной организации используйте мобильное приложение.",
+                "username": username,
+            },
         )
 
     user.last_login_at = datetime.now(UTC)

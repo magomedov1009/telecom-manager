@@ -1,12 +1,34 @@
 ﻿from typing import Annotated
 
 from fastapi import Depends, Request
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.security import SESSION_COOKIE_NAME, verify_session_token
 from app.db.session import get_db
 from app.models.enums import UserRole
+from app.models.mobile_sync import MobileMembership, MobileOrganization
 from app.models.users import User
+
+
+def can_access_web_application(db: Session, user_id: int) -> bool:
+    """Only legacy workspaces use the non-tenant-aware website tables."""
+    if settings.hosting_mode != "cloud":
+        return True
+    legacy_membership = db.scalar(
+        select(MobileMembership.id)
+        .join(
+            MobileOrganization,
+            MobileOrganization.id == MobileMembership.organization_id,
+        )
+        .where(
+            MobileMembership.user_id == user_id,
+            MobileOrganization.is_legacy_workspace.is_(True),
+        )
+        .limit(1)
+    )
+    return legacy_membership is not None
 
 
 def get_current_user_optional(
@@ -18,6 +40,8 @@ def get_current_user_optional(
         return None
     user = db.get(User, user_id)
     if user is None or not user.is_active:
+        return None
+    if not can_access_web_application(db, user.id):
         return None
     return user
 
