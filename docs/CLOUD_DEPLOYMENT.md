@@ -6,17 +6,17 @@
 
 ## Что потребуется
 
-- отдельный VPS с Docker и Docker Compose;
+- VPS с Docker и Docker Compose (можно использовать текущий сервер, если хватает ресурсов);
 - домен, например `cloud.example.ru`, с DNS-записью на VPS;
 - HTTPS-прокси (Nginx, Caddy или панель сервера);
 - отдельные надёжные пароли PostgreSQL и `APP_SECRET_KEY`;
 - кошелёк ЮMoney, тарифы и секрет HTTP-уведомлений.
 
 Для размещения рядом с текущим сайтом задайте облаку отдельный домен или
-поддомен. Текущий сайт продолжит
-слушать свой порт, база облака использует отдельный закрытый контейнер и
-том `telecom-manager-cloud-postgres-data`. Проверьте свободную память VPS перед
-запуском: облако добавляет ещё приложение и PostgreSQL.
+поддомен. Текущий сайт продолжит слушать свой порт. База облака использует
+отдельный закрытый контейнер и том `telecom-manager-cloud-postgres-data`.
+Проверьте свободную память VPS перед запуском: облако добавляет ещё приложение
+и PostgreSQL.
 
 ## Настройки `.env`
 
@@ -32,7 +32,6 @@ POSTGRES_USER=telecom_cloud
 POSTGRES_PASSWORD=длинный-уникальный-пароль
 
 HOSTING_MODE=cloud
-CLOUD_APP_PORT=127.0.0.1:8001
 CLOUD_TRIAL_DAYS=14
 CLOUD_MONTHLY_PRICE=0
 CLOUD_YEARLY_PRICE=0
