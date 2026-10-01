@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/repositories/local_repository.dart';
 import '../../core/sync/sync_service.dart';
@@ -34,6 +35,7 @@ class _SyncScreenState extends State<SyncScreen> {
   bool busy = false;
   String? statusMessage;
   late Future<AppUpdate> update;
+  late Future<ServerSubscription?> subscription;
   double? updateProgress;
 
   @override
@@ -42,6 +44,7 @@ class _SyncScreenState extends State<SyncScreen> {
     pending = widget.repository.pendingChanges();
     effectiveRole = widget.role;
     update = _checkUpdate();
+    subscription = _loadSubscription();
   }
 
   Future<AppUpdate> _checkUpdate() async {
@@ -49,6 +52,20 @@ class _SyncScreenState extends State<SyncScreen> {
     final serverUrl = preferences.getString('server_url') ?? '';
     serverController.text = serverUrl;
     return AppUpdateService().check(serverUrl: serverUrl);
+  }
+
+  Future<ServerSubscription?> _loadSubscription() async {
+    final preferences = await SharedPreferences.getInstance();
+    final serverUrl = preferences.getString('server_url') ?? '';
+    if (SyncService.normalizeServerUrl(serverUrl).isEmpty) return null;
+    try {
+      return await SyncService(
+        repository: widget.repository,
+        serverUrl: serverUrl,
+      ).subscriptionStatus();
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
@@ -93,6 +110,43 @@ class _SyncScreenState extends State<SyncScreen> {
                 onTap: updateProgress != null
                     ? null
                     : () => checkOrInstallUpdate(info),
+              ),
+            );
+          },
+        ),
+        FutureBuilder<ServerSubscription?>(
+          future: subscription,
+          builder: (context, snapshot) {
+            final item = snapshot.data;
+            if (item == null) return const SizedBox.shrink();
+            final isSelfHosted = item.hostingMode == 'self_hosted';
+            final expires = item.expiresAt == null
+                ? 'без ограничения срока'
+                : 'до ${item.expiresAt!.day.toString().padLeft(2, '0')}.${item.expiresAt!.month.toString().padLeft(2, '0')}.${item.expiresAt!.year}';
+            return Card(
+              color: item.canSync
+                  ? Theme.of(context).colorScheme.secondaryContainer
+                  : Theme.of(context).colorScheme.errorContainer,
+              child: ListTile(
+                leading: Icon(
+                  isSelfHosted
+                      ? Icons.dns_outlined
+                      : Icons.workspace_premium_outlined,
+                ),
+                title: Text(
+                  isSelfHosted ? 'Собственный сервер' : 'Облачная подписка',
+                ),
+                subtitle: Text(
+                  isSelfHosted
+                      ? 'Синхронизация не зависит от подписки'
+                      : '${item.status == 'trial' ? 'Пробный период' : 'Тариф'} $expires',
+                ),
+                trailing: !isSelfHosted && item.paymentUrl != null
+                    ? TextButton(
+                        onPressed: () => openPayment(item.paymentUrl!),
+                        child: const Text('Продлить'),
+                      )
+                    : null,
               ),
             );
           },
@@ -309,6 +363,18 @@ class _SyncScreenState extends State<SyncScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> openPayment(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть страницу оплаты')),
+        );
+      }
+    }
   }
 
   SyncService service() => SyncService(
@@ -563,6 +629,7 @@ class _SyncScreenState extends State<SyncScreen> {
             'Устройство подключено. Загружено с сервера: '
             '${syncResult.received}.';
         pending = widget.repository.pendingChanges();
+        subscription = _loadSubscription();
       });
     } catch (error) {
       setState(

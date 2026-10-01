@@ -84,6 +84,36 @@ class ServerConnection {
   final List<ServerOrganization> organizations;
 }
 
+class ServerSubscription {
+  const ServerSubscription({
+    required this.hostingMode,
+    required this.planCode,
+    required this.status,
+    required this.expiresAt,
+    required this.paymentUrl,
+    required this.canSync,
+  });
+
+  final String hostingMode;
+  final String planCode;
+  final String status;
+  final DateTime? expiresAt;
+  final String? paymentUrl;
+  final bool canSync;
+
+  factory ServerSubscription.fromJson(Map<String, Object?> json) =>
+      ServerSubscription(
+        hostingMode: json['hosting_mode']! as String,
+        planCode: json['plan_code']! as String,
+        status: json['status']! as String,
+        expiresAt: json['expires_at'] == null
+            ? null
+            : DateTime.parse(json['expires_at']! as String).toLocal(),
+        paymentUrl: json['payment_url'] as String?,
+        canSync: json['can_sync']! as bool,
+      );
+}
+
 class SyncService {
   SyncService({
     required this.repository,
@@ -174,6 +204,17 @@ class SyncService {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     };
+  }
+
+  Future<ServerSubscription> subscriptionStatus() async {
+    final response = await client.get(
+      endpoint('/subscription'),
+      headers: await _authorizedHeaders(),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return ServerSubscription.fromJson(
+      Map<String, Object?>.from(jsonDecode(response.body) as Map),
+    );
   }
 
   Never _serverError(http.Response response) {

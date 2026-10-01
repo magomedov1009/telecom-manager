@@ -275,6 +275,43 @@ void main() {
     await database.close();
   });
 
+  test('reads cloud subscription status from the connected server', () async {
+    final database = AppDatabase(
+      factory: databaseFactoryFfi,
+      overridePath: inMemoryDatabasePath,
+    );
+    final repository = LocalRepository(database);
+    await repository.initialize();
+    final tokens = MemoryTokenStore()..token = 'billing-token';
+    final service = SyncService(
+      repository: repository,
+      serverUrl: 'https://example.test',
+      tokenStore: tokens,
+      client: MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer billing-token');
+        expect(request.url.path, '/api/mobile/subscription');
+        return http.Response(
+          jsonEncode({
+            'hosting_mode': 'cloud',
+            'plan_code': 'monthly',
+            'status': 'active',
+            'expires_at': '2026-11-01T00:00:00Z',
+            'payment_url': 'https://pay.example.test/checkout',
+            'can_sync': true,
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await service.subscriptionStatus();
+    expect(result.hostingMode, 'cloud');
+    expect(result.planCode, 'monthly');
+    expect(result.canSync, isTrue);
+    expect(result.paymentUrl, contains('pay.example.test'));
+    await database.close();
+  });
+
   test('remote changes are applied in dependency order', () async {
     final database = AppDatabase(
       factory: databaseFactoryFfi,
