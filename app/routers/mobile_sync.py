@@ -18,7 +18,7 @@ from app.models.mobile_sync import (
     MobileSyncChange,
     MobileSyncRecord,
 )
-from app.models.billing import CloudSubscription
+from app.models.billing import CloudPayment, CloudSubscription
 from app.core.config import settings
 from app.models.clients import (
     Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial,
@@ -66,6 +66,14 @@ class SubscriptionResponse(BaseModel):
     monthly_price: int | None = None
     yearly_price: int | None = None
     can_sync: bool
+
+
+class SubscriptionPaymentResponse(BaseModel):
+    plan_code: str
+    amount: Decimal
+    status: str
+    created_at: datetime
+    paid_at: datetime | None = None
 
 
 class LoginResponse(BaseModel):
@@ -783,6 +791,38 @@ def subscription_status(
         yearly_price=settings.cloud_yearly_price if checkout_available else None,
         can_sync=_subscription_can_sync(organization, subscription),
     )
+
+
+@router.get(
+    "/subscription/payments",
+    response_model=list[SubscriptionPaymentResponse],
+)
+def subscription_payments(
+    db: DbSession,
+    token: Annotated[MobileDeviceToken, Depends(current_token)],
+) -> list[SubscriptionPaymentResponse]:
+    organization = db.get(MobileOrganization, token.organization_id)
+    if organization is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
+    if settings.hosting_mode != "cloud" or organization.is_legacy_workspace:
+        return []
+    require_admin(db, token)
+    payments = db.scalars(
+        select(CloudPayment)
+        .where(CloudPayment.organization_id == organization.id)
+        .order_by(CloudPayment.created_at.desc(), CloudPayment.id.desc())
+        .limit(50)
+    )
+    return [
+        SubscriptionPaymentResponse(
+            plan_code=payment.plan_code,
+            amount=payment.amount,
+            status=payment.status,
+            created_at=payment.created_at,
+            paid_at=payment.paid_at,
+        )
+        for payment in payments
+    ]
 
 
 @router.get(

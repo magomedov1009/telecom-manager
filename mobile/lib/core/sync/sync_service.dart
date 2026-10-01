@@ -123,6 +123,34 @@ class ServerSubscription {
       );
 }
 
+class ServerPayment {
+  const ServerPayment({
+    required this.planCode,
+    required this.amount,
+    required this.status,
+    required this.createdAt,
+    required this.paidAt,
+  });
+
+  final String planCode;
+  final double amount;
+  final String status;
+  final DateTime createdAt;
+  final DateTime? paidAt;
+
+  factory ServerPayment.fromJson(Map<String, Object?> json) => ServerPayment(
+    planCode: json['plan_code']! as String,
+    amount: json['amount'] is num
+        ? (json['amount']! as num).toDouble()
+        : double.parse(json['amount']!.toString()),
+    status: json['status']! as String,
+    createdAt: DateTime.parse(json['created_at']! as String).toLocal(),
+    paidAt: json['paid_at'] == null
+        ? null
+        : DateTime.parse(json['paid_at']! as String).toLocal(),
+  );
+}
+
 class SyncService {
   SyncService({
     required this.repository,
@@ -255,6 +283,20 @@ class SyncService {
     return ServerSubscription.fromJson(
       Map<String, Object?>.from(jsonDecode(response.body) as Map),
     );
+  }
+
+  Future<List<ServerPayment>> subscriptionPayments() async {
+    final response = await client.get(
+      endpoint('/subscription/payments'),
+      headers: await _authorizedHeaders(),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return (jsonDecode(response.body) as List)
+        .map(
+          (item) =>
+              ServerPayment.fromJson(Map<String, Object?>.from(item as Map)),
+        )
+        .toList();
   }
 
   Future<Uri> createCheckout(String planCode) async {

@@ -26,7 +26,7 @@ class SyncScreen extends StatefulWidget {
   State<SyncScreen> createState() => _SyncScreenState();
 }
 
-class _SyncScreenState extends State<SyncScreen> {
+class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
   final serverController = TextEditingController();
   final usernameController = TextEditingController();
   final passwordController = TextEditingController();
@@ -36,15 +36,35 @@ class _SyncScreenState extends State<SyncScreen> {
   String? statusMessage;
   late Future<AppUpdate> update;
   late Future<ServerSubscription?> subscription;
+  late Future<List<ServerPayment>> paymentHistory;
   double? updateProgress;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     pending = widget.repository.pendingChanges();
     effectiveRole = widget.role;
     update = _checkUpdate();
     subscription = _loadSubscription();
+    paymentHistory = effectiveRole == 'admin'
+        ? _loadPaymentHistory()
+        : Future.value(const <ServerPayment>[]);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshBilling();
+  }
+
+  void _refreshBilling() {
+    if (!mounted) return;
+    setState(() {
+      subscription = _loadSubscription();
+      paymentHistory = effectiveRole == 'admin'
+          ? _loadPaymentHistory()
+          : Future.value(const <ServerPayment>[]);
+    });
   }
 
   Future<AppUpdate> _checkUpdate() async {
@@ -68,8 +88,19 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
+  Future<List<ServerPayment>> _loadPaymentHistory() async {
+    final preferences = await SharedPreferences.getInstance();
+    final serverUrl = preferences.getString('server_url') ?? '';
+    if (SyncService.normalizeServerUrl(serverUrl).isEmpty) return [];
+    return SyncService(
+      repository: widget.repository,
+      serverUrl: serverUrl,
+    ).subscriptionPayments();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     serverController.dispose();
     usernameController.dispose();
     passwordController.dispose();
@@ -151,6 +182,77 @@ class _SyncScreenState extends State<SyncScreen> {
             );
           },
         ),
+        if (effectiveRole == 'admin')
+          FutureBuilder<ServerSubscription?>(
+            future: subscription,
+            builder: (context, subscriptionSnapshot) {
+              if (subscriptionSnapshot.data?.hostingMode != 'cloud') {
+                return const SizedBox.shrink();
+              }
+              return FutureBuilder<List<ServerPayment>>(
+                future: paymentHistory,
+                builder: (context, paymentsSnapshot) {
+                  final payments = paymentsSnapshot.data ?? const [];
+                  return Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Платежи',
+                                  style: TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Обновить',
+                                onPressed: _refreshBilling,
+                                icon: const Icon(Icons.refresh),
+                              ),
+                            ],
+                          ),
+                          if (paymentsSnapshot.hasError)
+                            const Text('Не удалось загрузить историю платежей')
+                          else if (paymentsSnapshot.connectionState ==
+                              ConnectionState.waiting)
+                            const LinearProgressIndicator()
+                          else if (payments.isEmpty)
+                            const Text('Платежей пока нет')
+                          else
+                            ...payments.map((payment) {
+                              final plan = payment.planCode == 'monthly'
+                                  ? 'Месячный тариф'
+                                  : 'Годовой тариф';
+                              final statusLabel = switch (payment.status) {
+                                'paid' => 'Оплачен',
+                                'pending' => 'Ожидает оплаты',
+                                'expired' => 'Срок оплаты истёк',
+                                'superseded' => 'Ссылка заменена',
+                                _ => payment.status,
+                              };
+                              final date = payment.createdAt;
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  '$plan · ${payment.amount.toStringAsFixed(0)} ₽',
+                                ),
+                                subtitle: Text(
+                                  '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year} · $statusLabel',
+                                ),
+                                dense: true,
+                              );
+                            }),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         FutureBuilder<ServerSubscription?>(
           future: subscription,
           builder: (context, snapshot) {
