@@ -157,6 +157,32 @@ class MobileSyncTest(unittest.TestCase):
             settings.hosting_mode = previous_mode
             settings.cloud_trial_days = previous_trial
 
+    def test_new_cloud_workspace_never_publishes_into_legacy_site_tables(self) -> None:
+        organization = create_organization(
+            CreateOrganizationRequest(name="Изолированная компания"),
+            self.db,
+            self.token,
+        )
+        self.token.organization_id = organization.id
+        self.db.commit()
+        result = push(
+            PushRequest(
+                changes=[
+                    PushItem(
+                        entity_type="provider",
+                        entity_id="018f0000-0000-7000-8000-000000000099",
+                        operation="upsert",
+                        version=1,
+                        payload={"name": "Только облако"},
+                    )
+                ]
+            ),
+            self.db,
+            self.token,
+        )
+        self.assertEqual(result[0].status, "accepted")
+        self.assertEqual(self.db.scalar(select(func.count()).select_from(Provider)), 0)
+
     def test_installer_cannot_change_catalogs(self) -> None:
         membership = self.db.scalar(select(MobileMembership))
         membership.role = "installer"

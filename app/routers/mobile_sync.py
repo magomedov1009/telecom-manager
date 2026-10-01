@@ -290,8 +290,8 @@ def _translate_site_foreign_keys(
 
 def _bootstrap_site_data(db: Session, organization_id: int) -> None:
     """Seed the primary mobile workspace from the existing website database."""
-    primary_id = db.scalar(select(MobileOrganization.id).order_by(MobileOrganization.id))
-    if primary_id != organization_id:
+    organization = db.get(MobileOrganization, organization_id)
+    if organization is None or not organization.is_legacy_workspace:
         return
     if not db.scalar(select(func.count()).select_from(Provider)):
         return
@@ -826,6 +826,9 @@ def _publish_record_to_site(
     user_id: int,
 ) -> bool:
     """Materialize a mobile record in the tables used by the website."""
+    organization = db.get(MobileOrganization, record.organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        return True
     if record.site_id is not None or record.deleted_at is not None:
         return True
     data = record.payload
@@ -1043,6 +1046,9 @@ def _publish_pending_to_site(
     organization_id: int,
     user_id: int,
 ) -> list[str]:
+    organization = db.get(MobileOrganization, organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        return []
     priority = {
         "provider": 10,
         "material": 10,
@@ -1153,6 +1159,9 @@ SITE_MODELS = {
 
 
 def _delete_record_from_site(db: Session, record: MobileSyncRecord) -> None:
+    organization = db.get(MobileOrganization, record.organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        return
     model = SITE_MODELS.get(record.entity_type)
     if model is None or record.site_id is None:
         return
@@ -1168,6 +1177,9 @@ def _update_record_on_site(
     record: MobileSyncRecord,
     user_id: int,
 ) -> bool:
+    organization = db.get(MobileOrganization, record.organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        return True
     if record.site_id is None:
         return _publish_record_to_site(db, record, user_id)
     model = SITE_MODELS.get(record.entity_type)
@@ -1349,6 +1361,12 @@ def replace_snapshot(
 ) -> dict:
     require_sync_access(db, token)
     require_admin(db, token)
+    organization = db.get(MobileOrganization, token.organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Восстановление веб-сайта доступно только в исходной организации",
+        )
     owner_user_id = payload.owner_user_id or token.user_id
     _organization_member_user(
         db,
@@ -1423,6 +1441,12 @@ def reassign_snapshot_owner(
 ) -> dict:
     require_sync_access(db, token)
     require_admin(db, token)
+    organization = db.get(MobileOrganization, token.organization_id)
+    if organization is None or not organization.is_legacy_workspace:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Назначение данных сайта доступно только в исходной организации",
+        )
     owner = _organization_member_user(
         db,
         token.organization_id,
