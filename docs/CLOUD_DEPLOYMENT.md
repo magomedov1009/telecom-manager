@@ -44,12 +44,15 @@ git clone https://github.com/magomedov1009/telecom-manager.git /opt/telecom-mana
 cd /opt/telecom-manager-cloud
 cp .env.example .env
 # заполните .env
-docker compose up -d --build
-docker compose run --rm app alembic upgrade head
+docker compose -f docker-compose.cloud.yml up -d --build
+docker compose -f docker-compose.cloud.yml run --rm app alembic upgrade head
 ```
 
-Настройте HTTPS-прокси на контейнер `app:8000`. В приложение указывается
-адрес `https://cloud.example.ru` без `/login` и `/api/mobile`.
+Для облака используйте только `docker-compose.cloud.yml`: он запускает приложение
+без режима перезагрузки исходников, не публикует PostgreSQL в интернет и
+открывает порт приложения только на `127.0.0.1`. Настройте HTTPS-прокси на
+`127.0.0.1:8000`. В приложение указывается адрес `https://cloud.example.ru`
+без `/login` и `/api/mobile`.
 
 ## ЮMoney
 
@@ -64,7 +67,7 @@ https://cloud.example.ru/api/billing/yoomoney/notification
 отправляют. После изменения `.env` перезапустите приложение:
 
 ```bash
-docker compose up -d --build app
+docker compose -f docker-compose.cloud.yml up -d --build app
 ```
 
 ## Резервные копии
@@ -73,7 +76,7 @@ docker compose up -d --build app
 
 ```bash
 cd /opt/telecom-manager-cloud
-docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > cloud-backup-$(date +%F).sql
+docker compose -f docker-compose.cloud.yml exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > cloud-backup-$(date +%F).sql
 ```
 
 Периодически проверяйте восстановление копии на отдельном сервере. Подписка
@@ -84,6 +87,6 @@ docker compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > clo
 ```bash
 cd /opt/telecom-manager-cloud
 git pull --ff-only origin main
-docker compose up -d --build app
-docker compose run --rm app alembic upgrade head
+docker compose -f docker-compose.cloud.yml up -d --build app
+docker compose -f docker-compose.cloud.yml run --rm app alembic upgrade head
 ```
