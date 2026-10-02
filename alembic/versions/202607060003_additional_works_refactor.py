@@ -23,7 +23,9 @@ def upgrade() -> None:
     op.drop_column("extra_works", "client_id")
     op.drop_column("extra_works", "connection_id")
     op.drop_column("extra_works", "title")
-    op.drop_column("extra_works", "extra_expenses")
+    # Some installations were created from schema snapshots that never had
+    # this legacy column. Keep clean database upgrades idempotent as well.
+    op.execute("ALTER TABLE extra_works DROP COLUMN IF EXISTS extra_expenses")
     op.alter_column("extra_works", "work_type_id", nullable=False)
 
 
