@@ -51,11 +51,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      APP_ENV: production
-      APP_DEBUG: "false"
-      SESSION_COOKIE_SECURE: "true"
-      APP_SECRET_KEY: ci-only-app-secret-key-not-for-production-32-chars
-      CLOUD_DOMAIN: telecom.pmguard.ru
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
       POSTGRES_DB: telecom_manager_ci
@@ -79,6 +74,11 @@ jobs:
         run: for script in scripts/*.sh; do bash -n "$script"; done
       - name: Apply migrations to PostgreSQL
         env:
+          APP_ENV: production
+          APP_DEBUG: "false"
+          SESSION_COOKIE_SECURE: "true"
+          APP_SECRET_KEY: ci-only-app-secret-key-not-for-production-32-chars
+          CLOUD_DOMAIN: telecom.pmguard.ru
           HOSTING_MODE: cloud
           BOOTSTRAP_CLEAN_CLOUD_DEFAULTS: "true"
         run: python -m alembic upgrade head
