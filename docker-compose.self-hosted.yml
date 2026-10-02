@@ -1,0 +1,70 @@
+services:
+  app:
+    build:
+      context: .
+    container_name: telecom-manager-self-hosted-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      STRICT_PRODUCTION_CONFIG: "true"
+      SESSION_COOKIE_SECURE: "true"
+      HOSTING_MODE: self_hosted
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    ports:
+      - "127.0.0.1:8002:8000"
+    networks:
+      - self_hosted_private
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: telecom-manager-self-hosted-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-telecom_manager}
+      POSTGRES_USER: ${POSTGRES_USER:-telecom_manager}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD in .env}
+    volumes:
+      - self_hosted_postgres_data:/var/lib/postgresql/data
+    networks:
+      - self_hosted_private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  self_hosted_postgres_data:
+    name: telecom-manager-self-hosted-postgres-data
+
+networks:
+  self_hosted_private:
+    name: telecom-manager-self-hosted-network

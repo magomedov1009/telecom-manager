@@ -7,13 +7,20 @@ short opaque checkout link, then opens it in the system browser.
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import asyncio
+import calendar
 import hashlib
 import hmac
+import json
+import logging
 import secrets
 from typing import Annotated
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 from urllib.error import HTTPError, URLError
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.request import (
+    HTTPRedirectHandler,
+    Request as UrlRequest,
+    build_opener,
+)
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, Response
@@ -24,14 +31,17 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models.billing import CloudPayment, CloudSubscription
+from app.models.billing import CloudPayment, CloudPaymentReceipt, CloudSubscription
 from app.models.mobile_sync import MobileDeviceToken, MobileOrganization
-from app.routers.mobile_sync import current_token
+from app.routers.mobile_sync import current_token, require_admin
 
 
 router = APIRouter(tags=["billing"])
 templates = Jinja2Templates(directory="app/templates")
 DbSession = Annotated[Session, Depends(get_db)]
+YOOMONEY_NOTIFICATION_MAX_BYTES = 16 * 1024
+YOOMONEY_NOTIFICATION_MAX_FIELDS = 64
+logger = logging.getLogger(__name__)
 
 
 class CheckoutRequest(BaseModel):
@@ -67,16 +77,30 @@ def _ensure_cloud_checkout(organization: MobileOrganization) -> None:
             status.HTTP_409_CONFLICT,
             "Для этой организации подписка не требуется",
         )
-    if not settings.yoomoney_wallet:
+    if not settings.yoomoney_wallet or not settings.yoomoney_notification_secret:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "Оплата пока не настроена",
+        )
+    if not settings.yoomoney_fallback_notifications_ready:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Не настроена доставка уведомлений связанного сервиса",
         )
 
 
 def _utc(value: datetime) -> datetime:
     """Normalize values returned by PostgreSQL and SQLite for comparisons."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _add_billing_months(value: datetime, months: int, anchor_day: int) -> datetime:
+    """Add calendar months while keeping the subscription's original day."""
+    month_index = value.year * 12 + value.month - 1 + months
+    year, zero_based_month = divmod(month_index, 12)
+    month = zero_based_month + 1
+    day = min(anchor_day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 
 @router.post("/api/mobile/subscription/checkout", response_model=CheckoutResponse)
@@ -86,7 +110,12 @@ def create_checkout(
     db: DbSession,
     token: Annotated[MobileDeviceToken, Depends(current_token)],
 ) -> CheckoutResponse:
-    organization = db.get(MobileOrganization, token.organization_id)
+    require_admin(db, token)
+    organization = db.scalar(
+        select(MobileOrganization)
+        .where(MobileOrganization.id == token.organization_id)
+        .with_for_update()
+    )
     if organization is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
     _ensure_cloud_checkout(organization)
@@ -111,7 +140,9 @@ def create_checkout(
     db.commit()
     db.refresh(payment)
     return CheckoutResponse(
-        checkout_url=str(request.url_for("billing_checkout", token=payment.public_token)),
+        checkout_url=(
+            f"{settings.cloud_public_base_url}/billing/checkout/{payment.public_token}"
+        ),
     )
 
 
@@ -127,18 +158,23 @@ def checkout_page(token: str, request: Request, db: DbSession) -> HTMLResponse:
         payment.status = "expired"
         db.commit()
         raise HTTPException(status.HTTP_410_GONE, "Срок действия ссылки на оплату истёк")
-    if not settings.yoomoney_wallet:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Оплата пока не настроена")
     organization = db.get(MobileOrganization, payment.organization_id)
+    if organization is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
+    _ensure_cloud_checkout(organization)
     return templates.TemplateResponse(
         request=request,
         name="billing/checkout.html",
+        headers={
+            "Cache-Control": "no-store, private",
+            "Referrer-Policy": "no-referrer",
+        },
         context={
             "app_name": settings.app_name,
             "organization": organization,
             "payment": payment,
             "wallet": settings.yoomoney_wallet,
-            "success_url": str(request.url_for("billing_complete")),
+            "success_url": f"{settings.cloud_public_base_url}/billing/complete",
             "plan_label": "1 месяц" if payment.plan_code == "monthly" else "1 год",
         },
     )
@@ -178,12 +214,29 @@ def _forward_yoomoney_notification(url: str, values: dict[str, str]) -> bool:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=10) as response:
-            return response.status == 200
-    except HTTPError as error:
-        return error.code == 200
-    except (URLError, TimeoutError):
+        # Forwarding includes payer and operation details. Never let a payment
+        # endpoint redirect that payload to another host or downgrade it to HTTP.
+        opener = build_opener(_RejectNotificationRedirects())
+        with opener.open(request, timeout=10) as response:
+            if response.status not in {200, 201}:
+                return False
+            response_body = response.read(4097)
+            if len(response_body) > 4096:
+                return False
+            result = json.loads(response_body)
+            # PMGuard's NestJS POST endpoint returns 201 after successful
+            # processing and includes a JSON success flag. The outer
+            # YooMoney-facing handler still acknowledges with HTTP 200.
+            return isinstance(result, dict) and result.get("success") is True
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return False
+    except (HTTPError, URLError, TimeoutError):
+        return False
+
+
+class _RejectNotificationRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 @router.post("/api/billing/yoomoney/notification", status_code=status.HTTP_200_OK)
@@ -191,21 +244,101 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
     """Accept one signed YooMoney notification and extend access once."""
     if not settings.yoomoney_notification_secret:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Уведомления не настроены")
-    form = await request.form()
-    values = {str(key): str(value) for key, value in form.items()}
+    if hasattr(request, "stream") and hasattr(request, "headers"):
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/x-www-form-urlencoded":
+            raise HTTPException(
+                status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                "Ожидается форма уведомления YooMoney",
+            )
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > YOOMONEY_NOTIFICATION_MAX_BYTES:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        "Уведомление слишком большое",
+                    )
+            except ValueError as error:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Некорректный Content-Length",
+                ) from error
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > YOOMONEY_NOTIFICATION_MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "Уведомление слишком большое",
+                )
+        try:
+            form_items = parse_qsl(
+                body.decode("utf-8"),
+                keep_blank_values=True,
+                max_num_fields=YOOMONEY_NOTIFICATION_MAX_FIELDS,
+                encoding="utf-8",
+                errors="strict",
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Некорректная форма уведомления",
+            ) from error
+    else:
+        # Lightweight request doubles in unit tests may expose only form().
+        form_request = request.form()
+        form = await form_request
+        multi_items = getattr(form, "multi_items", None)
+        form_items = list(multi_items() if multi_items else form.items())
+    # FormData is a multi-dict. Silently collapsing duplicate names to a dict
+    # can make signature verification and business validation disagree about
+    # which amount/label a sender intended. YooMoney sends one value per key.
+    form_keys = [str(key) for key, _ in form_items]
+    if len(form_keys) != len(set(form_keys)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Уведомление содержит повторяющиеся поля",
+        )
+    values = {str(key): str(value) for key, value in form_items}
     if not values or not any(values.values()) or values.get("test_notification") == "true":
         return Response(status_code=status.HTTP_200_OK)
     received_sign = values.get("sign", "")
     expected_sign = _notification_signature(values)
     if not hmac.compare_digest(received_sign, expected_sign):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверная подпись уведомления")
+    if values.get("notification_type") not in {"p2p-incoming", "card-incoming"}:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Неподдерживаемый тип уведомления",
+        )
+    if (
+        values.get("currency") != "643"
+        or values.get("unaccepted") != "false"
+        or values.get("codepro") != "false"
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Неподходящий статус платежа",
+        )
     label = values.get("label", "")
-    payment = db.scalar(select(CloudPayment).where(CloudPayment.label == label))
+    payment = db.scalar(
+        select(CloudPayment)
+        .where(CloudPayment.label == label)
+        .with_for_update()
+    )
     if payment is None:
-        # Dispatch by exact known order label so another project's label
-        # format does not need to be known by Telecom Manager.
+        # Dispatch only labels that belong to a configured integration. This
+        # prevents an unknown Telecom Manager order from being misrouted.
         fallback_url = settings.yoomoney_fallback_notification_url
-        if not fallback_url:
+        prefixes = tuple(
+            value.strip()
+            for value in settings.yoomoney_fallback_label_prefixes.split(",")
+            if value.strip()
+        )
+        if not fallback_url or not label or not any(
+            label.startswith(prefix) for prefix in prefixes
+        ):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ не найден")
         forwarded = await asyncio.to_thread(
             _forward_yoomoney_notification,
@@ -218,13 +351,11 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
                 "Не удалось доставить уведомление в связанный сервис",
             )
         return Response(status_code=status.HTTP_200_OK)
-    if values.get("currency") != "643" or values.get("unaccepted") != "false":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неподходящий статус платежа")
-    if payment.status == "paid":
-        return Response(status_code=status.HTTP_200_OK)
     # YooMoney may deliver a valid confirmation late. Once its signature,
     # amount, currency and operation id are verified below, honor the payment
-    # even if the checkout URL expired or was superseded in the meantime.
+    # even if the checkout URL expired or was superseded in the meantime. A
+    # reusable form may also result in multiple distinct charges with one label;
+    # record and credit every real operation, while deduplicating retries.
     operation_id = values.get("operation_id")
     if not operation_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Не указан номер операции")
@@ -234,15 +365,46 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неверная сумма") from error
     if withdrawn != payment.amount:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Сумма заказа не совпадает")
+    receipt = db.scalar(
+        select(CloudPaymentReceipt)
+        .where(CloudPaymentReceipt.provider_operation_id == operation_id)
+        .with_for_update()
+    )
+    if receipt is not None:
+        if receipt.payment_id != payment.id:
+            logger.error(
+                "YooMoney operation was already credited to another payment order",
+                extra={
+                    "operation_id_hash": hashlib.sha256(
+                        operation_id.encode("utf-8")
+                    ).hexdigest(),
+                    "received_payment_id": payment.id,
+                    "credited_payment_id": receipt.payment_id,
+                },
+            )
+        return Response(status_code=status.HTTP_200_OK)
     existing = db.scalar(
         select(CloudPayment).where(CloudPayment.provider_operation_id == operation_id)
     )
-    if existing is not None and existing.id != payment.id:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Операция уже обработана")
+    if existing is not None:
+        if existing.id != payment.id:
+            logger.error(
+                "YooMoney operation was already credited to another payment order",
+                extra={
+                    "operation_id_hash": hashlib.sha256(
+                        operation_id.encode("utf-8")
+                    ).hexdigest(),
+                    "received_payment_id": payment.id,
+                    "credited_payment_id": existing.id,
+                },
+            )
+            return Response(status_code=status.HTTP_200_OK)
+        # Compatibility for paid transactions accepted before receipt tracking.
+        return Response(status_code=status.HTTP_200_OK)
     subscription = db.scalar(
-        select(CloudSubscription).where(
-            CloudSubscription.organization_id == payment.organization_id
-        )
+        select(CloudSubscription)
+        .where(CloudSubscription.organization_id == payment.organization_id)
+        .with_for_update()
     )
     if subscription is None:
         subscription = CloudSubscription(
@@ -255,15 +417,37 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
     previous_expiry = subscription.expires_at
     if previous_expiry is not None and previous_expiry.tzinfo is None:
         previous_expiry = previous_expiry.replace(tzinfo=UTC)
+    first_paid_period = subscription.status != "active" or not (
+        previous_expiry and previous_expiry > now
+    )
     base = previous_expiry if previous_expiry and previous_expiry > now else now
+    if first_paid_period:
+        # The paid term begins at the end of a trial, or immediately if access
+        # has already expired. Its day anchors future monthly renewals.
+        subscription.starts_at = base
+        anchor_day = base.day
+    else:
+        anchor_day = (subscription.starts_at or base).day
     subscription.plan_code = payment.plan_code
     subscription.status = "active"
-    subscription.starts_at = subscription.starts_at or now
-    subscription.expires_at = base + timedelta(days=31 if payment.plan_code == "monthly" else 365)
+    subscription.expires_at = _add_billing_months(
+        base,
+        1 if payment.plan_code == "monthly" else 12,
+        anchor_day,
+    )
     subscription.payment_provider = "yoomoney"
     subscription.payment_reference = operation_id
-    payment.status = "paid"
-    payment.provider_operation_id = operation_id
-    payment.paid_at = now
+    db.add(
+        CloudPaymentReceipt(
+            payment_id=payment.id,
+            provider_operation_id=operation_id,
+            amount=withdrawn,
+            paid_at=now,
+        )
+    )
+    if payment.status != "paid":
+        payment.status = "paid"
+        payment.provider_operation_id = operation_id
+        payment.paid_at = now
     db.commit()
     return Response(status_code=status.HTTP_200_OK)

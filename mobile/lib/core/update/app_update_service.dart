@@ -11,14 +11,23 @@ class AppUpdate {
     required this.currentVersion,
     required this.latestVersion,
     required this.downloadUrl,
+    this.playStoreManaged = false,
   });
 
   final String currentVersion;
   final String latestVersion;
   final String downloadUrl;
+  final bool playStoreManaged;
+
+  static const playStoreUrl =
+      'https://play.google.com/store/apps/details?id='
+      'ru.telecommanager.telecom_manager_mobile';
 
   bool get available =>
       _versionNumber(latestVersion) > _versionNumber(currentVersion);
+
+  static int compareVersions(String left, String right) =>
+      _versionNumber(left).compareTo(_versionNumber(right));
 
   static int _versionNumber(String value) {
     final parts = value.replaceFirst(RegExp(r'^[^0-9]*'), '').split('.');
@@ -33,36 +42,74 @@ class AppUpdate {
 }
 
 class AppUpdateService {
+  AppUpdateService({
+    this.client,
+    this.currentVersionProvider,
+    this.installerStoreProvider,
+  });
+
   static const _latestRelease =
       'https://api.github.com/repos/magomedov1009/telecom-manager/releases/latest';
 
+  final http.Client? client;
+  final Future<String> Function()? currentVersionProvider;
+  final Future<String?> Function()? installerStoreProvider;
+
   Future<AppUpdate> check({String? serverUrl}) async {
-    final package = await PackageInfo.fromPlatform();
+    final packageInfo = currentVersionProvider == null
+        ? await PackageInfo.fromPlatform()
+        : null;
+    final currentVersion = currentVersionProvider == null
+        ? packageInfo!.version
+        : await currentVersionProvider!();
+    final installerStore = installerStoreProvider == null
+        ? packageInfo?.installerStore
+        : await installerStoreProvider!();
+    if (installerStore == 'com.android.vending') {
+      return AppUpdate(
+        currentVersion: currentVersion,
+        latestVersion: currentVersion,
+        downloadUrl: AppUpdate.playStoreUrl,
+        playStoreManaged: true,
+      );
+    }
     final urls = <String>[
       if (serverUrl != null && serverUrl.trim().isNotEmpty)
         '${serverUrl.trim().replaceAll(RegExp(r'/+$'), '')}/api/mobile/update',
       _latestRelease,
     ];
     Object? lastError;
+    AppUpdate? newest;
     for (final url in urls) {
       try {
-        final response = await http
-            .get(
-              Uri.parse(url),
-              headers: const {
-                'Accept': 'application/vnd.github+json',
-                'User-Agent': 'Telecom-Manager-Android',
-              },
-            )
-            .timeout(const Duration(seconds: 12));
+        final uri = Uri.parse(url);
+        const headers = {
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'Telecom-Manager-Android',
+        };
+        final responseFuture = client == null
+            ? http.get(uri, headers: headers)
+            : client!.get(uri, headers: headers);
+        final response = await responseFuture.timeout(
+          const Duration(seconds: 12),
+        );
         if (response.statusCode != 200) {
           throw StateError('HTTP ${response.statusCode}');
         }
-        return _parse(package.version, response.body);
+        final candidate = _parse(currentVersion, response.body);
+        if (newest == null ||
+            AppUpdate.compareVersions(
+                  candidate.latestVersion,
+                  newest.latestVersion,
+                ) >
+                0) {
+          newest = candidate;
+        }
       } catch (error) {
         lastError = error;
       }
     }
+    if (newest != null) return newest;
     throw StateError('Не удалось проверить обновление: $lastError');
   }
 
@@ -90,6 +137,9 @@ class AppUpdateService {
     AppUpdate update, {
     void Function(int received, int total)? onProgress,
   }) async {
+    if (update.playStoreManaged) {
+      throw StateError('Обновляйте приложение через Google Play');
+    }
     final directory = await getTemporaryDirectory();
     final file = File(
       '${directory.path}/telecom-manager-${update.latestVersion}.apk',

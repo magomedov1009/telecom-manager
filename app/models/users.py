@@ -20,6 +20,7 @@ class User(BaseModel):
     phone: Mapped[str | None] = mapped_column(String(32), unique=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    cloud_trial_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     comment: Mapped[str | None] = mapped_column(String(500))
     manager_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), index=True)

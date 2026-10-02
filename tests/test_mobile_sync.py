@@ -1,8 +1,11 @@
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, delete, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 import app.models  # noqa: F401
 from app.core.security import hash_password
@@ -30,10 +33,12 @@ from app.models.mobile_sync import (
 )
 from app.models.billing import CloudSubscription
 from fastapi import HTTPException
+from app.dependencies.auth import can_access_web_application
 from app.models.users import User
 from app.routers.mobile_sync import (
     AddMemberRequest,
     CreateOrganizationRequest,
+    CreateOrganizationMemberRequest,
     DeleteAccountRequest,
     LoginRequest,
     RegisterRequest,
@@ -43,6 +48,7 @@ from app.routers.mobile_sync import (
     ReassignSnapshotOwnerRequest,
     add_organization_member,
     create_organization,
+    create_organization_member,
     delete_cloud_account,
     login,
     organization_members,
@@ -54,8 +60,10 @@ from app.routers.mobile_sync import (
     register,
     remove_organization_member,
     subscription_status,
+    _subscription_can_sync,
 )
 from app.scripts.audit_mobile_restore import audit_restore
+from app.services.auth_rate_limit import enforce_auth_rate_limit
 
 
 class MobileSyncTest(unittest.TestCase):
@@ -101,6 +109,64 @@ class MobileSyncTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def test_auth_rate_limit_counts_shared_attempts_and_resets_expired_window(self) -> None:
+        started = datetime(2026, 10, 3, tzinfo=UTC)
+        for _ in range(2):
+            enforce_auth_rate_limit(
+                self.db,
+                action="register",
+                identity="203.0.113.10",
+                limit=2,
+                window=timedelta(hours=24),
+                now=started,
+            )
+        with self.assertRaises(HTTPException) as limited:
+            enforce_auth_rate_limit(
+                self.db,
+                action="register",
+                identity="203.0.113.10",
+                limit=2,
+                window=timedelta(hours=24),
+                now=started,
+            )
+        self.assertEqual(limited.exception.status_code, 429)
+
+        enforce_auth_rate_limit(
+            self.db,
+            action="register",
+            identity="203.0.113.10",
+            limit=2,
+            window=timedelta(hours=24),
+            now=started + timedelta(hours=24),
+        )
+
+    def test_auth_rate_limit_retains_counters_for_long_configured_windows(self) -> None:
+        previous_window = settings.cloud_registration_rate_window_seconds
+        settings.cloud_registration_rate_window_seconds = 4 * 24 * 60 * 60
+        started = datetime(2026, 10, 3, tzinfo=UTC)
+        window = timedelta(days=4)
+        try:
+            enforce_auth_rate_limit(
+                self.db,
+                action="register",
+                identity="203.0.113.11",
+                limit=1,
+                window=window,
+                now=started,
+            )
+            with self.assertRaises(HTTPException) as limited:
+                enforce_auth_rate_limit(
+                    self.db,
+                    action="register",
+                    identity="203.0.113.11",
+                    limit=1,
+                    window=window,
+                    now=started + timedelta(days=2, seconds=1),
+                )
+            self.assertEqual(limited.exception.status_code, 429)
+        finally:
+            settings.cloud_registration_rate_window_seconds = previous_window
+
     def test_push_is_idempotent_and_pull_uses_cursor(self) -> None:
         request = PushRequest(changes=[PushItem(
             entity_type="provider",
@@ -130,10 +196,35 @@ class MobileSyncTest(unittest.TestCase):
         self.assertEqual(len(pull(self.db, self.token, cursor=first_page.cursor, limit=200).changes), 0)
 
     def test_legacy_workspace_keeps_unlimited_sync_access(self) -> None:
-        result = subscription_status(self.db, self.token)
-        self.assertTrue(result.can_sync)
-        self.assertEqual(result.plan_code, "lifetime")
-        self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            result = subscription_status(self.db, self.token)
+            self.assertTrue(result.can_sync)
+            self.assertEqual(result.plan_code, "lifetime")
+            self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+
+            pushed = push(
+                PushRequest(changes=[PushItem(
+                    entity_type="provider",
+                    entity_id="018f0000-0000-7000-8000-000000000099",
+                    operation="upsert",
+                    version=1,
+                    payload={"name": "Legacy provider"},
+                )]),
+                self.db,
+                self.token,
+            )
+            self.assertEqual(pushed[0].status, "accepted")
+            pulled = pull(self.db, self.token, cursor=0, limit=200)
+            self.assertTrue(any(
+                item.entity_type == "provider"
+                and item.entity_id == "018f0000-0000-7000-8000-000000000099"
+                for item in pulled.changes
+            ))
+            self.assertIsNone(self.db.scalar(select(CloudSubscription)))
+        finally:
+            settings.hosting_mode = previous_mode
 
     def test_expired_cloud_workspace_cannot_sync(self) -> None:
         previous_mode = settings.hosting_mode
@@ -158,6 +249,13 @@ class MobileSyncTest(unittest.TestCase):
             with self.assertRaises(HTTPException) as error:
                 push(PushRequest(changes=[]), self.db, self.token)
             self.assertEqual(error.exception.status_code, 402)
+
+            subscription.status = "active"
+            subscription.expires_at = None
+            self.db.commit()
+            with self.assertRaises(HTTPException) as missing_expiry:
+                push(PushRequest(changes=[]), self.db, self.token)
+            self.assertEqual(missing_expiry.exception.status_code, 402)
         finally:
             settings.hosting_mode = previous_mode
             settings.cloud_trial_days = previous_trial
@@ -188,7 +286,114 @@ class MobileSyncTest(unittest.TestCase):
         self.assertEqual(result[0].status, "accepted")
         self.assertEqual(self.db.scalar(select(func.count()).select_from(Provider)), 0)
 
-    def test_cloud_login_without_membership_creates_a_separate_workspace(self) -> None:
+    def test_cloud_organizations_cannot_read_or_overwrite_each_others_records(self) -> None:
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            first = register(
+                RegisterRequest(
+                    organization_name="Компания первая",
+                    full_name="Первый владелец",
+                    username="tenant-owner-one",
+                    password="safe-password",
+                    device_name="phone-one",
+                ),
+                self.db,
+            )
+            second = register(
+                RegisterRequest(
+                    organization_name="Компания вторая",
+                    full_name="Второй владелец",
+                    username="tenant-owner-two",
+                    password="safe-password",
+                    device_name="phone-two",
+                ),
+                self.db,
+            )
+            with self.assertRaises(HTTPException) as cross_org_login:
+                login(
+                    LoginRequest(
+                        username="tenant-owner-one",
+                        password="safe-password",
+                        device_name="wrong-company-phone",
+                        organization_id=second.organization_id,
+                    ),
+                    self.db,
+                )
+            self.assertEqual(cross_org_login.exception.status_code, 403)
+            self.assertEqual(
+                self.db.scalar(
+                    select(func.count()).select_from(MobileDeviceToken).where(
+                        MobileDeviceToken.user_id == first.user_id,
+                        MobileDeviceToken.organization_id == second.organization_id,
+                    )
+                ),
+                0,
+            )
+            first_token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == first.organization_id
+                )
+            )
+            second_token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == second.organization_id
+                )
+            )
+            shared_entity_id = "018f0000-0000-7000-8000-000000000077"
+
+            push(
+                PushRequest(changes=[PushItem(
+                    entity_type="provider",
+                    entity_id=shared_entity_id,
+                    operation="upsert",
+                    version=1,
+                    payload={"name": "Только первая компания"},
+                )]),
+                self.db,
+                first_token,
+            )
+            first_page = pull(self.db, first_token, cursor=0, limit=200)
+            self.assertTrue(any(
+                change.entity_id == shared_entity_id
+                and change.payload["name"] == "Только первая компания"
+                for change in first_page.changes
+            ))
+            second_page = pull(self.db, second_token, cursor=0, limit=200)
+            self.assertFalse(any(
+                change.entity_id == shared_entity_id
+                for change in second_page.changes
+            ))
+
+            push(
+                PushRequest(changes=[PushItem(
+                    entity_type="provider",
+                    entity_id=shared_entity_id,
+                    operation="upsert",
+                    version=1,
+                    payload={"name": "Только вторая компания"},
+                )]),
+                self.db,
+                second_token,
+            )
+            first_records = list(self.db.scalars(
+                select(MobileSyncRecord).where(
+                    MobileSyncRecord.organization_id == first.organization_id,
+                    MobileSyncRecord.entity_id == shared_entity_id,
+                )
+            ))
+            second_records = list(self.db.scalars(
+                select(MobileSyncRecord).where(
+                    MobileSyncRecord.organization_id == second.organization_id,
+                    MobileSyncRecord.entity_id == shared_entity_id,
+                )
+            ))
+            self.assertEqual(first_records[0].payload["name"], "Только первая компания")
+            self.assertEqual(second_records[0].payload["name"], "Только вторая компания")
+        finally:
+            settings.hosting_mode = previous_mode
+
+    def test_cloud_login_without_membership_does_not_create_a_trial_workspace(self) -> None:
         previous_mode = settings.hosting_mode
         try:
             settings.hosting_mode = "cloud"
@@ -201,24 +406,40 @@ class MobileSyncTest(unittest.TestCase):
             )
             self.db.add(newcomer)
             self.db.commit()
-            response = login(
-                LoginRequest(
-                    username="new-cloud-user",
-                    password="secret",
-                    device_name="new-device",
-                ),
-                self.db,
+            organization_count = self.db.scalar(
+                select(func.count()).select_from(MobileOrganization)
             )
-            self.assertNotEqual(response.organization_id, self.token.organization_id)
-            organization = self.db.get(MobileOrganization, response.organization_id)
-            self.assertFalse(organization.is_legacy_workspace)
+            with self.assertRaises(HTTPException) as unassigned:
+                login(
+                    LoginRequest(
+                        username="new-cloud-user",
+                        password="secret",
+                        device_name="new-device",
+                    ),
+                    self.db,
+                )
+            self.assertEqual(unassigned.exception.status_code, 403)
+            self.assertEqual(
+                self.db.scalar(select(func.count()).select_from(MobileOrganization)),
+                organization_count,
+            )
+            self.assertEqual(
+                self.db.scalar(
+                    select(func.count()).select_from(MobileMembership).where(
+                        MobileMembership.user_id == newcomer.id,
+                    )
+                ),
+                0,
+            )
         finally:
             settings.hosting_mode = previous_mode
 
     def test_cloud_registration_creates_isolated_trial_organization(self) -> None:
         previous_mode = settings.hosting_mode
+        previous_trial_days = settings.cloud_trial_days
         try:
             settings.hosting_mode = "cloud"
+            settings.cloud_trial_days = 9
             response = register(
                 RegisterRequest(
                     organization_name="Новая компания",
@@ -238,6 +459,195 @@ class MobileSyncTest(unittest.TestCase):
             self.assertFalse(organization.is_legacy_workspace)
             self.assertEqual(response.role, "admin")
             self.assertEqual(subscription.status, "trial")
+            owner = self.db.get(User, response.user_id)
+            self.assertTrue(owner.cloud_trial_used)
+            self.assertEqual(
+                subscription.expires_at - subscription.starts_at,
+                timedelta(days=9),
+            )
+        finally:
+            settings.hosting_mode = previous_mode
+            settings.cloud_trial_days = previous_trial_days
+
+    def test_owner_gets_only_one_cloud_trial_across_organizations(self) -> None:
+        previous_mode = settings.hosting_mode
+        previous_trial_days = settings.cloud_trial_days
+        try:
+            settings.hosting_mode = "cloud"
+            settings.cloud_trial_days = 14
+            registered = register(
+                RegisterRequest(
+                    organization_name="Первая организация",
+                    full_name="Владелец",
+                    username="single-trial-owner",
+                    password="safe-password",
+                    device_name="phone",
+                ),
+                self.db,
+            )
+            first_subscription = self.db.scalar(
+                select(CloudSubscription).where(
+                    CloudSubscription.organization_id == registered.organization_id
+                )
+            )
+            second = create_organization(
+                CreateOrganizationRequest(name="Вторая организация"),
+                self.db,
+                self.db.scalar(
+                    select(MobileDeviceToken).where(
+                        MobileDeviceToken.organization_id == registered.organization_id
+                    )
+                ),
+            )
+            second_subscription = self.db.scalar(
+                select(CloudSubscription).where(
+                    CloudSubscription.organization_id == second.id
+                )
+            )
+            second_organization = self.db.get(MobileOrganization, second.id)
+            self.assertEqual(first_subscription.status, "trial")
+            self.assertEqual(second_subscription.status, "expired")
+            self.assertEqual(
+                second_subscription.expires_at,
+                second_subscription.starts_at,
+            )
+            self.assertFalse(
+                _subscription_can_sync(second_organization, second_subscription)
+            )
+
+            # Deleting the original trial workspace must not reset the owner
+            # claim while the owner account still has another membership.
+            first_token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == registered.organization_id
+                )
+            )
+            delete_cloud_account(
+                DeleteAccountRequest(confirmation="DELETE_MY_CLOUD_ACCOUNT"),
+                self.db,
+                first_token,
+            )
+            # SQLite's test connection does not enforce FK cascades, so mirror
+            # the rows that PostgreSQL removes when the organization is deleted.
+            self.db.execute(
+                delete(MobileMembership).where(
+                    MobileMembership.organization_id == registered.organization_id
+                )
+            )
+            self.db.execute(
+                delete(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == registered.organization_id
+                )
+            )
+            self.db.commit()
+            self.assertIsNotNone(self.db.get(User, registered.user_id))
+            second_login = login(
+                LoginRequest(
+                    username="single-trial-owner",
+                    password="safe-password",
+                    device_name="second-phone",
+                    organization_id=second.id,
+                ),
+                self.db,
+            )
+            third = create_organization(
+                CreateOrganizationRequest(name="Третья организация"),
+                self.db,
+                self.db.scalar(
+                    select(MobileDeviceToken).where(
+                        MobileDeviceToken.organization_id == second_login.organization_id,
+                        MobileDeviceToken.user_id == registered.user_id,
+                    )
+                ),
+            )
+            third_subscription = self.db.scalar(
+                select(CloudSubscription).where(
+                    CloudSubscription.organization_id == third.id
+                )
+            )
+            self.assertEqual(third_subscription.status, "expired")
+        finally:
+            settings.hosting_mode = previous_mode
+            settings.cloud_trial_days = previous_trial_days
+
+    def test_cloud_registration_validates_database_field_lengths_and_blank_names(self) -> None:
+        payload = {
+            "organization_name": "Компания",
+            "full_name": "Администратор",
+            "username": "company-admin",
+            "password": "secret1",
+            "device_name": "Телефон",
+        }
+        cleaned = RegisterRequest(**payload)
+        self.assertEqual(cleaned.username, "company-admin")
+        self.assertEqual(cleaned.organization_name, "Компания")
+
+        with self.assertRaises(ValidationError):
+            RegisterRequest(**{**payload, "username": "u" * 65})
+        for field in ("organization_name", "full_name", "username", "device_name"):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                RegisterRequest(**{**payload, field: "   "})
+
+    def test_cloud_registration_rolls_back_everything_if_trial_creation_fails(self) -> None:
+        previous_mode = settings.hosting_mode
+        settings.hosting_mode = "cloud"
+        organization_count = self.db.scalar(
+            select(func.count()).select_from(MobileOrganization)
+        )
+        payload = RegisterRequest(
+            organization_name="Atomic Company",
+            full_name="Owner",
+            username="atomic-owner",
+            password="safe-password",
+            device_name="phone",
+        )
+        try:
+            with patch(
+                "app.routers.mobile_sync._subscription_for",
+                side_effect=IntegrityError("insert", {}, RuntimeError("failure")),
+            ):
+                with self.assertRaises(IntegrityError):
+                    register(payload, self.db)
+            self.assertIsNone(
+                self.db.scalar(select(User.id).where(User.username == "atomic-owner"))
+            )
+            self.assertEqual(
+                self.db.scalar(
+                    select(func.count()).select_from(MobileOrganization)
+                ),
+                organization_count,
+            )
+        finally:
+            settings.hosting_mode = previous_mode
+
+    def test_cloud_only_account_cannot_open_legacy_web_application(self) -> None:
+        previous_mode = settings.hosting_mode
+        try:
+            settings.hosting_mode = "cloud"
+            registered = register(
+                RegisterRequest(
+                    organization_name="Облачная организация",
+                    full_name="Облачный владелец",
+                    username="cloud-web-boundary-owner",
+                    password="safe-password",
+                    device_name="cloud-phone",
+                ),
+                self.db,
+            )
+            self.assertTrue(can_access_web_application(self.db, self.token.user_id))
+            self.assertFalse(can_access_web_application(self.db, registered.user_id))
+
+            # A cloud tenant must not inherit access to the shared legacy
+            # website merely because the same login is also in its workspace.
+            self.db.add(
+                MobileMembership(
+                    organization_id=registered.organization_id,
+                    user_id=self.token.user_id,
+                    role="installer",
+                )
+            )
+            self.db.commit()
+            self.assertFalse(can_access_web_application(self.db, self.token.user_id))
         finally:
             settings.hosting_mode = previous_mode
 
@@ -383,6 +793,90 @@ class MobileSyncTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as revoked:
             pull(self.db, installer_token, cursor=0, limit=200)
         self.assertEqual(revoked.exception.status_code, 403)
+
+    def test_cloud_admin_creates_staff_without_cross_organization_invites(self) -> None:
+        previous_mode = settings.hosting_mode
+        settings.hosting_mode = "cloud"
+        try:
+            first_org = create_organization(
+                CreateOrganizationRequest(name="Первая компания"),
+                self.db,
+                self.token,
+            )
+            second_org = create_organization(
+                CreateOrganizationRequest(name="Вторая компания"),
+                self.db,
+                self.token,
+            )
+            login(
+                LoginRequest(
+                    username="admin",
+                    password="secret",
+                    device_name="first-company-phone",
+                    organization_id=first_org.id,
+                ),
+                self.db,
+            )
+            login(
+                LoginRequest(
+                    username="admin",
+                    password="secret",
+                    device_name="second-company-phone",
+                    organization_id=second_org.id,
+                ),
+                self.db,
+            )
+            first_admin_token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == first_org.id,
+                    MobileDeviceToken.user_id == self.token.user_id,
+                )
+            )
+            second_admin_token = self.db.scalar(
+                select(MobileDeviceToken).where(
+                    MobileDeviceToken.organization_id == second_org.id,
+                    MobileDeviceToken.user_id == self.token.user_id,
+                )
+            )
+            member = create_organization_member(
+                second_org.id,
+                CreateOrganizationMemberRequest(
+                    full_name="Новый монтажник",
+                    username="new-installer",
+                    password="secure-pass",
+                    role="installer",
+                ),
+                self.db,
+                second_admin_token,
+            )
+            self.assertEqual(member.full_name, "Новый монтажник")
+            self.assertEqual(member.role, "installer")
+            self.assertEqual(
+                len(organization_members(second_org.id, self.db, second_admin_token)),
+                2,
+            )
+            staff_login = login(
+                LoginRequest(
+                    username="new-installer",
+                    password="secure-pass",
+                    device_name="staff-phone",
+                    organization_id=second_org.id,
+                ),
+                self.db,
+            )
+            self.assertEqual(staff_login.organization_id, second_org.id)
+            self.assertEqual(staff_login.role, "installer")
+
+            with self.assertRaises(HTTPException) as cross_org_invite:
+                add_organization_member(
+                    first_org.id,
+                    AddMemberRequest(username="new-installer", role="installer"),
+                    self.db,
+                    first_admin_token,
+                )
+            self.assertEqual(cross_org_invite.exception.status_code, 409)
+        finally:
+            settings.hosting_mode = previous_mode
 
     def test_mobile_connection_is_published_without_duplicate_client(self) -> None:
         provider = Provider(name="ELLKO", is_active=True)

@@ -1,7 +1,7 @@
 """SQLAlchemy models."""
 
 from app.models.base import BaseModel
-from app.models.billing import CloudPayment, CloudSubscription
+from app.models.billing import CloudPayment, CloudPaymentReceipt, CloudSubscription
 from app.models.clients import Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial, ExtraWorkType, Provider
 from app.models.enums import (
     ConnectionType,
@@ -15,7 +15,7 @@ from app.models.enums import (
 from app.models.events import EventLog
 from app.models.finance import Expense, FinanceTransaction
 from app.models.inventory import InventoryTransaction, Material, MaterialDebtSettlement, Warehouse
-from app.models.mobile_sync import MobileDeviceToken, MobileMembership, MobileOrganization, MobileSyncChange, MobileSyncRecord
+from app.models.mobile_sync import MobileAuthRateLimit, MobileDeviceToken, MobileMembership, MobileOrganization, MobileSyncChange, MobileSyncRecord
 from app.models.users import User
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "Client",
     "CloudSubscription",
     "CloudPayment",
+    "CloudPaymentReceipt",
     "Connection",
     "ConnectionMaterial",
     "ConnectionType",
@@ -40,6 +41,7 @@ __all__ = [
     "Material",
     "MaterialDebtSettlement",
     "MaterialUnit",
+    "MobileAuthRateLimit",
     "MobileDeviceToken",
     "MobileMembership",
     "MobileOrganization",
