@@ -40,7 +40,10 @@ container_started=true
 
 ready=false
 for _ in {1..60}; do
-    if docker exec "$container_name" pg_isready -q -U "$database_user" -d "$database"; then
+    # pg_isready can accept connections to PostgreSQL's temporary initdb server
+    # before the requested database exists. Verify a real query instead.
+    if docker exec "$container_name" psql \
+        -U "$database_user" -d "$database" -Atqc 'SELECT 1' >/dev/null 2>&1; then
         ready=true
         break
     fi
