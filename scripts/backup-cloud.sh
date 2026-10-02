@@ -15,14 +15,15 @@ die() {
 
 [[ -f "$compose_file" ]] || die "не найден Compose-файл: $compose_file"
 [[ -f "$project_dir/.env" ]] || die "не найден облачный .env: $project_dir/.env"
-[[ -n "$remote_dir" ]] || die 'задайте RCLONE_REMOTE_DIR, например telecom-backups:cloud-db'
 [[ "$local_retention_days" =~ ^[1-9][0-9]{0,3}$ ]] \
     || die 'LOCAL_BACKUP_RETENTION_DAYS должно быть целым числом от 1 до 3650'
 (( local_retention_days <= 3650 )) \
     || die 'LOCAL_BACKUP_RETENTION_DAYS не может превышать 3650 дней'
 command -v docker >/dev/null 2>&1 || die 'не найден docker'
-command -v rclone >/dev/null 2>&1 || die 'не найден rclone'
 command -v sha256sum >/dev/null 2>&1 || die 'не найден sha256sum'
+if [[ -n "$remote_dir" ]]; then
+    command -v rclone >/dev/null 2>&1 || die 'не найден rclone'
+fi
 
 mkdir -p -- "$backup_dir"
 chmod 700 -- "$backup_dir"
@@ -30,7 +31,6 @@ chmod 700 -- "$backup_dir"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 archive="$backup_dir/cloud-backup-$timestamp.dump"
 temporary="$backup_dir/.cloud-backup-$timestamp.partial"
-remote_archive="${remote_dir%/}/$(basename -- "$archive")"
 cleanup() {
     [[ ! -e "$temporary" ]] || rm -f -- "$temporary"
 }
@@ -52,16 +52,22 @@ mv -- "$temporary" "$archive"
 chmod 600 -- "$archive"
 sha256sum -- "$archive"
 
-rclone copyto --immutable -- "$archive" "$remote_archive" \
-    || die "загрузка во внешнее хранилище не удалась; локальный архив сохранён: $archive"
-rclone check --one-way -- "$archive" "$remote_archive" \
-    || die "проверка внешней копии не прошла; локальный архив сохранён: $archive"
+if [[ -n "$remote_dir" ]]; then
+    remote_archive="${remote_dir%/}/$(basename -- "$archive")"
+    rclone copyto --immutable -- "$archive" "$remote_archive" \
+        || die "загрузка во внешнее хранилище не удалась; локальный архив сохранён: $archive"
+    rclone check --one-way -- "$archive" "$remote_archive" \
+        || die "проверка внешней копии не прошла; локальный архив сохранён: $archive"
+    printf 'Внешняя копия успешно проверена.\n'
+else
+    printf 'Создана только локальная копия; внешнее хранилище не настроено.\n'
+fi
 
-# Keep recent local restore points, but only prune older archives after the
-# newly created archive has been uploaded and verified off-site.
+# Prune only after the new archive has passed pg_restore --list. When an
+# off-site remote is configured, the remote checksum check above must also pass.
 find "$backup_dir" -maxdepth 1 -type f \
     -name 'cloud-backup-*.dump' \
     -mmin "+$((local_retention_days * 1440))" \
     -print -delete
 
-printf 'Архив создан, читаемость и внешняя копия проверены: %s\n' "$archive"
+printf 'Проверенный архив создан: %s\n' "$archive"

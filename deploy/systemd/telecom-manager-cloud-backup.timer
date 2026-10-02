@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Telecom Manager cloud database backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=telecom-manager-cloud-backup.service
+
+[Install]
+WantedBy=timers.target
+
