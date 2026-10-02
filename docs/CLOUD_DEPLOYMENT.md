@@ -284,33 +284,47 @@ docker compose -f docker-compose.cloud.yml up -d --build app
 
 ## Резервные копии
 
-В репозитории есть `scripts/backup-cloud.sh`: он делает custom-format архив,
-проверяет его командой `pg_restore --list`, отправляет через настроенный `rclone`
-во внешнее хранилище и затем сверяет загруженный файл. При ошибке загрузки или
-сверки локальный архив сохраняется для повторной отправки. После успешной
-внешней проверки старые локальные архивы удаляются по истечении 7 дней; срок
-можно изменить переменной `LOCAL_BACKUP_RETENTION_DAYS` (от 1 до 3650 дней).
-Удаляются только обычные файлы `cloud-backup-*.dump` непосредственно в
-каталоге `backups/`, и только после проверки новой внешней копии. Во внешнем
+В репозитории есть `scripts/backup-cloud.sh`: он делает custom-format архив и
+проверяет его командой `pg_restore --list`. Если задан `RCLONE_REMOTE_DIR`,
+скрипт отправляет архив через настроенный `rclone` во внешнее хранилище и
+сверяет копию; при ошибке загрузки/сверки локальная копия сохраняется. Если
+внешнее хранилище не задано, скрипт создаёт и сохраняет только локальную копию
+и явно сообщает, что она не off-site. Старые локальные архивы удаляются после
+успешной проверки нового архива (и внешней сверки, если remote включён); срок
+задаётся через `LOCAL_BACKUP_RETENTION_DAYS` (1–3650 дней). Удаляются только
+обычные файлы `cloud-backup-*.dump` непосредственно в `backups/`. Во внешнем
 хранилище срок хранения настраивается отдельно. Каталог `backups/` закрыт для
-Git и Docker build context. Настройте `rclone` от имени того же системного
-пользователя, который будет запускать расписание, и сначала запустите вручную:
+Git и Docker build context.
+
+Для локального ежедневного расписания в репозитории есть systemd service/timer
+с 30-дневным сроком хранения. На Telecom VPS установите их и выполните первую
+копию вручную:
+
+```bash
+cd /opt/telecom-manager-cloud
+install -m 0644 deploy/systemd/telecom-manager-cloud-backup.service /etc/systemd/system/
+install -m 0644 deploy/systemd/telecom-manager-cloud-backup.timer /etc/systemd/system/
+systemctl daemon-reload
+bash scripts/backup-cloud.sh
+systemctl enable --now telecom-manager-cloud-backup.timer
+systemctl start telecom-manager-cloud-backup.service
+systemctl status telecom-manager-cloud-backup.timer
+```
+
+Чтобы дополнительно включить off-site копию, настройте `rclone` от имени того же
+системного пользователя и сначала проверьте загрузку вручную:
 
 ```bash
 cd /opt/telecom-manager-cloud
 RCLONE_REMOTE_DIR='remote-name:telecom-manager-cloud' bash scripts/backup-cloud.sh
 ```
 
-Затем добавьте ежедневное расписание, например в cron от того же пользователя
-(имя remote замените на настроенное в `rclone`; не помещайте токены в crontab):
+Для `rclone` запускайте тот же сервис с защищённой конфигурацией remote; не
+помещайте токены в crontab. Настройте оповещение по ненулевому коду выполнения
+задания и правила хранения внешнего хранилища. Успешный `rclone check`
+подтверждает совпадение копии, но не заменяет тестовое восстановление.
 
-```cron
-15 3 * * * cd /opt/telecom-manager-cloud && RCLONE_REMOTE_DIR='remote-name:telecom-manager-cloud' /bin/bash scripts/backup-cloud.sh >> /var/log/telecom-manager-cloud-backup.log 2>&1
-```
-
-Настройте оповещение по ненулевому коду выполнения задания и правила хранения
-внешнего хранилища. Успешный `rclone check` подтверждает совпадение копии, но не
-заменяет тестовое восстановление. Периодически проверяйте архив командой:
+Периодически проверяйте архив командой:
 
 ```bash
 bash scripts/restore-test-cloud.sh /path/to/cloud-backup.dump
@@ -336,7 +350,7 @@ bash scripts/restore-test-cloud.sh /path/to/cloud-backup.dump
 
 ```bash
 cd /opt/telecom-manager-cloud
-RCLONE_REMOTE_DIR='remote-name:telecom-manager-cloud' bash scripts/backup-cloud.sh
+bash scripts/backup-cloud.sh
 git pull --ff-only origin main
 docker compose -f docker-compose.cloud.yml build app
 docker compose -f docker-compose.cloud.yml stop app

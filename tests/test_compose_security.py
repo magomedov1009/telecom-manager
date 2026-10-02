@@ -121,6 +121,29 @@ class BackupScriptSecurityTests(unittest.TestCase):
         self.assertIn('-mmin "+$((local_retention_days * 1440))"', script)
         self.assertIn("LOCAL_BACKUP_RETENTION_DAYS:-7", script)
 
+    def test_local_backup_does_not_require_or_claim_offsite_storage(self) -> None:
+        script = (ROOT / "scripts/backup-cloud.sh").read_text(encoding="utf-8")
+
+        self.assertIn('if [[ -n "$remote_dir" ]]; then', script)
+        self.assertIn("command -v rclone", script)
+        self.assertIn("Создана только локальная копия; внешнее хранилище не настроено.", script)
+        self.assertNotIn("задайте RCLONE_REMOTE_DIR", script)
+
+    def test_daily_local_backup_timer_is_persistent_and_scoped(self) -> None:
+        service = (
+            ROOT / "deploy/systemd/telecom-manager-cloud-backup.service"
+        ).read_text(encoding="utf-8")
+        timer = (
+            ROOT / "deploy/systemd/telecom-manager-cloud-backup.timer"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("/opt/telecom-manager-cloud/scripts/backup-cloud.sh", service)
+        self.assertIn("LOCAL_BACKUP_RETENTION_DAYS=30", service)
+        self.assertIn("ProtectSystem=strict", service)
+        self.assertIn("ReadWritePaths=/opt/telecom-manager-cloud/backups", service)
+        self.assertIn("OnCalendar=*-*-* 03:15:00", timer)
+        self.assertIn("Persistent=true", timer)
+
 
 class RepositorySecretHygieneTests(unittest.TestCase):
     def test_signing_keys_and_certificates_are_excluded_from_git_and_images(self) -> None:
