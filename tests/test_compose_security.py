@@ -139,6 +139,9 @@ class BackupScriptSecurityTests(unittest.TestCase):
 
         self.assertIn("/opt/telecom-manager-cloud/scripts/backup-cloud.sh", service)
         self.assertIn("LOCAL_BACKUP_RETENTION_DAYS=30", service)
+        self.assertIn(
+            "EnvironmentFile=-/etc/telecom-manager-cloud-backup.env", service
+        )
         self.assertIn("ProtectSystem=strict", service)
         self.assertIn("ReadWritePaths=/opt/telecom-manager-cloud/backups", service)
         self.assertIn("OnCalendar=*-*-* 03:15:00", timer)

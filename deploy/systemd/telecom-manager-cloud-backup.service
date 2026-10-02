@@ -11,6 +11,7 @@ Group=root
 WorkingDirectory=/opt/telecom-manager-cloud
 Environment=BACKUP_DIR=/opt/telecom-manager-cloud/backups
 Environment=LOCAL_BACKUP_RETENTION_DAYS=30
+EnvironmentFile=-/etc/telecom-manager-cloud-backup.env
 UMask=0077
 ExecStart=/bin/bash /opt/telecom-manager-cloud/scripts/backup-cloud.sh
 NoNewPrivileges=true
