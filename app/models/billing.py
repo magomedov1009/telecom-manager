@@ -31,7 +31,7 @@ class CloudSubscription(BaseModel):
 
 
 class CloudPayment(BaseModel):
-    """One immutable checkout attempt, reconciled by a YooMoney notification."""
+    """One immutable checkout attempt, reconciled by its provider notification."""
 
     __tablename__ = "cloud_payments"
 
@@ -43,6 +43,7 @@ class CloudPayment(BaseModel):
     label: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     plan_code: Mapped[str] = mapped_column(String(32), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="yoomoney")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     provider_operation_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

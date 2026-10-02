@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     cloud_payment_link_minutes: int = Field(
         default=60, gt=0, alias="CLOUD_PAYMENT_LINK_MINUTES"
     )
+    cloud_payment_provider: str = Field(default="yoomoney", alias="CLOUD_PAYMENT_PROVIDER")
     mobile_login_rate_limit: int = Field(default=30, ge=1, alias="MOBILE_LOGIN_RATE_LIMIT")
     mobile_login_rate_window_seconds: int = Field(
         default=900, gt=0, alias="MOBILE_LOGIN_RATE_WINDOW_SECONDS"
@@ -59,9 +60,12 @@ class Settings(BaseSettings):
         alias="YOOMONEY_FALLBACK_NOTIFICATION_URL",
     )
     yoomoney_fallback_label_prefixes: str = Field(
-        default="tg_",
+        default="",
         alias="YOOMONEY_FALLBACK_LABEL_PREFIXES",
     )
+    robokassa_merchant_login: str | None = Field(default=None, alias="ROBOKASSA_MERCHANT_LOGIN")
+    robokassa_password1: str | None = Field(default=None, alias="ROBOKASSA_PASSWORD1")
+    robokassa_password2: str | None = Field(default=None, alias="ROBOKASSA_PASSWORD2")
     android_release_tag: str = Field(
         default="android-v1.1.1",
         alias="ANDROID_RELEASE_TAG",
@@ -176,6 +180,25 @@ class Settings(BaseSettings):
             self.yoomoney_fallback_notification_url
             and self.yoomoney_fallback_notification_url.strip()
         )
+
+    @property
+    def cloud_payment_provider_ready(self) -> bool:
+        return self.payment_provider_is_ready(self.cloud_payment_provider)
+
+    def payment_provider_is_ready(self, provider: str) -> bool:
+        if provider == "yoomoney":
+            return bool(
+                self.yoomoney_wallet
+                and self.yoomoney_notification_secret
+                and self.yoomoney_fallback_notifications_ready
+            )
+        if provider == "robokassa":
+            return bool(
+                self.robokassa_merchant_login
+                and self.robokassa_password1
+                and self.robokassa_password2
+            )
+        return False
 
 
 @lru_cache
