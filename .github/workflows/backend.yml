@@ -1,0 +1,92 @@
+name: Application checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Flutter SDK
+        uses: flutter-actions/setup-flutter@480ffd9d3a24db4ce099d7ceb62c3d6959661eb8 # v4.2
+        with:
+          channel: stable
+          version: 3.44.4
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: flutter pub get --enforce-lockfile
+      - name: Analyze mobile source
+        working-directory: mobile
+        run: flutter analyze
+      - name: Run mobile tests
+        working-directory: mobile
+        run: flutter test
+      # This is a build-validation artifact only; Play upload signing remains a
+      # separate owner-managed step and no app bundle is published by CI.
+      - name: Validate Android App Bundle build
+        working-directory: mobile
+        run: flutter build appbundle --release --no-pub
+
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: telecom_manager_ci
+          POSTGRES_USER: telecom_manager_ci
+          POSTGRES_PASSWORD: ci-only-postgres-password-not-for-production
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telecom_manager_ci -d telecom_manager_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: telecom_manager_ci
+      POSTGRES_USER: telecom_manager_ci
+      POSTGRES_PASSWORD: ci-only-postgres-password-not-for-production
+      BOOTSTRAP_CLEAN_DEMO_PROVIDER_CATALOG: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Validate shell script syntax
+        run: for script in scripts/*.sh; do bash -n "$script"; done
+      - name: Apply migrations to PostgreSQL
+        env:
+          HOSTING_MODE: cloud
+          BOOTSTRAP_CLEAN_CLOUD_DEFAULTS: "true"
+        run: python -m alembic upgrade head
+      - name: Run backend tests
+        run: python -m pytest -q tests
+      - name: Verify PostgreSQL backup restoration
+        run: |
+          mapfile -t postgres_ids < <(docker ps --filter ancestor=postgres:16-alpine --format '{{.ID}}')
+          if (( ${#postgres_ids[@]} != 1 )); then
+            echo "Expected exactly one PostgreSQL CI service container" >&2
+            exit 1
+          fi
+          archive="$RUNNER_TEMP/telecom-manager-ci.dump"
+          docker exec --user postgres "${postgres_ids[0]}" pg_dump -Fc \
+            -U "$POSTGRES_USER" "$POSTGRES_DB" > "$archive"
+          bash scripts/restore-test-cloud.sh "$archive"

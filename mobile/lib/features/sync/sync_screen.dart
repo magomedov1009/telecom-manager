@@ -120,9 +120,11 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
               child: ListTile(
                 leading: const Icon(Icons.system_update_outlined),
                 title: Text(
-                  info?.available == true
-                      ? 'Доступна версия ${info!.latestVersion}'
-                      : 'Обновление приложения',
+                  info?.playStoreManaged == true
+                      ? 'Обновление в Google Play'
+                      : info?.available == true
+                          ? 'Доступна версия ${info!.latestVersion}'
+                          : 'Обновление приложения',
                 ),
                 subtitle: updateProgress != null
                     ? LinearProgressIndicator(value: updateProgress)
@@ -130,14 +132,18 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
                         snapshot.hasError
                             ? 'Не удалось проверить: ${snapshot.error}'
                             : info == null
-                            ? 'Проверка версии…'
-                            : info.available
-                            ? 'Установлена ${info.currentVersion}. Нажмите, чтобы обновить'
-                            : 'Установлена актуальная версия ${info.currentVersion}',
+                                ? 'Проверка версии…'
+                                : info.playStoreManaged
+                                    ? 'Установлено из Google Play. Обновляйте приложение через магазин.'
+                                    : info.available
+                                        ? 'Установлена ${info.currentVersion}. Нажмите, чтобы обновить'
+                                        : 'Установлена актуальная версия ${info.currentVersion}',
                       ),
                 trailing: info?.available == true
                     ? const Icon(Icons.download_outlined)
-                    : const Icon(Icons.refresh),
+                    : info?.playStoreManaged == true
+                        ? const Icon(Icons.open_in_new)
+                        : const Icon(Icons.refresh),
                 onTap: updateProgress != null
                     ? null
                     : () => checkOrInstallUpdate(info),
@@ -151,6 +157,7 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
             final item = snapshot.data;
             if (item == null) return const SizedBox.shrink();
             final isSelfHosted = item.hostingMode == 'self_hosted';
+            final isLegacy = item.hostingMode == 'legacy';
             final expires = item.expiresAt == null
                 ? 'без ограничения срока'
                 : 'до ${item.expiresAt!.day.toString().padLeft(2, '0')}.${item.expiresAt!.month.toString().padLeft(2, '0')}.${item.expiresAt!.year}';
@@ -160,16 +167,26 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
                   : Theme.of(context).colorScheme.errorContainer,
               child: ListTile(
                 leading: Icon(
-                  isSelfHosted
+                  isSelfHosted || isLegacy
                       ? Icons.dns_outlined
                       : Icons.workspace_premium_outlined,
                 ),
                 title: Text(
-                  isSelfHosted ? 'Собственный сервер' : 'Облачная подписка',
+                  isSelfHosted
+                      ? 'Собственный сервер'
+                      : isLegacy
+                      ? 'Основная организация'
+                      : 'Облачная подписка',
                 ),
                 subtitle: Text(
                   isSelfHosted
                       ? 'Синхронизация не зависит от подписки'
+                      : isLegacy
+                      ? 'Доступ без ограничений, подписка не нужна'
+                      : !item.canSync
+                      ? item.checkoutAvailable
+                            ? 'Срок истёк. Данные на телефоне сохранены; оплатите продление для синхронизации.'
+                            : 'Срок истёк. Данные на телефоне сохранены; обратитесь к администратору.'
                       : '${item.status == 'trial' ? 'Пробный период' : 'Тариф'} $expires',
                 ),
                 trailing: !isSelfHosted && item.checkoutAvailable
@@ -274,29 +291,41 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
           },
         ),
         if (effectiveRole == 'admin')
-          Card(
-            color: Theme.of(context).colorScheme.errorContainer,
-            child: ListTile(
-              leading: const Icon(Icons.phonelink_setup_outlined),
-              title: const Text('Восстановить сервер из телефона'),
-              subtitle: const Text(
-                'Полностью заменить рабочие данные сайта текущей локальной копией',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: busy ? null : replaceServerFromPhone,
-            ),
-          ),
-        if (effectiveRole == 'admin')
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.assignment_ind_outlined),
-              title: const Text('Назначить восстановленные данные'),
-              subtitle: const Text(
-                'Передать подключения, складские операции и финансы выбранному монтажнику',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: busy ? null : reassignSnapshotOwner,
-            ),
+          FutureBuilder<ServerSubscription?>(
+            future: subscription,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting ||
+                  snapshot.data?.hostingMode == 'cloud') {
+                return const SizedBox.shrink();
+              }
+              return Column(
+                children: [
+                  Card(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: ListTile(
+                      leading: const Icon(Icons.phonelink_setup_outlined),
+                      title: const Text('Восстановить сервер из телефона'),
+                      subtitle: const Text(
+                        'Полностью заменить рабочие данные сайта текущей локальной копией',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: busy ? null : replaceServerFromPhone,
+                    ),
+                  ),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.assignment_ind_outlined),
+                      title: const Text('Назначить восстановленные данные'),
+                      subtitle: const Text(
+                        'Передать подключения, складские операции и финансы выбранному монтажнику',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: busy ? null : reassignSnapshotOwner,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         if (effectiveRole == 'admin')
           Card(
@@ -552,7 +581,7 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'На сервере будут безвозвратно удалены организация, пользователи и синхронизированные данные. Локальная копия на телефоне останется до удаления данных приложения.',
+              'С сервера будут удалены организация, её данные, доступы участников, подписка и история платежей. Локальная копия этой организации сразу удалится с телефона; другие организации не затрагиваются.',
             ),
             const SizedBox(height: 14),
             TextField(
@@ -602,6 +631,25 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
   );
 
   Future<void> checkOrInstallUpdate(AppUpdate? info) async {
+    if (info?.playStoreManaged == true) {
+      try {
+        if (!await launchUrl(
+          Uri.parse(info!.downloadUrl),
+          mode: LaunchMode.externalApplication,
+        )) {
+          throw StateError('Не удалось открыть Google Play');
+        }
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error.toString().replaceFirst('Bad state: ', '')),
+            ),
+          );
+        }
+      }
+      return;
+    }
     if (info == null || !info.available) {
       setState(() => update = _checkUpdate());
       return;
@@ -874,6 +922,7 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
             children: [
               TextField(
                 controller: organization,
+                maxLength: 255,
                 decoration: const InputDecoration(
                   labelText: 'Название компании',
                 ),
@@ -881,16 +930,21 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
               const SizedBox(height: 10),
               TextField(
                 controller: fullName,
+                maxLength: 255,
                 decoration: const InputDecoration(labelText: 'Ваше имя'),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: login,
+                maxLength: 64,
+                autocorrect: false,
+                enableSuggestions: false,
                 decoration: const InputDecoration(labelText: 'Логин'),
               ),
               const SizedBox(height: 10),
               TextField(
                 controller: newPassword,
+                maxLength: 128,
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Пароль (минимум 6 символов)',
@@ -1060,6 +1114,7 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
   Future<void> showMembers() async {
     try {
       final members = await service().members();
+      final cloudOrganization = (await subscription)?.hostingMode == 'cloud';
       if (!mounted) return;
       await showDialog<void>(
         context: context,
@@ -1110,7 +1165,9 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
                 inviteMember();
               },
               icon: const Icon(Icons.person_add),
-              label: const Text('Пригласить'),
+              label: Text(
+                cloudOrganization ? 'Добавить сотрудника' : 'Пригласить',
+              ),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context),
@@ -1130,38 +1187,62 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
   }
 
   Future<void> inviteMember() async {
+    final cloudOrganization = (await subscription)?.hostingMode == 'cloud';
+    if (!mounted) return;
+    final fullName = TextEditingController();
     final username = TextEditingController();
+    final password = TextEditingController();
     var role = 'installer';
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Пригласить пользователя сайта'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: username,
-                decoration: const InputDecoration(labelText: 'Логин'),
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: role,
-                decoration: const InputDecoration(labelText: 'Роль'),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'admin',
-                    child: Text('Администратор'),
+          title: Text(
+            cloudOrganization
+                ? 'Добавить сотрудника'
+                : 'Пригласить пользователя сайта',
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (cloudOrganization)
+                  TextField(
+                    controller: fullName,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(labelText: 'Имя'),
                   ),
-                  DropdownMenuItem(value: 'manager', child: Text('Менеджер')),
-                  DropdownMenuItem(
-                    value: 'installer',
-                    child: Text('Монтажник'),
+                TextField(
+                  controller: username,
+                  decoration: const InputDecoration(labelText: 'Логин'),
+                ),
+                if (cloudOrganization)
+                  TextField(
+                    controller: password,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Пароль (не менее 6 символов)',
+                    ),
                   ),
-                ],
-                onChanged: (value) =>
-                    setDialogState(() => role = value ?? role),
-              ),
-            ],
+                DropdownButtonFormField<String>(
+                  initialValue: role,
+                  decoration: const InputDecoration(labelText: 'Роль'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'admin',
+                      child: Text('Администратор'),
+                    ),
+                    DropdownMenuItem(value: 'manager', child: Text('Менеджер')),
+                    DropdownMenuItem(
+                      value: 'installer',
+                      child: Text('Монтажник'),
+                    ),
+                  ],
+                  onChanged: (value) =>
+                      setDialogState(() => role = value ?? role),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1170,17 +1251,28 @@ class _SyncScreenState extends State<SyncScreen> with WidgetsBindingObserver {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Пригласить'),
+              child: Text(cloudOrganization ? 'Создать' : 'Пригласить'),
             ),
           ],
         ),
       ),
     );
+    final name = fullName.text.trim();
     final login = username.text;
+    final secret = password.text;
+    fullName.dispose();
     username.dispose();
+    password.dispose();
     if (saved != true) return;
     try {
-      final member = await service().addMember(username: login, role: role);
+      final member = cloudOrganization
+          ? await service().createOrganizationMember(
+              fullName: name,
+              username: login.trim(),
+              password: secret,
+              role: role,
+            )
+          : await service().addMember(username: login.trim(), role: role);
       if (mounted) {
         setState(
           () => statusMessage =

@@ -107,7 +107,7 @@ def login(
         value=create_session_token(user.id),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=settings.session_cookie_secure,
         max_age=60 * 60 * 12,
     )
     return response

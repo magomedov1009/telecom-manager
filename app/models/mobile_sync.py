@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.db.base import Base
 from app.models.base import BaseModel
 
 
@@ -53,3 +54,22 @@ class MobileSyncChange(BaseModel):
     entity_id: Mapped[str] = mapped_column(String(36), index=True)
     operation: Mapped[str] = mapped_column(String(16), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class MobileAuthRateLimit(Base):
+    """Shared fixed-window counters for public mobile authentication routes."""
+
+    __tablename__ = "mobile_auth_rate_limits"
+    __table_args__ = (
+        UniqueConstraint(
+            "key_hash",
+            "action",
+            name="uq_mobile_auth_rate_limits_key_action",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -4,9 +4,10 @@ import hashlib
 import secrets
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
@@ -18,7 +19,7 @@ from app.models.mobile_sync import (
     MobileSyncChange,
     MobileSyncRecord,
 )
-from app.models.billing import CloudPayment, CloudSubscription
+from app.models.billing import CloudPayment, CloudPaymentReceipt, CloudSubscription
 from app.core.config import settings
 from app.models.clients import (
     Client, Connection, ConnectionMaterial, ExtraWork, ExtraWorkMaterial,
@@ -38,13 +39,14 @@ from app.models.enums import (
 )
 from app.models.users import User
 from app.services.expenses import pack_comment, unpack_comment
+from app.services.auth_rate_limit import enforce_auth_rate_limit
 
 router = APIRouter(prefix="/api/mobile", tags=["mobile-sync"])
 DbSession = Annotated[Session, Depends(get_db)]
 
 
 class LoginRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=64)
     password: str
     device_name: str = Field(min_length=1, max_length=120)
     organization_id: int | None = None
@@ -94,9 +96,17 @@ class CreateOrganizationRequest(BaseModel):
 class RegisterRequest(BaseModel):
     organization_name: str = Field(min_length=1, max_length=255)
     full_name: str = Field(min_length=1, max_length=255)
-    username: str = Field(min_length=3, max_length=100)
+    username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=6, max_length=128)
     device_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("organization_name", "full_name", "username", "device_name")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Поле не может быть пустым")
+        return value
 
 
 class DeleteAccountRequest(BaseModel):
@@ -105,6 +115,13 @@ class DeleteAccountRequest(BaseModel):
 
 class AddMemberRequest(BaseModel):
     username: str = Field(min_length=1, max_length=100)
+    role: Literal["admin", "manager", "installer"]
+
+
+class CreateOrganizationMemberRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=255)
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=6, max_length=128)
     role: Literal["admin", "manager", "installer"]
 
 
@@ -167,6 +184,16 @@ def _subscription_for(db: Session, organization: MobileOrganization) -> CloudSub
     """Return commercial access without ever restricting legacy/self-hosted data."""
     if settings.hosting_mode != "cloud" or organization.is_legacy_workspace:
         return None
+    # Serialize subscription creation per account owner. This makes the
+    # one-trial-per-owner rule hold even if two organizations are created at
+    # nearly the same time.
+    owner = None
+    if organization.owner_user_id is not None:
+        owner = db.scalar(
+            select(User)
+            .where(User.id == organization.owner_user_id)
+            .with_for_update()
+        )
     subscription = db.scalar(
         select(CloudSubscription).where(
             CloudSubscription.organization_id == organization.id
@@ -174,15 +201,26 @@ def _subscription_for(db: Session, organization: MobileOrganization) -> CloudSub
     )
     if subscription is None:
         now = datetime.now(UTC)
+        trial_available = owner is not None and not owner.cloud_trial_used
+        if trial_available:
+            owner.cloud_trial_used = True
         subscription = CloudSubscription(
             organization_id=organization.id,
             plan_code="trial",
-            status="trial",
+            status="trial" if trial_available else "expired",
             starts_at=now,
-            expires_at=now + timedelta(days=settings.cloud_trial_days),
+            expires_at=(
+                now + timedelta(days=settings.cloud_trial_days)
+                if trial_available
+                else now
+            ),
         )
         db.add(subscription)
         db.flush()
+    elif owner is not None and not owner.cloud_trial_used:
+        # Also repair the claim lazily for databases where an existing cloud
+        # subscription predates this policy migration.
+        owner.cloud_trial_used = True
     return subscription
 
 
@@ -195,7 +233,9 @@ def _subscription_can_sync(
     if subscription is None or subscription.status not in {"trial", "active"}:
         return False
     if subscription.expires_at is None:
-        return True
+        # Only legacy workspaces get unlimited access. A cloud subscription
+        # without an expiry must fail closed instead of becoming perpetual.
+        return False
     expires_at = subscription.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=UTC)
@@ -490,7 +530,19 @@ def current_token(
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
+def login(
+    payload: LoginRequest,
+    db: DbSession,
+    request: Request = None,
+) -> LoginResponse:
+    client_host = request.client.host if request and request.client else "unknown"
+    enforce_auth_rate_limit(
+        db,
+        action="login",
+        identity=client_host,
+        limit=settings.mobile_login_rate_limit,
+        window=timedelta(seconds=settings.mobile_login_rate_window_seconds),
+    )
     user = db.scalar(select(User).where(User.username == payload.username.strip()))
     if user is None or not user.is_active or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный логин или пароль")
@@ -502,24 +554,21 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
         )
     )
     if not memberships:
-        # In the shared cloud a user with no membership must never be placed
-        # into another customer's first workspace.
-        organization = None
-        if settings.hosting_mode != "cloud":
-            organization = db.scalar(
-                select(MobileOrganization).order_by(MobileOrganization.id)
+        # Cloud workspaces are created through explicit registration. Creating
+        # a trial organization from login would let a removed staff account
+        # start another free trial.
+        if settings.hosting_mode == "cloud":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Аккаунт не подключён к организации. Зарегистрируйтесь или обратитесь к администратору.",
             )
+        organization = db.scalar(
+            select(MobileOrganization).order_by(MobileOrganization.id)
+        )
         if organization is None:
             organization = MobileOrganization(
-                name=(
-                    "Основная организация"
-                    if settings.hosting_mode != "cloud"
-                    else f"Организация {user.full_name}"
-                ),
-                # A brand-new shared cloud must start as a trial workspace.
-                # A self-hosted install remains unrestricted by design.
-                is_legacy_workspace=settings.hosting_mode != "cloud",
-                owner_user_id=user.id if settings.hosting_mode == "cloud" else None,
+                name="Основная организация",
+                is_legacy_workspace=True,
             )
             db.add(organization)
             db.flush()
@@ -580,50 +629,87 @@ def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
 
 
 @router.post("/register", response_model=LoginResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, db: DbSession) -> LoginResponse:
+def register(
+    payload: RegisterRequest,
+    db: DbSession,
+    request: Request = None,
+) -> LoginResponse:
     """Create an isolated customer account on the shared cloud only."""
     if settings.hosting_mode != "cloud":
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             "Самостоятельная регистрация доступна только в облаке",
         )
+    client_host = request.client.host if request and request.client else "unknown"
+    enforce_auth_rate_limit(
+        db,
+        action="register",
+        identity=client_host,
+        limit=settings.cloud_registration_rate_limit,
+        window=timedelta(seconds=settings.cloud_registration_rate_window_seconds),
+    )
     username = payload.username.strip()
     if db.scalar(select(User.id).where(User.username == username)) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "Такой логин уже занят")
-    user = User(
-        username=username,
-        full_name=payload.full_name.strip(),
-        hashed_password=hash_password(payload.password, secrets.token_urlsafe(16)),
-        role=UserRole.ADMIN,
-        is_active=True,
-    )
-    db.add(user)
-    db.flush()
-    organization = MobileOrganization(
-        name=payload.organization_name.strip(),
-        hosting_mode="cloud",
-        is_legacy_workspace=False,
-        owner_user_id=user.id,
-    )
-    db.add(organization)
-    db.flush()
-    db.add(
-        MobileMembership(
+    try:
+        user = User(
+            username=username,
+            full_name=payload.full_name.strip(),
+            hashed_password=hash_password(payload.password, secrets.token_urlsafe(16)),
+            role=UserRole.ADMIN,
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+        organization = MobileOrganization(
+            name=payload.organization_name.strip(),
+            hosting_mode="cloud",
+            is_legacy_workspace=False,
+            owner_user_id=user.id,
+        )
+        db.add(organization)
+        db.flush()
+        membership = MobileMembership(
             organization_id=organization.id,
             user_id=user.id,
             role="admin",
         )
-    )
-    _subscription_for(db, organization)
-    db.commit()
-    return login(
-        LoginRequest(
-            username=username,
-            password=payload.password,
-            device_name=payload.device_name,
-            organization_id=organization.id,
-        ),
-        db,
+        db.add(membership)
+        _subscription_for(db, organization)
+
+        # Issue the first device token in the same transaction. If any part of
+        # registration fails, there is no orphaned user/workspace/trial.
+        raw_token = secrets.token_urlsafe(48)
+        db.add(
+            MobileDeviceToken(
+                token_hash=_token_hash(raw_token),
+                organization_id=organization.id,
+                user_id=user.id,
+                expires_at=datetime.now(UTC) + timedelta(days=90),
+            )
+        )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.scalar(select(User.id).where(User.username == username)) is not None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Такой логин уже занят")
+        raise
+
+    return LoginResponse(
+        token=raw_token,
+        organization_id=organization.id,
+        organization_name=organization.name,
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+        role=membership.role,
+        organizations=[
+            OrganizationOption(
+                id=organization.id,
+                name=organization.name,
+                role=membership.role,
+            )
+        ],
     )
 
 
@@ -778,6 +864,8 @@ def subscription_status(
     checkout_available = bool(
         settings.hosting_mode == "cloud"
         and settings.yoomoney_wallet
+        and settings.yoomoney_notification_secret
+        and settings.yoomoney_fallback_notifications_ready
         and (settings.cloud_monthly_price > 0 or settings.cloud_yearly_price > 0)
     )
     return SubscriptionResponse(
@@ -787,8 +875,16 @@ def subscription_status(
         expires_at=subscription.expires_at,
         payment_url=None,
         checkout_available=checkout_available,
-        monthly_price=settings.cloud_monthly_price if checkout_available else None,
-        yearly_price=settings.cloud_yearly_price if checkout_available else None,
+        monthly_price=(
+            settings.cloud_monthly_price
+            if checkout_available and settings.cloud_monthly_price > 0
+            else None
+        ),
+        yearly_price=(
+            settings.cloud_yearly_price
+            if checkout_available and settings.cloud_yearly_price > 0
+            else None
+        ),
         can_sync=_subscription_can_sync(organization, subscription),
     )
 
@@ -807,22 +903,51 @@ def subscription_payments(
     if settings.hosting_mode != "cloud" or organization.is_legacy_workspace:
         return []
     require_admin(db, token)
-    payments = db.scalars(
-        select(CloudPayment)
+    receipts = db.execute(
+        select(CloudPaymentReceipt, CloudPayment)
+        .join(CloudPayment, CloudPayment.id == CloudPaymentReceipt.payment_id)
         .where(CloudPayment.organization_id == organization.id)
+        .order_by(CloudPaymentReceipt.paid_at.desc(), CloudPaymentReceipt.id.desc())
+        .limit(50)
+    ).all()
+    history = [
+        SubscriptionPaymentResponse(
+            plan_code=payment.plan_code,
+            amount=receipt.amount,
+            status="paid",
+            created_at=receipt.paid_at,
+            paid_at=receipt.paid_at,
+        )
+        for receipt, payment in receipts
+    ]
+    unpaid_orders = db.scalars(
+        select(CloudPayment)
+        .where(
+            CloudPayment.organization_id == organization.id,
+            CloudPayment.status != "paid",
+        )
         .order_by(CloudPayment.created_at.desc(), CloudPayment.id.desc())
         .limit(50)
     )
-    return [
+    history.extend(
         SubscriptionPaymentResponse(
             plan_code=payment.plan_code,
             amount=payment.amount,
             status=payment.status,
             created_at=payment.created_at,
-            paid_at=payment.paid_at,
+            paid_at=None,
         )
-        for payment in payments
-    ]
+        for payment in unpaid_orders
+    )
+    return sorted(
+        history,
+        key=lambda payment: (
+            payment.created_at.replace(tzinfo=UTC)
+            if payment.created_at.tzinfo is None
+            else payment.created_at
+        ),
+        reverse=True,
+    )[:50]
 
 
 @router.get(
@@ -867,6 +992,14 @@ def add_organization_member(
     if token.organization_id != organization_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Выберите эту организацию")
     require_admin(db, token)
+    organization = db.get(MobileOrganization, organization_id)
+    if organization is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
+    if settings.hosting_mode == "cloud" and not organization.is_legacy_workspace:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "В облаке создавайте нового сотрудника с отдельным логином и паролем",
+        )
     user = db.scalar(
         select(User).where(
             User.username == payload.username.strip(),
@@ -890,6 +1023,67 @@ def add_organization_member(
         db.add(membership)
     else:
         membership.role = payload.role
+    db.commit()
+    return MemberResponse(
+        user_id=user.id,
+        username=user.username,
+        full_name=user.full_name,
+        role=membership.role,
+    )
+
+
+@router.post(
+    "/organizations/{organization_id}/members/create",
+    response_model=MemberResponse,
+)
+def create_organization_member(
+    organization_id: int,
+    payload: CreateOrganizationMemberRequest,
+    db: DbSession,
+    token: Annotated[MobileDeviceToken, Depends(current_token)],
+) -> MemberResponse:
+    if token.organization_id != organization_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Выберите эту организацию")
+    require_admin(db, token)
+    organization = db.get(MobileOrganization, organization_id)
+    if (
+        settings.hosting_mode != "cloud"
+        or organization is None
+        or organization.is_legacy_workspace
+    ):
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "Создание сотрудников доступно только в облачной организации",
+        )
+
+    username = payload.username.strip()
+    full_name = payload.full_name.strip()
+    if len(username) < 3 or not full_name:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Укажите логин от 3 символов и имя сотрудника",
+        )
+    if db.scalar(select(User.id).where(User.username == username)) is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Этот логин уже занят. Выберите другой",
+        )
+
+    user = User(
+        username=username,
+        full_name=full_name,
+        hashed_password=hash_password(payload.password, secrets.token_urlsafe(16)),
+        role=UserRole(payload.role),
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    membership = MobileMembership(
+        organization_id=organization_id,
+        user_id=user.id,
+        role=payload.role,
+    )
+    db.add(membership)
     db.commit()
     return MemberResponse(
         user_id=user.id,

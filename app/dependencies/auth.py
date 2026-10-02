@@ -1,7 +1,7 @@
 ﻿from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -16,7 +16,7 @@ def can_access_web_application(db: Session, user_id: int) -> bool:
     """Only legacy workspaces use the non-tenant-aware website tables."""
     if settings.hosting_mode != "cloud":
         return True
-    legacy_membership = db.scalar(
+    legacy_membership = exists(
         select(MobileMembership.id)
         .join(
             MobileOrganization,
@@ -26,9 +26,21 @@ def can_access_web_application(db: Session, user_id: int) -> bool:
             MobileMembership.user_id == user_id,
             MobileOrganization.is_legacy_workspace.is_(True),
         )
-        .limit(1)
     )
-    return legacy_membership is not None
+    cloud_membership = exists(
+        select(MobileMembership.id)
+        .join(
+            MobileOrganization,
+            MobileOrganization.id == MobileMembership.organization_id,
+        )
+        .where(
+            MobileMembership.user_id == user_id,
+            MobileOrganization.is_legacy_workspace.is_(False),
+        )
+    )
+    # Cloud tenants must not inherit access to the shared, non-tenant-aware
+    # website even if their user is also a member of the legacy workspace.
+    return bool(db.scalar(select(legacy_membership & ~cloud_membership)))
 
 
 def get_current_user_optional(

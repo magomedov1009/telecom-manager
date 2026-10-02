@@ -46,3 +46,22 @@ class CloudPayment(BaseModel):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     provider_operation_id: Mapped[str | None] = mapped_column(String(255), unique=True)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CloudPaymentReceipt(BaseModel):
+    """An individual successful YooMoney charge for a checkout order."""
+
+    __tablename__ = "cloud_payment_receipts"
+
+    payment_id: Mapped[int] = mapped_column(
+        ForeignKey("cloud_payments.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    provider_operation_id: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

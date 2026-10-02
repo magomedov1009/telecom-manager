@@ -183,6 +183,23 @@ class SyncService {
     return normalized.replaceAll(RegExp(r'/+$'), '');
   }
 
+  static bool isTrustedCheckoutUrl(String configuredServerUrl, Uri candidate) {
+    final server = Uri.tryParse(normalizeServerUrl(configuredServerUrl));
+    final segments = candidate.pathSegments;
+    return server != null &&
+        server.scheme == 'https' &&
+        candidate.scheme == 'https' &&
+        candidate.host.toLowerCase() == server.host.toLowerCase() &&
+        candidate.port == server.port &&
+        candidate.userInfo.isEmpty &&
+        candidate.query.isEmpty &&
+        candidate.fragment.isEmpty &&
+        segments.length == 3 &&
+        segments[0] == 'billing' &&
+        segments[1] == 'checkout' &&
+        RegExp(r'^[A-Za-z0-9_-]{16,96}$').hasMatch(segments[2]);
+  }
+
   String get normalizedServerUrl => normalizeServerUrl(serverUrl);
 
   Uri endpoint(String path, [Map<String, String>? query]) => Uri.parse(
@@ -308,7 +325,7 @@ class SyncService {
     if (response.statusCode != 200) _serverError(response);
     final body = Map<String, Object?>.from(jsonDecode(response.body) as Map);
     final url = Uri.tryParse(body['checkout_url']?.toString() ?? '');
-    if (url == null || !url.hasScheme) {
+    if (url == null || !isTrustedCheckoutUrl(serverUrl, url)) {
       throw StateError('Сервер вернул неверную ссылку на оплату');
     }
     return url;
@@ -371,6 +388,30 @@ class SyncService {
       endpoint('/organizations/${binding.remoteOrganizationId}/members'),
       headers: await _authorizedHeaders(),
       body: jsonEncode({'username': username, 'role': role}),
+    );
+    if (response.statusCode != 200) _serverError(response);
+    return ServerMember.fromJson(
+      Map<String, Object?>.from(jsonDecode(response.body) as Map),
+    );
+  }
+
+  Future<ServerMember> createOrganizationMember({
+    required String fullName,
+    required String username,
+    required String password,
+    required String role,
+  }) async {
+    final binding = await repository.remoteOrganizationBinding();
+    if (binding == null) throw StateError('Организация не подключена');
+    final response = await client.post(
+      endpoint('/organizations/${binding.remoteOrganizationId}/members/create'),
+      headers: await _authorizedHeaders(),
+      body: jsonEncode({
+        'full_name': fullName,
+        'username': username,
+        'password': password,
+        'role': role,
+      }),
     );
     if (response.statusCode != 200) _serverError(response);
     return ServerMember.fromJson(

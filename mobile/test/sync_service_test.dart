@@ -115,6 +115,34 @@ void main() {
     );
   });
 
+  test('checkout URL must be HTTPS and belong to the configured server', () {
+    expect(
+      SyncService.isTrustedCheckoutUrl(
+        'https://cloud.example.test',
+        Uri.parse(
+          'https://cloud.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123',
+        ),
+      ),
+      isTrue,
+    );
+    for (final value in [
+      'http://cloud.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123',
+      'https://evil.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123',
+      'https://cloud.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123?next=https://evil.example.test',
+      'https://cloud.example.test/redirect/AbCdEfGhIjKlMnOp_123',
+      'https://user@cloud.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123',
+    ]) {
+      expect(
+        SyncService.isTrustedCheckoutUrl(
+          'https://cloud.example.test',
+          Uri.parse(value),
+        ),
+        isFalse,
+        reason: value,
+      );
+    }
+  });
+
   test(
     'connect creates isolated server workspace and acknowledges queue',
     () async {
@@ -234,6 +262,99 @@ void main() {
     },
   );
 
+  test(
+    'keeps local sync queue after expired subscription and retries after renewal',
+    () async {
+      final database = AppDatabase(
+        factory: databaseFactoryFfi,
+        overridePath: inMemoryDatabasePath,
+      );
+      final repository = LocalRepository(database);
+      await repository.initialize();
+      final tokens = MemoryTokenStore();
+      var subscriptionActive = false;
+      final service = SyncService(
+        repository: repository,
+        serverUrl: 'https://cloud.example.test',
+        tokenStore: tokens,
+        client: MockClient((request) async {
+          if (request.url.path.endsWith('/register')) {
+            return http.Response(
+              jsonEncode({
+                'token': 'expired-cloud-token',
+                'organization_id': 75,
+                'organization_name': 'Cloud workspace',
+                'user_id': 10,
+                'username': 'owner',
+                'full_name': 'Owner',
+                'role': 'admin',
+                'organizations': [
+                  {'id': 75, 'name': 'Cloud workspace', 'role': 'admin'},
+                ],
+              }),
+              201,
+            );
+          }
+          if (request.url.path.endsWith('/sync/push')) {
+            if (!subscriptionActive) {
+              return http.Response.bytes(
+                utf8.encode(
+                  jsonEncode({'detail': 'Срок облачной подписки закончился'}),
+                ),
+                402,
+                headers: const {
+                  'content-type': 'application/json; charset=utf-8',
+                },
+              );
+            }
+            final changes =
+                (jsonDecode(request.body) as Map<String, Object?>)['changes']!
+                    as List;
+            return http.Response(
+              jsonEncode(
+                changes
+                    .map(
+                      (raw) => {
+                        'entity_type': (raw as Map)['entity_type'],
+                        'entity_id': raw['entity_id'],
+                        'status': 'accepted',
+                        'server_version': 1,
+                      },
+                    )
+                    .toList(),
+              ),
+              200,
+            );
+          }
+          if (request.url.path.endsWith('/sync/pull')) {
+            return http.Response(
+              jsonEncode({'cursor': 0, 'has_more': false, 'changes': []}),
+              200,
+            );
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+      await service.register(
+        organizationName: 'Cloud workspace',
+        fullName: 'Owner',
+        username: 'owner',
+        password: 'safe-password',
+        deviceName: 'test-phone',
+      );
+      await repository.addProvider('Запись останется в очереди');
+
+      await expectLater(service.synchronize(), throwsA(isA<StateError>()));
+      expect(await repository.pendingChanges(), 1);
+
+      subscriptionActive = true;
+      final result = await service.synchronize();
+      expect(result.sent, 1);
+      expect(await repository.pendingChanges(), 0);
+      await database.close();
+    },
+  );
+
   test('stale queued change is rebased and sent automatically', () async {
     final database = AppDatabase(
       factory: databaseFactoryFfi,
@@ -311,6 +432,99 @@ void main() {
     expect(result.paymentUrl, contains('pay.example.test'));
     await database.close();
   });
+
+  test(
+    'creates an authenticated checkout and accepts only server checkout URL',
+    () async {
+      final database = AppDatabase(
+        factory: databaseFactoryFfi,
+        overridePath: inMemoryDatabasePath,
+      );
+      final repository = LocalRepository(database);
+      await repository.initialize();
+      final tokens = MemoryTokenStore()..token = 'billing-token';
+      final service = SyncService(
+        repository: repository,
+        serverUrl: 'https://cloud.example.test',
+        tokenStore: tokens,
+        client: MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(request.url.path, '/api/mobile/subscription/checkout');
+          expect(request.headers['authorization'], 'Bearer billing-token');
+          expect(
+            (jsonDecode(request.body) as Map<String, Object?>)['plan_code'],
+            'yearly',
+          );
+          return http.Response(
+            jsonEncode({
+              'checkout_url':
+                  'https://cloud.example.test/billing/checkout/AbCdEfGhIjKlMnOp_123',
+            }),
+            200,
+          );
+        }),
+      );
+
+      final checkout = await service.createCheckout('yearly');
+
+      expect(checkout.host, 'cloud.example.test');
+      expect(checkout.pathSegments, [
+        'billing',
+        'checkout',
+        'AbCdEfGhIjKlMnOp_123',
+      ]);
+      await database.close();
+    },
+  );
+
+  test(
+    'keeps each successful charge as a separate payment history row',
+    () async {
+      final database = AppDatabase(
+        factory: databaseFactoryFfi,
+        overridePath: inMemoryDatabasePath,
+      );
+      final repository = LocalRepository(database);
+      await repository.initialize();
+      final tokens = MemoryTokenStore()..token = 'billing-token';
+      final service = SyncService(
+        repository: repository,
+        serverUrl: 'https://cloud.example.test',
+        tokenStore: tokens,
+        client: MockClient((request) async {
+          expect(request.method, 'GET');
+          expect(request.url.path, '/api/mobile/subscription/payments');
+          expect(request.headers['authorization'], 'Bearer billing-token');
+          return http.Response(
+            jsonEncode([
+              {
+                'plan_code': 'monthly',
+                'amount': 199.0,
+                'status': 'paid',
+                'created_at': '2026-10-01T10:00:00Z',
+                'paid_at': '2026-10-01T10:01:00Z',
+              },
+              {
+                'plan_code': 'monthly',
+                'amount': 199.0,
+                'status': 'paid',
+                'created_at': '2026-10-01T10:00:00Z',
+                'paid_at': '2026-10-01T10:03:00Z',
+              },
+            ]),
+            200,
+          );
+        }),
+      );
+
+      final payments = await service.subscriptionPayments();
+
+      expect(payments, hasLength(2));
+      expect(payments.map((payment) => payment.amount), [199.0, 199.0]);
+      expect(payments[0].paidAt, isNot(equals(payments[1].paidAt)));
+      await database.close();
+    },
+  );
 
   test('registers a new cloud organization and stores its token', () async {
     final database = AppDatabase(

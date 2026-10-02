@@ -1,5 +1,8 @@
 .git
 .github
+.env
+.env.*
+!.env.example
 .venv
 __pycache__
 **/__pycache__
@@ -9,9 +12,17 @@ __pycache__
 .ruff_cache
 .mypy_cache
 tmp_pytest_deps
+artifacts
+backups
 mobile
 tests
 docs
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
 .env
 .env.*
 *.db

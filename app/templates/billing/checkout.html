@@ -12,12 +12,16 @@
       <p class="muted">Организация: {{ organization.name }}</p>
       <p class="muted">Тариф: {{ plan_label }}</p>
       <div class="price">{{ payment.amount }} ₽</div>
+      <p class="muted">
+        Это сумма списания с плательщика. ЮMoney удерживает комиссию из
+        поступления на кошелёк; итоговое зачисление зависит от выбранного
+        способа оплаты.
+      </p>
       <form method="post" action="https://yoomoney.ru/quickpay/confirm">
         <input type="hidden" name="receiver" value="{{ wallet }}">
         <input type="hidden" name="label" value="{{ payment.label }}">
         <input type="hidden" name="quickpay-form" value="button">
         <input type="hidden" name="sum" value="{{ payment.amount }}" data-type="number">
-        <input type="hidden" name="targets" value="Подписка {{ app_name }}">
         <input type="hidden" name="successURL" value="{{ success_url }}">
         <label class="option"><input type="radio" name="paymentType" value="AC" checked> Банковской картой</label>
         <label class="option"><input type="radio" name="paymentType" value="PC"> Из кошелька ЮMoney</label>

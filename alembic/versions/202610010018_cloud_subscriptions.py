@@ -24,11 +24,11 @@ def upgrade() -> None:
         "mobile_organizations",
         sa.Column("is_legacy_workspace", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    # The oldest workspace is the existing production workspace.  It remains
-    # unrestricted, so introducing subscriptions cannot interrupt its sync.
+    # Every workspace that existed before commercial subscriptions were
+    # introduced is grandfathered. New cloud registrations happen after this
+    # migration and receive subscriptions through the registration flow.
     op.execute(
-        "UPDATE mobile_organizations SET is_legacy_workspace = true "
-        "WHERE id = (SELECT MIN(id) FROM mobile_organizations)"
+        "UPDATE mobile_organizations SET is_legacy_workspace = true"
     )
     op.create_table(
         "cloud_subscriptions",

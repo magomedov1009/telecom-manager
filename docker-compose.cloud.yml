@@ -6,12 +6,59 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      STRICT_PRODUCTION_CONFIG: "true"
+      SESSION_COOKIE_SECURE: "true"
+      HOSTING_MODE: cloud
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
     ports:
       - "127.0.0.1:8001:8000"
+    networks:
+      - cloud_private
+      - cloud_edge
     depends_on:
       postgres:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips=*
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  https_proxy:
+    image: caddy:2-alpine
+    container_name: telecom-manager-cloud-proxy
+    profiles: ["https-proxy"]
+    restart: unless-stopped
+    environment:
+      CLOUD_DOMAIN: ${CLOUD_DOMAIN:-cloud.example.ru}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile.cloud:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - cloud_edge
+    depends_on:
+      app:
+        condition: service_healthy
     logging:
       driver: json-file
       options:
@@ -28,6 +75,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a strong POSTGRES_PASSWORD in .env}
     volumes:
       - cloud_postgres_data:/var/lib/postgresql/data
+    networks:
+      - cloud_private
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -42,3 +91,13 @@ services:
 volumes:
   cloud_postgres_data:
     name: telecom-manager-cloud-postgres-data
+  caddy_data:
+    name: telecom-manager-cloud-caddy-data
+  caddy_config:
+    name: telecom-manager-cloud-caddy-config
+
+networks:
+  cloud_private:
+    name: telecom-manager-cloud-network
+  cloud_edge:
+    name: telecom-manager-cloud-edge

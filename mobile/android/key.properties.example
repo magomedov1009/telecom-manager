@@ -1,0 +1,4 @@
+storeFile=C:/SecureKeys/telecom-manager-upload.jks
+storePassword=REPLACE_WITH_UPLOAD_STORE_PASSWORD
+keyAlias=telecom-manager-upload
+keyPassword=REPLACE_WITH_UPLOAD_KEY_PASSWORD

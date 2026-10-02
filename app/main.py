@@ -4,6 +4,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -37,14 +39,35 @@ def create_app() -> FastAPI:
 
     templates = Jinja2Templates(directory="app/templates")
 
+    @application.get("/health/live", response_class=JSONResponse)
+    def health_live() -> dict:
+        return {"status": "ok"}
+
+    @application.get("/health/ready", response_class=JSONResponse)
+    def health_ready() -> JSONResponse:
+        """Report ready only when the configured database accepts a query."""
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            return JSONResponse({"status": "ready"})
+        except SQLAlchemyError:
+            return JSONResponse({"status": "unavailable"}, status_code=503)
+        finally:
+            db.close()
+
     @application.get("/api/mobile/update", response_class=JSONResponse)
     async def mobile_update(request: Request) -> dict:
+        release_tag = settings.android_release_tag.strip()
+        download_url = settings.android_apk_download_url or (
+            "https://github.com/magomedov1009/telecom-manager/releases/download/"
+            f"{release_tag}/app-release.apk"
+        )
         return {
-            "tag_name": "android-v1.1.1",
+            "tag_name": release_tag,
             "assets": [
                 {
                     "name": "app-release.apk",
-                    "browser_download_url": "https://github.com/magomedov1009/telecom-manager/releases/download/android-v1.1.1/app-release.apk",
+                    "browser_download_url": download_url,
                 }
             ],
         }

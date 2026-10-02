@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -7,6 +9,16 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 /tmp_pytest_deps/
+/artifacts/
+/backups/
+/mobile/android/key.properties
+/mobile/android/build/
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
 
 logs/*
 !logs/.gitkeep
