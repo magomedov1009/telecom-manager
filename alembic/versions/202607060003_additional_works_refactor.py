@@ -26,7 +26,7 @@ def upgrade() -> None:
     # Some installations were created from schema snapshots that never had
     # this legacy column. Keep clean database upgrades idempotent as well.
     op.execute("ALTER TABLE extra_works DROP COLUMN IF EXISTS extra_expenses")
-    op.alter_column("extra_works", "work_type_id", nullable=False)
+    # work_type_id is introduced by the later 202607060005 migration.
 
 
 def downgrade() -> None:

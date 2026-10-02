@@ -49,12 +49,14 @@ def upgrade() -> None:
     op.create_index(op.f("ix_extra_works_work_date"), "extra_works", ["work_date"])
     op.create_index(op.f("ix_extra_works_status"), "extra_works", ["status"])
     op.create_foreign_key("fk_extra_works_provider_id_providers", "extra_works", "providers", ["provider_id"], ["id"], ondelete="RESTRICT")
-    op.create_foreign_key("fk_extra_works_work_type_id_extra_work_types", "extra_works", "extra_work_types", ["work_type_id"], ["id"], ondelete="SET NULL")
+    op.create_foreign_key("fk_extra_works_work_type_id_extra_work_types", "extra_works", "extra_work_types", ["work_type_id"], ["id"], ondelete="RESTRICT")
     op.execute("UPDATE extra_works ew SET provider_id = c.provider_id FROM clients c WHERE ew.client_id = c.id")
     op.execute("UPDATE extra_works SET provider_id = (SELECT id FROM providers ORDER BY id LIMIT 1) WHERE provider_id IS NULL")
     op.execute("UPDATE extra_works SET work_date = created_at::date WHERE work_date IS NULL")
+    op.execute("UPDATE extra_works SET work_type_id = (SELECT id FROM extra_work_types WHERE name = 'Другое') WHERE work_type_id IS NULL")
     op.execute("UPDATE extra_works SET installer_amount = amount WHERE installer_amount = 0 AND office_amount = 0")
     op.alter_column("extra_works", "provider_id", nullable=False)
+    op.alter_column("extra_works", "work_type_id", nullable=False)
     op.alter_column("extra_works", "work_date", nullable=False)
 
     op.create_table(
