@@ -79,13 +79,11 @@ class ContinuousIntegrationWorkflowTests(unittest.TestCase):
             for step in steps
             if step.get("name") == "Apply migrations to PostgreSQL"
         )
+        self.assertEqual(migration_step["env"]["HOSTING_MODE"], "cloud")
         self.assertEqual(
-            migration_step["env"],
-            {
-                "HOSTING_MODE": "cloud",
-                "BOOTSTRAP_CLEAN_CLOUD_DEFAULTS": "true",
-            },
+            migration_step["env"]["BOOTSTRAP_CLEAN_CLOUD_DEFAULTS"], "true"
         )
+        self.assertEqual(migration_step["env"]["APP_ENV"], "production")
 
 
 if __name__ == "__main__":
