@@ -863,9 +863,7 @@ def subscription_status(
         )
     checkout_available = bool(
         settings.hosting_mode == "cloud"
-        and settings.yoomoney_wallet
-        and settings.yoomoney_notification_secret
-        and settings.yoomoney_fallback_notifications_ready
+        and settings.cloud_payment_provider_ready
         and (settings.cloud_monthly_price > 0 or settings.cloud_yearly_price > 0)
     )
     return SubscriptionResponse(

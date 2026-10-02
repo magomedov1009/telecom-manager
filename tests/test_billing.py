@@ -32,6 +32,7 @@ from app.routers.billing import (
     _notification_signature,
     checkout_page,
     create_checkout,
+    robokassa_result,
     yoomoney_notification,
 )
 from app.routers.mobile_sync import (
@@ -96,6 +97,10 @@ class BillingTest(unittest.TestCase):
             settings.cloud_payment_link_minutes,
             settings.yoomoney_fallback_notification_url,
             settings.yoomoney_fallback_label_prefixes,
+            settings.cloud_payment_provider,
+            settings.robokassa_merchant_login,
+            settings.robokassa_password1,
+            settings.robokassa_password2,
         )
         settings.hosting_mode = "cloud"
         settings.cloud_domain = "cloud.example.test"
@@ -108,6 +113,10 @@ class BillingTest(unittest.TestCase):
             "https://pmguard.example.invalid/yoomoney/callback"
         )
         settings.yoomoney_fallback_label_prefixes = "tg_"
+        settings.cloud_payment_provider = "yoomoney"
+        settings.robokassa_merchant_login = None
+        settings.robokassa_password1 = None
+        settings.robokassa_password2 = None
         self.app = create_app()
 
     def tearDown(self) -> None:
@@ -121,6 +130,10 @@ class BillingTest(unittest.TestCase):
             settings.cloud_payment_link_minutes,
             settings.yoomoney_fallback_notification_url,
             settings.yoomoney_fallback_label_prefixes,
+            settings.cloud_payment_provider,
+            settings.robokassa_merchant_login,
+            settings.robokassa_password1,
+            settings.robokassa_password2,
         ) = self.old
         self.db.close()
         self.engine.dispose()
@@ -186,6 +199,151 @@ class BillingTest(unittest.TestCase):
         self.assertEqual(february, datetime(2027, 2, 28, tzinfo=UTC))
         self.assertEqual(march, datetime(2027, 3, 31, tzinfo=UTC))
         self.assertEqual(leap_day, datetime(2029, 2, 28, tzinfo=UTC))
+
+    def test_robokassa_callback_credits_once_and_checks_signature_and_amount(self) -> None:
+        settings.robokassa_merchant_login = "telecom-test"
+        settings.robokassa_password1 = "first-secret"
+        settings.robokassa_password2 = "second-secret"
+        payment = CloudPayment(
+            organization_id=self.organization.id,
+            public_token="robokassa-payment-token",
+            label="TMROBO123",
+            plan_code="monthly",
+            amount=199,
+            provider="robokassa",
+            status="pending",
+        )
+        self.db.add(payment)
+        self.db.commit()
+
+        def send(values: dict[str, str]):
+            encoded_body = urlencode(values).encode()
+            sent = False
+
+            async def receive():
+                nonlocal sent
+                if sent:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                sent = True
+                return {"type": "http.request", "body": encoded_body, "more_body": False}
+
+            request = Request(
+                {
+                    "type": "http",
+                    "method": "POST",
+                    "scheme": "https",
+                    "path": "/api/billing/robokassa/result",
+                    "raw_path": b"/api/billing/robokassa/result",
+                    "query_string": b"",
+                    "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+                    "client": ("testclient", 50000),
+                    "server": ("cloud.example.test", 443),
+                    "root_path": "",
+                },
+                receive,
+            )
+            return asyncio.run(robokassa_result(request, self.db))
+
+        values = {"OutSum": "199.00", "InvId": str(payment.id)}
+        values["SignatureValue"] = hashlib.md5(
+            f"199.00:{payment.id}:second-secret".encode()
+        ).hexdigest()
+        confirmation = send(values)
+        self.assertEqual(confirmation.body.decode(), f"OK{payment.id}")
+        self.assertEqual(payment.status, "paid")
+        subscription = self.db.scalar(
+            select(CloudSubscription).where(
+                CloudSubscription.organization_id == self.organization.id
+            )
+        )
+        first_expiry = subscription.expires_at
+        self.assertEqual(subscription.payment_provider, "robokassa")
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(CloudPaymentReceipt)),
+            1,
+        )
+
+        repeated = send(values)
+        self.assertEqual(repeated.body.decode(), f"OK{payment.id}")
+        self.assertEqual(subscription.expires_at, first_expiry)
+        self.assertEqual(
+            self.db.scalar(select(func.count()).select_from(CloudPaymentReceipt)),
+            1,
+        )
+
+        tampered = dict(values, OutSum="299.00")
+        with self.assertRaises(HTTPException) as rejected:
+            send(tampered)
+        self.assertEqual(rejected.exception.status_code, 401)
+
+        wrong_amount = {
+            "OutSum": "201.00",
+            "InvId": str(payment.id),
+        }
+        wrong_amount["SignatureValue"] = hashlib.md5(
+            f"201.00:{payment.id}:second-secret".encode()
+        ).hexdigest()
+        with self.assertRaises(HTTPException) as amount_rejected:
+            send(wrong_amount)
+        self.assertEqual(amount_rejected.exception.status_code, 422)
+        self.assertEqual(payment.status, "paid")
+        self.assertEqual(subscription.expires_at, first_expiry)
+
+    def test_robokassa_checkout_uses_separate_credentials_and_provider_form(self) -> None:
+        settings.cloud_payment_provider = "robokassa"
+        settings.robokassa_merchant_login = "telecom-shop"
+        settings.robokassa_password1 = "first-secret"
+        settings.robokassa_password2 = "second-secret"
+        request = Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "scheme": "https",
+                "path": "/api/mobile/subscription/checkout",
+                "raw_path": b"/api/mobile/subscription/checkout",
+                "query_string": b"",
+                "headers": [],
+                "client": ("testclient", 50000),
+                "server": ("cloud.example.test", 443),
+                "root_path": "",
+                "app": self.app,
+                "router": self.app.router,
+            }
+        )
+        result = create_checkout(
+            CheckoutRequest(plan_code="monthly"), request, self.db, self.token
+        )
+        payment = self.db.scalar(select(CloudPayment))
+        self.assertEqual(payment.provider, "robokassa")
+        self.assertTrue(subscription_status(self.db, self.token).checkout_available)
+        page_request = Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "scheme": "https",
+                "path": f"/billing/checkout/{payment.public_token}",
+                "raw_path": f"/billing/checkout/{payment.public_token}".encode(),
+                "query_string": b"",
+                "headers": [],
+                "client": ("testclient", 50000),
+                "server": ("cloud.example.test", 443),
+                "root_path": "",
+                "app": self.app,
+                "router": self.app.router,
+            }
+        )
+        html = checkout_page(payment.public_token, page_request, self.db).body.decode()
+        signature = hashlib.md5(
+            f"telecom-shop:199.00:{payment.id}:first-secret".encode()
+        ).hexdigest()
+        self.assertIn("https://auth.robokassa.ru/Merchant/Index.aspx", html)
+        self.assertIn(f'name="InvId" value="{payment.id}"', html)
+        self.assertIn(f'name="SignatureValue" value="{signature}"', html)
+        self.assertNotIn("first-secret", html)
+        self.assertEqual(
+            result.checkout_url,
+            f"https://cloud.example.test/billing/checkout/{payment.public_token}",
+        )
 
     def test_checkout_is_hidden_and_rejected_without_notification_secret(self) -> None:
         previous_secret = settings.yoomoney_notification_secret

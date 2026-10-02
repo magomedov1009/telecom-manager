@@ -41,6 +41,8 @@ templates = Jinja2Templates(directory="app/templates")
 DbSession = Annotated[Session, Depends(get_db)]
 YOOMONEY_NOTIFICATION_MAX_BYTES = 16 * 1024
 YOOMONEY_NOTIFICATION_MAX_FIELDS = 64
+ROBOKASSA_NOTIFICATION_MAX_BYTES = 16 * 1024
+ROBOKASSA_NOTIFICATION_MAX_FIELDS = 64
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +68,10 @@ def _price_for(plan_code: str) -> Decimal:
     return Decimal(price).quantize(Decimal("0.01"))
 
 
-def _ensure_cloud_checkout(organization: MobileOrganization) -> None:
+def _ensure_cloud_checkout(
+    organization: MobileOrganization,
+    provider: str | None = None,
+) -> None:
     if settings.hosting_mode != "cloud":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -77,15 +82,17 @@ def _ensure_cloud_checkout(organization: MobileOrganization) -> None:
             status.HTTP_409_CONFLICT,
             "Для этой организации подписка не требуется",
         )
-    if not settings.yoomoney_wallet or not settings.yoomoney_notification_secret:
+    selected_provider = provider or settings.cloud_payment_provider
+    if selected_provider not in {"yoomoney", "robokassa"}:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Оплата пока не настроена",
+            "Выбранный способ оплаты не поддерживается",
         )
-    if not settings.yoomoney_fallback_notifications_ready:
+    if not settings.payment_provider_is_ready(selected_provider):
+        provider_label = "ЮMoney" if selected_provider == "yoomoney" else "Robokassa"
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "Не настроена доставка уведомлений связанного сервиса",
+            f"Оплата {provider_label} пока не настроена",
         )
 
 
@@ -134,6 +141,7 @@ def create_checkout(
         label=f"TM{secrets.token_hex(16)}",
         plan_code=payload.plan_code,
         amount=_price_for(payload.plan_code),
+        provider=settings.cloud_payment_provider,
         status="pending",
     )
     db.add(payment)
@@ -161,7 +169,15 @@ def checkout_page(token: str, request: Request, db: DbSession) -> HTMLResponse:
     organization = db.get(MobileOrganization, payment.organization_id)
     if organization is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Организация не найдена")
-    _ensure_cloud_checkout(organization)
+    _ensure_cloud_checkout(organization, payment.provider)
+    amount = f"{payment.amount:.2f}"
+    robokassa_signature = ""
+    if payment.provider == "robokassa":
+        signature_data = (
+            f"{settings.robokassa_merchant_login}:{amount}:"
+            f"{payment.id}:{settings.robokassa_password1}"
+        )
+        robokassa_signature = hashlib.md5(signature_data.encode("utf-8")).hexdigest()
     return templates.TemplateResponse(
         request=request,
         name="billing/checkout.html",
@@ -174,6 +190,11 @@ def checkout_page(token: str, request: Request, db: DbSession) -> HTMLResponse:
             "organization": organization,
             "payment": payment,
             "wallet": settings.yoomoney_wallet,
+            "provider": payment.provider,
+            "merchant_login": settings.robokassa_merchant_login,
+            "robokassa_signature": robokassa_signature,
+            "amount": amount,
+            "invoice_id": payment.id,
             "success_url": f"{settings.cloud_public_base_url}/billing/complete",
             "plan_label": "1 месяц" if payment.plan_code == "monthly" else "1 год",
         },
@@ -203,6 +224,215 @@ def _notification_signature(values: dict[str, str]) -> str:
         serialized.encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def _robokassa_notification_signature(amount: str, invoice_id: str) -> str:
+    password = settings.robokassa_password2
+    if not password:
+        return ""
+    return hashlib.md5(
+        f"{amount}:{invoice_id}:{password}".encode("utf-8")
+    ).hexdigest()
+
+
+def _credit_successful_payment(
+    db: Session,
+    payment: CloudPayment,
+    operation_id: str,
+    amount: Decimal,
+    provider: str,
+) -> None:
+    """Record a confirmed charge once and extend the matching organization."""
+    # Different valid checkout orders can be confirmed close together. Locking
+    # the organization also serializes the first paid subscription row creation.
+    db.scalar(
+        select(MobileOrganization.id)
+        .where(MobileOrganization.id == payment.organization_id)
+        .with_for_update()
+    )
+    receipt = db.scalar(
+        select(CloudPaymentReceipt)
+        .where(CloudPaymentReceipt.provider_operation_id == operation_id)
+        .with_for_update()
+    )
+    if receipt is not None:
+        if receipt.payment_id != payment.id:
+            logger.error(
+                "Payment provider operation was already credited to another order",
+                extra={
+                    "provider": provider,
+                    "operation_id_hash": hashlib.sha256(
+                        operation_id.encode("utf-8")
+                    ).hexdigest(),
+                },
+            )
+        return
+    existing = db.scalar(
+        select(CloudPayment).where(CloudPayment.provider_operation_id == operation_id)
+    )
+    if existing is not None:
+        if existing.id != payment.id:
+            logger.error(
+                "Payment provider operation was already credited to another order",
+                extra={
+                    "provider": provider,
+                    "operation_id_hash": hashlib.sha256(
+                        operation_id.encode("utf-8")
+                    ).hexdigest(),
+                },
+            )
+        # Compatibility with successful payments recorded before receipts.
+        return
+    subscription = db.scalar(
+        select(CloudSubscription)
+        .where(CloudSubscription.organization_id == payment.organization_id)
+        .with_for_update()
+    )
+    if subscription is None:
+        subscription = CloudSubscription(
+            organization_id=payment.organization_id,
+            plan_code=payment.plan_code,
+            status="active",
+        )
+        db.add(subscription)
+    now = datetime.now(UTC)
+    previous_expiry = subscription.expires_at
+    if previous_expiry is not None and previous_expiry.tzinfo is None:
+        previous_expiry = previous_expiry.replace(tzinfo=UTC)
+    first_paid_period = subscription.status != "active" or not (
+        previous_expiry and previous_expiry > now
+    )
+    base = previous_expiry if previous_expiry and previous_expiry > now else now
+    if first_paid_period:
+        subscription.starts_at = base
+        anchor_day = base.day
+    else:
+        anchor_day = (subscription.starts_at or base).day
+    subscription.plan_code = payment.plan_code
+    subscription.status = "active"
+    subscription.expires_at = _add_billing_months(
+        base,
+        1 if payment.plan_code == "monthly" else 12,
+        anchor_day,
+    )
+    subscription.payment_provider = provider
+    subscription.payment_reference = operation_id
+    db.add(
+        CloudPaymentReceipt(
+            payment_id=payment.id,
+            provider_operation_id=operation_id,
+            amount=amount,
+            paid_at=now,
+        )
+    )
+    if payment.status != "paid":
+        payment.status = "paid"
+        payment.provider_operation_id = operation_id
+        payment.paid_at = now
+    db.commit()
+
+
+@router.post("/api/billing/robokassa/result", response_class=Response)
+async def robokassa_result(request: Request, db: DbSession) -> Response:
+    """Verify Robokassa's server-to-server ResultURL payment confirmation."""
+    if not settings.robokassa_password2:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Уведомления Robokassa не настроены",
+        )
+    content_type = (
+        request.headers.get("content-type", "")
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+    )
+    if content_type != "application/x-www-form-urlencoded":
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            "Ожидается форма Robokassa",
+        )
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > ROBOKASSA_NOTIFICATION_MAX_BYTES:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    "Уведомление слишком большое",
+                )
+        except ValueError as error:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Некорректный Content-Length",
+            ) from error
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > ROBOKASSA_NOTIFICATION_MAX_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "Уведомление слишком большое",
+            )
+    try:
+        items = parse_qsl(
+            body.decode("utf-8"),
+            keep_blank_values=True,
+            max_num_fields=ROBOKASSA_NOTIFICATION_MAX_FIELDS,
+            encoding="utf-8",
+            errors="strict",
+        )
+    except (UnicodeDecodeError, ValueError) as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Некорректная форма уведомления",
+        ) from error
+    keys = [key.casefold() for key, _ in items]
+    if len(keys) != len(set(keys)):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Уведомление содержит повторяющиеся поля",
+        )
+    values = {key.casefold(): value for key, value in items}
+    invoice_id = values.get("invid", "")
+    amount_text = values.get("outsum", "")
+    received_signature = values.get("signaturevalue", "")
+    if not invoice_id.isdigit() or not amount_text or not received_signature:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Не указаны обязательные поля оплаты",
+        )
+    expected_signature = _robokassa_notification_signature(amount_text, invoice_id)
+    if not hmac.compare_digest(
+        received_signature.casefold(), expected_signature.casefold()
+    ):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Неверная подпись уведомления",
+        )
+    try:
+        amount = Decimal(amount_text).quantize(Decimal("0.01"))
+        internal_id = int(invoice_id)
+    except Exception as error:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Неверная сумма или номер счета",
+        ) from error
+    payment = db.scalar(
+        select(CloudPayment).where(CloudPayment.id == internal_id).with_for_update()
+    )
+    if payment is None or payment.provider != "robokassa":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ Robokassa не найден")
+    if amount != payment.amount:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "Сумма заказа не совпадает",
+        )
+    operation_id = f"robokassa:{invoice_id}"
+    _credit_successful_payment(db, payment, operation_id, amount, "robokassa")
+    return Response(
+        content=f"OK{invoice_id}",
+        media_type="text/plain",
+        status_code=status.HTTP_200_OK,
+    )
 
 
 def _forward_yoomoney_notification(url: str, values: dict[str, str]) -> bool:
@@ -365,89 +595,7 @@ async def yoomoney_notification(request: Request, db: DbSession) -> Response:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неверная сумма") from error
     if withdrawn != payment.amount:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Сумма заказа не совпадает")
-    receipt = db.scalar(
-        select(CloudPaymentReceipt)
-        .where(CloudPaymentReceipt.provider_operation_id == operation_id)
-        .with_for_update()
-    )
-    if receipt is not None:
-        if receipt.payment_id != payment.id:
-            logger.error(
-                "YooMoney operation was already credited to another payment order",
-                extra={
-                    "operation_id_hash": hashlib.sha256(
-                        operation_id.encode("utf-8")
-                    ).hexdigest(),
-                    "received_payment_id": payment.id,
-                    "credited_payment_id": receipt.payment_id,
-                },
-            )
-        return Response(status_code=status.HTTP_200_OK)
-    existing = db.scalar(
-        select(CloudPayment).where(CloudPayment.provider_operation_id == operation_id)
-    )
-    if existing is not None:
-        if existing.id != payment.id:
-            logger.error(
-                "YooMoney operation was already credited to another payment order",
-                extra={
-                    "operation_id_hash": hashlib.sha256(
-                        operation_id.encode("utf-8")
-                    ).hexdigest(),
-                    "received_payment_id": payment.id,
-                    "credited_payment_id": existing.id,
-                },
-            )
-            return Response(status_code=status.HTTP_200_OK)
-        # Compatibility for paid transactions accepted before receipt tracking.
-        return Response(status_code=status.HTTP_200_OK)
-    subscription = db.scalar(
-        select(CloudSubscription)
-        .where(CloudSubscription.organization_id == payment.organization_id)
-        .with_for_update()
-    )
-    if subscription is None:
-        subscription = CloudSubscription(
-            organization_id=payment.organization_id,
-            plan_code=payment.plan_code,
-            status="active",
-        )
-        db.add(subscription)
-    now = datetime.now(UTC)
-    previous_expiry = subscription.expires_at
-    if previous_expiry is not None and previous_expiry.tzinfo is None:
-        previous_expiry = previous_expiry.replace(tzinfo=UTC)
-    first_paid_period = subscription.status != "active" or not (
-        previous_expiry and previous_expiry > now
-    )
-    base = previous_expiry if previous_expiry and previous_expiry > now else now
-    if first_paid_period:
-        # The paid term begins at the end of a trial, or immediately if access
-        # has already expired. Its day anchors future monthly renewals.
-        subscription.starts_at = base
-        anchor_day = base.day
-    else:
-        anchor_day = (subscription.starts_at or base).day
-    subscription.plan_code = payment.plan_code
-    subscription.status = "active"
-    subscription.expires_at = _add_billing_months(
-        base,
-        1 if payment.plan_code == "monthly" else 12,
-        anchor_day,
-    )
-    subscription.payment_provider = "yoomoney"
-    subscription.payment_reference = operation_id
-    db.add(
-        CloudPaymentReceipt(
-            payment_id=payment.id,
-            provider_operation_id=operation_id,
-            amount=withdrawn,
-            paid_at=now,
-        )
-    )
-    if payment.status != "paid":
-        payment.status = "paid"
-        payment.provider_operation_id = operation_id
-        payment.paid_at = now
-    db.commit()
+    if payment.provider != "yoomoney":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заказ ЮMoney не найден")
+    _credit_successful_payment(db, payment, operation_id, withdrawn, "yoomoney")
     return Response(status_code=status.HTTP_200_OK)

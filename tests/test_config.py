@@ -82,6 +82,19 @@ class DatabaseUrlTest(unittest.TestCase):
         )
         self.assertTrue(settings.yoomoney_fallback_notifications_ready)
 
+    def test_robokassa_checkout_readiness_uses_its_own_secrets(self) -> None:
+        settings = Settings(
+            CLOUD_PAYMENT_PROVIDER="robokassa",
+            ROBOKASSA_MERCHANT_LOGIN="telecom-shop",
+            ROBOKASSA_PASSWORD1="checkout-secret",
+            ROBOKASSA_PASSWORD2="notification-secret",
+        )
+        self.assertTrue(settings.cloud_payment_provider_ready)
+        self.assertFalse(settings.payment_provider_is_ready("yoomoney"))
+
+        unavailable = Settings(CLOUD_PAYMENT_PROVIDER="robokassa")
+        self.assertFalse(unavailable.cloud_payment_provider_ready)
+
     def test_cloud_domain_must_be_a_hostname_not_a_url(self) -> None:
         invalid_domains = (
             "https://telecom.pmguard.ru",
