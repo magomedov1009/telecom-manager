@@ -5240,6 +5240,17 @@ class LocalRepository {
       'extra_work_material': 'extra_work_materials',
       'expense': 'expenses',
     };
+    const booleanFields = {
+      'providers': {'is_active'},
+      'warehouses': {'is_active'},
+      'materials': {'is_active'},
+      'users': {'is_active'},
+      'extra_work_types': {
+        'is_active',
+        'requires_materials',
+        'requires_equipment',
+      },
+    };
     const priorities = {
       'provider': 10,
       'providers': 10,
@@ -5309,21 +5320,48 @@ class LocalRepository {
         if (payload.containsKey('sync_state')) {
           payload['sync_state'] = 'synced';
         }
+        for (final field in booleanFields[table] ?? const <String>{}) {
+          if (payload[field] is bool) {
+            payload[field] = payload[field] == true ? 1 : 0;
+          }
+        }
+        var localEntityId = entityId;
+        var existing = await transaction.query(
+          table,
+          columns: ['id'],
+          where: 'id = ?',
+          whereArgs: [entityId],
+          limit: 1,
+        );
+        if (existing.isEmpty && change['entity_type'] == 'user') {
+          // A newly linked device has a local user row before its first pull.
+          // The server can identify the same account with a different row ID,
+          // while SQLite also enforces (organization_id, username). Match the
+          // account by username and update its local row instead of inserting
+          // a duplicate user.
+          final username = payload['username']?.toString().trim();
+          if (username != null && username.isNotEmpty) {
+            existing = await transaction.query(
+              'users',
+              columns: ['id'],
+              where: 'organization_id = ? AND username = ?',
+              whereArgs: [orgId, username],
+              limit: 1,
+            );
+            if (existing.isNotEmpty) {
+              localEntityId = existing.single['id']! as String;
+              payload['id'] = localEntityId;
+            }
+          }
+        }
         if (change['operation'] == 'delete') {
           await transaction.update(
             table,
             {'deleted_at': DateTime.now().toUtc().toIso8601String()},
             where: 'id = ?',
-            whereArgs: [entityId],
+            whereArgs: [localEntityId],
           );
         } else {
-          final existing = await transaction.query(
-            table,
-            columns: ['id'],
-            where: 'id = ?',
-            whereArgs: [entityId],
-            limit: 1,
-          );
           if (existing.isEmpty) {
             await transaction.insert(table, payload);
           } else {
@@ -5334,8 +5372,8 @@ class LocalRepository {
             await transaction.update(
               table,
               payload,
-              where: 'id = ?',
-              whereArgs: [entityId],
+              where: 'id = ? AND organization_id = ?',
+              whereArgs: [localEntityId, orgId],
             );
           }
         }
