@@ -28,11 +28,14 @@ jobs:
       - name: Run mobile tests
         working-directory: mobile
         run: flutter test
-      # This is a build-validation artifact only; Play upload signing remains a
-      # separate owner-managed step and no app bundle is published by CI.
-      - name: Validate Android App Bundle build
+      # Validate both distribution variants without publishing or exposing any
+      # Play upload key. The play build has no APK-install permission.
+      - name: Validate direct APK build
         working-directory: mobile
-        run: flutter build appbundle --release --no-pub
+        run: flutter build apk --release --flavor direct --no-pub
+      - name: Validate Play App Bundle build
+        working-directory: mobile
+        run: flutter build appbundle --release --flavor play --no-pub
 
   backend:
     runs-on: ubuntu-latest

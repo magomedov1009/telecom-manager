@@ -74,6 +74,57 @@ void main() {
     },
   );
 
+  test(
+    'remote user sync updates the locally bound account by username',
+    () async {
+      await repository.bindRemoteOrganization(
+        serverUrl: 'https://cloud.example.test',
+        remoteOrganizationId: '12',
+        organizationName: 'Облачная компания',
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+        password: 'safe-password',
+      );
+      final localAdmin = (await repository.users()).single;
+      final now = DateTime.utc(2026, 10, 3).toIso8601String();
+
+      await repository.applyRemoteChanges([
+        {
+          'entity_type': 'user',
+          'entity_id': '1',
+          'operation': 'upsert',
+          'version': 1,
+          'payload': {
+            'id': '1',
+            'organization_id': '12',
+            'username': 'admin',
+            'full_name': 'Администратор сервера',
+            'role': 'admin',
+            'manager_id': null,
+            'comment': null,
+            'last_login_at': null,
+            'is_active': true,
+            'created_at': now,
+            'updated_at': now,
+            'deleted_at': null,
+            'version': 1,
+            'sync_state': 'synced',
+          },
+        },
+      ], 1);
+
+      final users = await repository.users();
+      expect(users, hasLength(1));
+      expect(users.single.id, localAdmin.id);
+      expect(users.single.fullName, 'Администратор сервера');
+      expect(
+        await repository.authenticate('admin', 'safe-password'),
+        isNotNull,
+      );
+    },
+  );
+
   test('receipt updates stock and sync queue atomically', () async {
     final warehouses = await repository.warehouses();
     final materials = await repository.materials();

@@ -46,11 +46,11 @@ Android-приложение с автономной SQLite-базой и доп
 ```bash
 flutter analyze
 flutter test
-flutter build apk --release
+flutter build apk --release --flavor direct
 ```
 
 Готовый APK создаётся в:
 
 ```text
-build/app/outputs/flutter-apk/app-release.apk
+build/app/outputs/flutter-apk/app-direct-release.apk
 ```
