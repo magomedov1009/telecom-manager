@@ -14,6 +14,7 @@ from app.models.enums import (
 )
 from app.models.events import EventLog
 from app.models.finance import Expense, FinanceTransaction
+from app.models.fiber_work import FiberWorkLog
 from app.models.inventory import InventoryTransaction, Material, MaterialDebtSettlement, Warehouse
 from app.models.mobile_sync import MobileAuthRateLimit, MobileDeviceToken, MobileMembership, MobileOrganization, MobileSyncChange, MobileSyncRecord
 from app.models.users import User
@@ -36,6 +37,7 @@ __all__ = [
     "ExtraWorkType",
     "FinanceTransaction",
     "FinanceTransactionType",
+    "FiberWorkLog",
     "InventoryTransaction",
     "InventoryTransactionType",
     "Material",

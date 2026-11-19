@@ -26,6 +26,7 @@ from app.models.clients import (
     ExtraWorkType, Provider,
 )
 from app.models.finance import Expense, FinanceTransaction
+from app.models.fiber_work import FiberWorkLog
 from app.models.inventory import InventoryTransaction, Material, MaterialDebtSettlement, Warehouse
 from app.models.enums import (
     ConnectionType,
@@ -1374,6 +1375,16 @@ def _publish_record_to_site(
             comment=data.get("comment"),
             created_at=datetime.fromisoformat(data["occurred_at"]),
         )
+    elif entity_type == "fiber_work_log":
+        item = FiberWorkLog(
+            owner_user_id=user_id,
+            object_name=data["object_name"],
+            work_date=date.fromisoformat(data["work_date"]),
+            cable_spans=data.get("cable_spans") or [],
+            splices=data.get("splices") or [],
+            map_data=data.get("map_data"),
+            notes=data.get("notes"),
+        )
     else:
         return True
     db.add(item)
@@ -1496,6 +1507,7 @@ SITE_MODELS = {
     "extra_work": ExtraWork,
     "extra_work_material": ExtraWorkMaterial,
     "expense": Expense,
+    "fiber_work_log": FiberWorkLog,
 }
 
 
@@ -1534,6 +1546,14 @@ def _update_record_on_site(
     if kind == "provider":
         item.name, item.description = data["name"], data.get("description")
         item.is_active = bool(data.get("is_active", True))
+    elif kind == "fiber_work_log":
+        item.owner_user_id = user_id
+        item.object_name = data["object_name"]
+        item.work_date = date.fromisoformat(data["work_date"])
+        item.cable_spans = data.get("cable_spans") or []
+        item.splices = data.get("splices") or []
+        item.map_data = data.get("map_data")
+        item.notes = data.get("notes")
     elif kind == "warehouse":
         item.name = data["name"]
         item.provider_id = _site_id(db, org_id, "provider", data.get("provider_id"))
@@ -1631,7 +1651,7 @@ def push(
     operational_types = {
         "client", "connection", "connection_material",
         "inventory_transaction", "finance_transaction", "material_debt_settlement",
-        "extra_work", "extra_work_material", "expense",
+        "extra_work", "extra_work_material", "expense", "fiber_work_log",
     }
     if membership.role != "admin" and any(item.entity_type not in operational_types for item in payload.changes):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Роль не разрешает изменение справочников")

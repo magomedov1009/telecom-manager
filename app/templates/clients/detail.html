@@ -6,8 +6,13 @@
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
   <a class="btn btn-outline-secondary" href="/clients"><i class="bi bi-arrow-left me-1"></i>К списку клиентов</a>
-  <button class="btn btn-outline-primary" type="button" disabled><i class="bi bi-pencil me-1"></i>Редактировать клиента</button>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-primary" type="button" disabled><i class="bi bi-pencil me-1"></i>Редактировать клиента</button>
+    {% if user.role.value == 'admin' %}<form method="post" action="/clients/{{ data.client.id }}/delete" onsubmit="return confirm('Удалить клиента и его подключения? Если по ним списывали материалы, удаление будет остановлено.');"><button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash me-1"></i>Удалить клиента</button></form>{% endif %}
+  </div>
 </div>
+
+{% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
 
 <section class="card mb-4">
   <div class="card-body p-4">

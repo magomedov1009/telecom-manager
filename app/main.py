@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db.session import SessionLocal
 from app.dependencies.auth import get_current_user_optional
-from app.routers import additional_work_types, additional_works, billing, clients, connections, expenses, finance, legal, materials, mobile_sync, pages, providers, reports, settings as settings_router
+from app.routers import additional_work_types, additional_works, billing, clients, connections, expenses, fiber_works, finance, legal, materials, mobile_sync, pages, providers, reports, settings as settings_router
 
 
 def create_app() -> FastAPI:
@@ -29,6 +29,7 @@ def create_app() -> FastAPI:
     application.include_router(connections.router)
     application.include_router(expenses.router)
     application.include_router(finance.router)
+    application.include_router(fiber_works.router)
     application.include_router(materials.router)
     application.include_router(legal.router)
     application.include_router(mobile_sync.router)

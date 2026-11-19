@@ -729,8 +729,8 @@ class BillingTest(unittest.TestCase):
         self.assertEqual(self.db.scalar(select(CloudSubscription)).plan_code, "monthly")
 
     def test_yearly_purchase_extends_the_existing_monthly_term(self) -> None:
-        starts_at = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
-        existing_expiry = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
+        starts_at = datetime.now(UTC)
+        existing_expiry = starts_at + timedelta(days=30)
         subscription = CloudSubscription(
             organization_id=self.organization.id,
             plan_code="monthly",
@@ -777,7 +777,7 @@ class BillingTest(unittest.TestCase):
             resulting_expiry = resulting_expiry.replace(tzinfo=UTC)
         self.assertEqual(
             resulting_expiry,
-            _add_billing_months(existing_expiry, 12, anchor_day=31),
+            _add_billing_months(existing_expiry, 12, anchor_day=starts_at.day),
         )
 
     def test_expired_cloud_subscription_can_create_a_renewal_checkout(self) -> None:

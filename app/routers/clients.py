@@ -10,7 +10,7 @@ from app.db.session import get_db
 from app.dependencies.auth import get_current_user_optional
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
-from app.services.clients import get_client, get_client_detail_data, get_clients_page_data, normalize_filters
+from app.services.clients import ClientDeletionError, delete_client, get_client, get_client_detail_data, get_clients_page_data, normalize_filters
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 templates = Jinja2Templates(directory="app/templates")
@@ -58,3 +58,28 @@ def client_detail(request: Request, db: DbSession, current_user: CurrentUser, cl
     if client is None:
         return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
     return render(request, "clients/detail.html", current_user, {"data": get_client_detail_data(client)})
+
+
+@router.post("/{client_id}/delete", response_class=HTMLResponse)
+def delete_client_action(
+    request: Request,
+    db: DbSession,
+    current_user: CurrentUser,
+    client_id: int,
+) -> Response:
+    if current_user is None:
+        return redirect_to_login()
+    client = get_client(db, client_id, current_user)
+    if client is None:
+        return render(request, "errors/404.html", current_user, {"missing_path": request.url.path})
+    try:
+        delete_client(db, client=client, user=current_user)
+    except ClientDeletionError as exc:
+        db.rollback()
+        return render(
+            request,
+            "clients/detail.html",
+            current_user,
+            {"data": get_client_detail_data(client), "error": str(exc)},
+        )
+    return RedirectResponse(url="/clients", status_code=status.HTTP_303_SEE_OTHER)

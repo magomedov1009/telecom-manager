@@ -36,6 +36,7 @@ NAV_ITEMS = [
     {"label": "Материалы", "endpoint": "/materials", "icon": "bi-box-seam", "roles": ["admin", "manager", "installer"]},
     {"label": "Финансы", "endpoint": "/finance", "icon": "bi-cash-coin", "roles": ["admin", "manager", "installer"]},
     {"label": "Допработы", "endpoint": "/additional-works", "icon": "bi-tools", "roles": ["admin", "manager", "installer"]},
+    {"label": "Кабель и сварки", "endpoint": "/fiber-works", "icon": "bi-bezier2", "roles": ["admin", "manager", "installer"]},
     {"label": "Отчёты", "endpoint": "/reports", "icon": "bi-bar-chart", "roles": ["admin", "manager"]},
     {"label": "Настройки", "endpoint": "/settings", "icon": "bi-gear", "roles": ["admin"]},
 ]

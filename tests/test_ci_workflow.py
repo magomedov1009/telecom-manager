@@ -50,7 +50,11 @@ class ContinuousIntegrationWorkflowTests(unittest.TestCase):
         self.assertIn("flutter pub get --enforce-lockfile", run_commands)
         self.assertIn("flutter analyze", run_commands)
         self.assertIn("flutter test", run_commands)
-        self.assertIn("flutter build appbundle --release --no-pub", run_commands)
+        self.assertIn("flutter build apk --release --flavor direct --no-pub", run_commands)
+        self.assertIn(
+            "flutter build appbundle --release --flavor play --no-pub",
+            run_commands,
+        )
         self.assertFalse(any("PLAY_STORE_RELEASE" in command for command in run_commands))
         self.assertFalse(any("upload" in step.get("name", "").lower() for step in steps))
 

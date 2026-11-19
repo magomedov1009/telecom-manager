@@ -13,7 +13,7 @@
   <div class="d-flex flex-wrap gap-2">
     <a class="btn btn-outline-primary" href="/connections/{{ connection.id }}/edit"><i class="bi bi-pencil me-1"></i>Редактировать</a>
     {% if user.role.value == 'admin' %}
-      <form method="post" action="/connections/{{ connection.id }}/delete" class="mb-0"><button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash me-1"></i>Удалить</button></form>
+      <form method="post" action="/connections/{{ connection.id }}/delete" class="mb-0" onsubmit="return confirm('Удалить подключение? Если к нему привязан расход материала, удаление будет запрещено.');"><button class="btn btn-outline-danger" type="submit"><i class="bi bi-trash me-1"></i>Удалить</button></form>
     {% endif %}
   </div>
 </div>

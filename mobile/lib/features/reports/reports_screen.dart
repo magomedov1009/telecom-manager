@@ -298,13 +298,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               'Подключений за период',
               report.connections.length.toString(),
             ),
-            metric('Стоимость подключений', money(report.connectionTotal)),
+            metric('Расход ONU за период', '${quantity(report.onuQuantity)} шт.'),
             metric('Доход офиса', money(report.officeIncome)),
-            metric(
-              'Доля монтажника',
-              money(report.installerIncome),
-              muted: true,
-            ),
             metric(
               'Расходы, ещё не возмещённые офисом',
               '− ${money(report.installerPaidExpenses)}',
@@ -555,9 +550,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   List<(String, String)> summaryRows(ProviderManagementReport report) => [
     ('Подключений', report.connections.length.toString()),
-    ('Стоимость подключений', money(report.connectionTotal)),
+    ('Расход ONU', '${quantity(report.onuQuantity)} шт.'),
     ('Доход офиса', money(report.officeIncome)),
-    ('Доля монтажника', money(report.installerIncome)),
     ('Расходы, не возмещённые офисом', money(report.installerPaidExpenses)),
     ('Невыплаченные допработы', money(report.unpaidExtraWorks)),
     ('Итог офиса за период', money(report.officeResult)),

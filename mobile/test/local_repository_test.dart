@@ -31,6 +31,62 @@ void main() {
     expect(summary.pendingChanges, 10);
   });
 
+  test('fiber work stays separate and is included in the sync queue', () async {
+    final pendingBefore = await repository.pendingChanges();
+    final connectionsBefore = (await repository.dashboardSummary()).connections;
+    final id = await repository.saveFiberWorkLog(
+      objectName: 'Улица Лесная',
+      workDate: DateTime(2026, 11, 19),
+      cableSpans: [
+        {
+          'cable_mark': 'ОК-24',
+          'from_closure': 'М1',
+          'to_closure': 'М2',
+          'length_m': 125.5,
+          'fiber_count': 2,
+          'fiber_colors': ['blue', 'yellow'],
+        },
+      ],
+      splices: [
+        {
+          'closure': 'М1',
+          'cable_mark': 'ОК-24',
+          'fiber_number': 1,
+          'fiber_color': 'blue',
+          'fiber_color_name': 'Синий',
+        },
+      ],
+      mapData: {
+        'image': 'test-image-data',
+        'aspect': 1.5,
+        'markers': {
+          'М1': {'x': 0.2, 'y': 0.3},
+          'М2': {'x': 0.8, 'y': 0.7},
+        },
+      },
+    );
+
+    final log = (await repository.fiberWorkLogs()).single;
+    expect(log.id, id);
+    expect(log.objectName, 'Улица Лесная');
+    expect(log.totalCableMeters, 125.5);
+    expect(log.totalSplices, 1);
+    expect(log.mapData?['aspect'], 1.5);
+    expect(await repository.pendingChanges(), pendingBefore + 1);
+    expect(
+      (await repository.dashboardSummary()).connections,
+      connectionsBefore,
+    );
+    final change = (await repository.syncQueue()).last;
+    expect(change.entityType, 'fiber_work_log');
+    expect(change.payload['splices'], isA<List>());
+    expect(change.payload['map_data'], isA<Map>());
+
+    await repository.deleteFiberWorkLog(id);
+    expect(await repository.fiberWorkLogs(), isEmpty);
+    expect((await repository.syncQueue()).last.operation, 'delete');
+  });
+
   test('a new production workspace has no preset providers', () async {
     await database.close();
     final cleanDatabase = AppDatabase(
@@ -71,6 +127,57 @@ void main() {
       expect(organizations, hasLength(1));
       expect(organizations.single.name, 'Локальная организация');
       expect(await repository.remoteOrganizationBinding(), isNull);
+    },
+  );
+
+  test(
+    'remote user sync updates the locally bound account by username',
+    () async {
+      await repository.bindRemoteOrganization(
+        serverUrl: 'https://cloud.example.test',
+        remoteOrganizationId: '12',
+        organizationName: 'Облачная компания',
+        username: 'admin',
+        fullName: 'Администратор',
+        role: 'admin',
+        password: 'safe-password',
+      );
+      final localAdmin = (await repository.users()).single;
+      final now = DateTime.utc(2026, 10, 3).toIso8601String();
+
+      await repository.applyRemoteChanges([
+        {
+          'entity_type': 'user',
+          'entity_id': '1',
+          'operation': 'upsert',
+          'version': 1,
+          'payload': {
+            'id': '1',
+            'organization_id': '12',
+            'username': 'admin',
+            'full_name': 'Администратор сервера',
+            'role': 'admin',
+            'manager_id': null,
+            'comment': null,
+            'last_login_at': null,
+            'is_active': true,
+            'created_at': now,
+            'updated_at': now,
+            'deleted_at': null,
+            'version': 1,
+            'sync_state': 'synced',
+          },
+        },
+      ], 1);
+
+      final users = await repository.users();
+      expect(users, hasLength(1));
+      expect(users.single.id, localAdmin.id);
+      expect(users.single.fullName, 'Администратор сервера');
+      expect(
+        await repository.authenticate('admin', 'safe-password'),
+        isNotNull,
+      );
     },
   );
 
@@ -291,6 +398,91 @@ void main() {
     expect(await repository.pendingChanges(), pendingBefore + 5);
   });
 
+  test('deleting a connection with material use is blocked', () async {
+    final user = (await repository.users()).single;
+    await (await database.instance).insert('app_settings', {
+      'key': 'current_user_id',
+      'value': user.id,
+    });
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 2,
+    );
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: 'DELETE-GUARD-1',
+      login: 'delete-guard-1',
+      address: 'Списание материалов',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 10, 1),
+      price: 1000,
+      officeAmount: 300,
+      installerAmount: 700,
+      materials: [ConnectionMaterialInput(materialId: material.id, quantity: 1)],
+    );
+    final connection = (await repository.connections(clientId: clientId)).single;
+
+    await expectLater(
+      repository.deleteConnection(connection.id),
+      throwsA(isA<ArgumentError>().having(
+        (error) => error.message,
+        'message',
+        contains('списание материала'),
+      )),
+    );
+    expect(await repository.connections(clientId: clientId), hasLength(1));
+  });
+
+  test('deleting a client with material use is blocked', () async {
+    final user = (await repository.users()).single;
+    await (await database.instance).insert('app_settings', {
+      'key': 'current_user_id',
+      'value': user.id,
+    });
+    final provider = (await repository.providers()).first;
+    final warehouse = (await repository.warehouses()).first;
+    final material = (await repository.materials()).first;
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 2,
+    );
+    final clientId = await repository.addClient(
+      providerId: provider.id,
+      contractNumber: 'DELETE-GUARD-2',
+      login: 'delete-guard-2',
+      address: 'Списание материалов клиента',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 10, 1),
+      price: 1000,
+      officeAmount: 300,
+      installerAmount: 700,
+      materials: [ConnectionMaterialInput(materialId: material.id, quantity: 1)],
+    );
+
+    await expectLater(
+      repository.deleteClient(clientId),
+      throwsA(isA<ArgumentError>().having(
+        (error) => error.message,
+        'message',
+        contains('расход материала'),
+      )),
+    );
+    expect(await repository.clients(query: 'delete-guard-2'), hasLength(1));
+  });
+
   test(
     'client search covers login contract address phone and provider',
     () async {
@@ -432,6 +624,16 @@ void main() {
         4,
       );
 
+      await repository.addInventoryOperation(
+        warehouseId: source.id,
+        materialId: material.id,
+        operationType: 'ADJUSTMENT',
+        quantity: 1,
+        adjustmentDirection: 'minus',
+        comment: 'Исправление инвентаризации',
+      );
+      expect((await repository.materialSettlements()).single.quantity, 4);
+
       await repository.addTransfer(
         sourceWarehouseId: destination.id,
         destinationWarehouseId: source.id,
@@ -504,6 +706,52 @@ void main() {
       expect((await repository.materialSettlements()).single.quantity, 2);
     },
   );
+
+  test('deleting a cross-provider connection with material use is blocked', () async {
+    final user = (await repository.users()).single;
+    await (await database.instance).insert('app_settings', {
+      'key': 'current_user_id',
+      'value': user.id,
+    });
+    final providers = await repository.providers();
+    final warehouses = await repository.warehouses();
+    final material = (await repository.materials()).first;
+    final warehouse = warehouses.first;
+    final clientProvider = providers.singleWhere(
+      (item) => item.name != warehouse.name,
+    );
+    await repository.addReceipt(
+      warehouseId: warehouse.id,
+      materialId: material.id,
+      quantity: 5,
+    );
+    final clientId = await repository.addClient(
+      providerId: clientProvider.id,
+      contractNumber: '2002',
+      login: 'deleted-foreign-provider-client',
+      address: 'Адрес другого провайдера',
+    );
+    await repository.addConnection(
+      clientId: clientId,
+      warehouseId: warehouse.id,
+      connectionType: 'NEW',
+      connectionDate: DateTime(2026, 7, 26),
+      price: 0,
+      officeAmount: 0,
+      installerAmount: 0,
+      materials: [ConnectionMaterialInput(materialId: material.id, quantity: 2)],
+    );
+    expect((await repository.materialSettlements()).single.quantity, 2);
+
+    final connection = (await repository.connections()).single;
+    await expectLater(
+      repository.deleteConnection(connection.id),
+      throwsA(isA<ArgumentError>()),
+    );
+
+    expect((await repository.materialSettlements()).single.quantity, 2);
+    expect(await repository.connections(), hasLength(1));
+  });
 
   test(
     'finance debt follows website connection and office payment formula',
@@ -578,7 +826,9 @@ void main() {
       );
       expect(period.customerReceived, 0);
       expect(period.paidToOffice, 0);
-      expect(period.iOweOffice, 0);
+      // Activity is filtered to today, but the debt includes the old unpaid
+      // connection accrual carried into the selected period.
+      expect(period.iOweOffice, 500);
       expect(period.availableCash, 0);
       final filteredJournal = await repository.financeJournal(
         providerId: provider.id,
@@ -626,7 +876,154 @@ void main() {
     expect(summary.iOweOffice, 0);
   });
 
-  test('deleting connection restores stock and reverses finance', () async {
+  test(
+    'closing connection settlement leaves expense and extra work debts intact',
+    () async {
+      final provider = (await repository.providers()).first;
+      final warehouse = (await repository.warehouses()).first;
+      final clientId = await repository.addClient(
+        providerId: provider.id,
+        contractNumber: 'close-connections-1',
+        login: 'close-connections-client',
+        address: 'Закрытие расчёта подключений',
+      );
+      await repository.addConnection(
+        clientId: clientId,
+        warehouseId: warehouse.id,
+        connectionType: 'WITHOUT_MATERIALS',
+        connectionDate: DateTime(2026, 10, 5),
+        price: 0,
+        officeAmount: 0,
+        installerAmount: 500,
+        materials: const [],
+      );
+      await repository.addExpense(
+        providerId: provider.id,
+        category: 'transport',
+        description: 'Долг по расходу',
+        amount: 100,
+        paidBy: 'INSTALLER',
+        expenseDate: DateTime(2026, 10, 6),
+      );
+      final workType = (await repository.extraWorkTypes()).first;
+      await repository.addExtraWork(
+        providerId: provider.id,
+        workTypeId: workType.id,
+        workDate: DateTime(2026, 10, 7),
+        amount: 200,
+      );
+      final expense = (await repository.expenses()).single;
+      final work = (await repository.extraWorks()).single;
+
+      final preview = await repository.connectionSettlementPreview(
+        providerId: provider.id,
+        dateFrom: DateTime(2026, 10, 1),
+        dateTo: DateTime(2026, 10, 31),
+      );
+      expect(preview.connectionClaims, 500);
+      expect(preview.alreadyPaidByOffice, 0);
+      expect(preview.amountToClose, 500);
+
+      final before = await repository.financeSummary(
+        providerId: provider.id,
+        dateTo: DateTime(2026, 10, 31),
+      );
+      await repository.closeConnectionSettlement(
+        providerId: provider.id,
+        dateFrom: DateTime(2026, 10, 1),
+        dateTo: DateTime(2026, 10, 31),
+      );
+      final after = await repository.financeSummary(
+        providerId: provider.id,
+        dateTo: DateTime(2026, 10, 31),
+      );
+      expect(after.balance, before.balance - 500);
+      expect(after.officeOwesMe, 300);
+      expect(await repository.expenseOutstanding(expense.id), 100);
+      expect(await repository.extraWorkOutstanding(work.id), 200);
+      expect(
+        (await repository.connectionSettlementPreview(
+          providerId: provider.id,
+          dateFrom: DateTime(2026, 10, 1),
+          dateTo: DateTime(2026, 10, 31),
+        )).alreadyClosed,
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'old unlinked office payments settle oldest claims without duplication',
+    () async {
+      final provider = (await repository.providers()).first;
+      final workType = (await repository.extraWorkTypes()).first;
+      final expenseDate = DateTime(2026, 7, 1);
+      final workDate = DateTime(2026, 7, 2);
+      await repository.addExpense(
+        providerId: provider.id,
+        category: 'transport',
+        description: 'Старый расход',
+        amount: 100,
+        paidBy: 'INSTALLER',
+        expenseDate: expenseDate,
+      );
+      final expense = (await repository.expenses()).single;
+      await repository.addExtraWork(
+        providerId: provider.id,
+        workTypeId: workType.id,
+        workDate: workDate,
+        amount: 200,
+      );
+      final work = (await repository.extraWorks()).single;
+      await repository.addManualFinanceTransaction(
+        transactionType: 'PAYMENT_FROM_OFFICE',
+        amount: 150,
+        providerId: provider.id,
+        occurredAt: DateTime(2026, 7, 3),
+        comment: 'Историческая выплата офиса',
+      );
+
+      expect(await repository.expenseOutstanding(expense.id), 0);
+      expect(await repository.extraWorkOutstanding(work.id), 150);
+      var summary = await repository.financeSummary(providerId: provider.id);
+      expect(summary.officeOwesMe, 150);
+      expect(summary.iOweOffice, 0);
+
+      final report = (await repository.providerManagementReports(
+        dateFrom: DateTime(2026, 7, 1),
+        dateTo: DateTime(2026, 7, 31),
+        providerId: provider.id,
+      )).single;
+      expect(report.installerPaidExpenses, 0);
+      expect(report.unpaidExtraWorks, 150);
+
+      await repository.settleWorkItem(
+        sourceType: 'extra_work',
+        sourceId: work.id,
+        providerId: provider.id,
+        amount: 150,
+        paidAt: DateTime(2026, 7, 4),
+      );
+      expect(await repository.extraWorkOutstanding(work.id), 0);
+      summary = await repository.financeSummary(providerId: provider.id);
+      expect(summary.officeOwesMe, 0);
+      expect(summary.iOweOffice, 0);
+      expect(
+        (await repository.financeJournal(
+          providerId: provider.id,
+          transactionType: 'PAYMENT_FROM_OFFICE',
+        )),
+        hasLength(2),
+      );
+    },
+  );
+
+  test('admin can delete a connection without material use', () async {
+    final user = (await repository.users()).single;
+    await (await database.instance).insert('app_settings', {
+      'key': 'current_user_id',
+      'value': user.id,
+    });
     final provider = (await repository.providers()).first;
     final warehouse = (await repository.warehouses()).first;
     final material = (await repository.materials()).first;
@@ -649,15 +1046,13 @@ void main() {
       price: 1000,
       officeAmount: 300,
       installerAmount: 700,
-      materials: [
-        ConnectionMaterialInput(materialId: material.id, quantity: 2),
-      ],
+      materials: const [],
     );
     expect(
       (await repository.materialBalancesForWarehouse(
         warehouse.id,
       )).singleWhere((item) => item.materialId == material.id).quantity,
-      3,
+      5,
     );
     expect((await repository.financeSummary()).customerReceived, 1000);
 

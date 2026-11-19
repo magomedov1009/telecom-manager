@@ -1,8 +1,9 @@
 
-from datetime import date
+from datetime import date, datetime, time
 from typing import Annotated
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Form, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -10,10 +11,12 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import get_db
 from app.dependencies.auth import can_export_reports, can_open_reports, get_current_user_optional
+from app.models.inventory import MaterialDebtSettlement
 from app.models.users import User
 from app.routers.pages import NAV_ITEMS
+from app.services.access import get_access_scope
 from app.services.inventory import format_quantity
-from app.services.reports import build_pdf, build_xlsx, get_reports_data, rows_for_export
+from app.services.reports import build_pdf, build_xlsx, get_reports_data, material_settlements, rows_for_export
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 templates = Jinja2Templates(directory="app/templates")
@@ -55,7 +58,7 @@ def reports_page(
     request: Request,
     db: DbSession,
     current_user: CurrentUser,
-    period: Annotated[str, Query()] = "all",
+    period: Annotated[str, Query()] = "month",
     date_from: Annotated[str | None, Query()] = None,
     date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
@@ -77,11 +80,84 @@ def reports_page(
     )
 
 
+@router.post("/material-settlements/close")
+def close_material_debt(
+    db: DbSession,
+    current_user: CurrentUser,
+    debtor_id: Annotated[int, Form()],
+    creditor_id: Annotated[int, Form()],
+    material_id: Annotated[int, Form()],
+    settlement_date: Annotated[date, Form()],
+    confirm: Annotated[str, Form()],
+    period: Annotated[str, Form()] = "month",
+    date_from: Annotated[str, Form()] = "",
+    date_to: Annotated[str, Form()] = "",
+    provider_id: Annotated[str, Form()] = "",
+    search: Annotated[str, Form()] = "",
+) -> Response:
+    if current_user is None:
+        return redirect_to_login()
+    if current_user.role.value != "admin" or confirm != "yes":
+        return RedirectResponse(url="/reports?tab=material_settlements", status_code=status.HTTP_303_SEE_OTHER)
+
+    balance_period = {
+        "date_from": None,
+        "date_to": settlement_date,
+        "start": None,
+        "end": datetime.combine(settlement_date, time.max),
+    }
+    current_balances = material_settlements(
+        db,
+        balance_period,
+        None,
+        None,
+        get_access_scope(db, current_user),
+    )
+    balance = next(
+        (
+            row
+            for row in current_balances
+            if row["debtor"].id == debtor_id
+            and row["creditor"].id == creditor_id
+            and row["material"].id == material_id
+        ),
+        None,
+    )
+    # Recalculate at the chosen date so a stale page or duplicate click cannot
+    # close more than the actual remaining debt.
+    if balance is not None and balance["quantity"] > 0:
+        db.add(
+            MaterialDebtSettlement(
+                debtor_provider_id=debtor_id,
+                creditor_provider_id=creditor_id,
+                material_id=material_id,
+                user_id=current_user.id,
+                quantity=balance["quantity"],
+                comment="Долг закрыт из отчёта",
+                created_at=datetime.combine(settlement_date, time(hour=12)),
+            )
+        )
+        db.commit()
+
+    params = {
+        "tab": "material_settlements",
+        "period": period,
+        "date_from": date_from,
+        "date_to": date_to,
+        "provider_id": provider_id,
+        "search": search,
+    }
+    return RedirectResponse(
+        url=f"/reports?{urlencode({key: value for key, value in params.items() if value})}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/export.xlsx")
 def export_xlsx(
     db: DbSession,
     current_user: CurrentUser,
-    period: Annotated[str, Query()] = "all",
+    period: Annotated[str, Query()] = "month",
     date_from: Annotated[str | None, Query()] = None,
     date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,
@@ -107,7 +183,7 @@ def export_xlsx(
 def export_pdf(
     db: DbSession,
     current_user: CurrentUser,
-    period: Annotated[str, Query()] = "all",
+    period: Annotated[str, Query()] = "month",
     date_from: Annotated[str | None, Query()] = None,
     date_to: Annotated[str | None, Query()] = None,
     provider_id: Annotated[str | None, Query()] = None,

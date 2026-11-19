@@ -37,13 +37,16 @@
 - [ ] Заполнен раздел Data safety в Play Console по фактическим данным приложения.
 - [ ] Пройдено закрытое тестирование до публикации в production.
 
+Play-вариант не содержит разрешение `REQUEST_INSTALL_PACKAGES`; прямой APK
+сохраняет установку обновлений из GitHub. Сборка Play выполняется только как AAB.
+
 Для Play-сборки сначала заполните `mobile/android/key.properties` по шаблону
 `mobile/android/key.properties.example`, сохранив настоящий файл и keystore
 вне Git. В PowerShell:
 
 ```powershell
 $env:PLAY_STORE_RELEASE = "true"
-flutter build appbundle --release
+flutter build appbundle --release --flavor play
 Remove-Item Env:PLAY_STORE_RELEASE
 ```
 

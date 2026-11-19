@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/repositories/local_repository.dart';
+import '../fiber/fiber_work_screen.dart';
 
 const expenseCategories = {
   'fuel': 'Бензин',
@@ -175,6 +176,101 @@ class _WorksScreenState extends State<WorksScreen> {
     }
   }
 
+  Future<void> settleItem({
+    required String id,
+    required String sourceType,
+    required String providerId,
+    required String title,
+  }) async {
+    try {
+      final outstanding = sourceType == 'expense'
+          ? await widget.repository.expenseOutstanding(id)
+          : await widget.repository.extraWorkOutstanding(id);
+      if (!mounted || outstanding <= 0) return;
+      final amount = TextEditingController(
+        text: outstanding.toStringAsFixed(2),
+      );
+      DateTime paidAt = DateTime.now();
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text('Погасить: $title'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amount,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText:
+                        'Сумма (остаток ${outstanding.toStringAsFixed(2)} ₽)',
+                    suffixText: '₽',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.calendar_month),
+                  label: Text(
+                    'Дата оплаты: ${paidAt.day}.${paidAt.month}.${paidAt.year}',
+                  ),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: paidAt,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) setDialogState(() => paidAt = picked);
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Погасить'),
+              ),
+            ],
+          ),
+        ),
+      );
+      final value = double.tryParse(amount.text.trim().replaceAll(',', '.'));
+      amount.dispose();
+      if (approved != true || !mounted) return;
+      if (value == null || value <= 0 || value > outstanding + 0.001) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Укажите сумму не больше остатка')),
+        );
+        return;
+      }
+      await widget.repository.settleWorkItem(
+        sourceType: sourceType,
+        sourceId: id,
+        providerId: providerId,
+        amount: value,
+        paidAt: paidAt,
+      );
+      if (!mounted) return;
+      reload();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Оплата записана')));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -185,6 +281,17 @@ class _WorksScreenState extends State<WorksScreen> {
           'Работы',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Учёт кабеля и сварок',
+            icon: const Icon(Icons.cable_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => FiberWorkScreen(repository: widget.repository),
+              ),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -246,6 +353,32 @@ class _WorksScreenState extends State<WorksScreen> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              FutureBuilder<double>(
+                                future: widget.repository.extraWorkOutstanding(
+                                  item.id,
+                                ),
+                                builder: (context, snapshot) {
+                                  if (!snapshot.hasData) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  if (snapshot.data! <= 0) {
+                                    return const Text('Оплачено');
+                                  }
+                                  return IconButton(
+                                    tooltip:
+                                        'Погасить допработу: ${snapshot.data!.toStringAsFixed(2)} ₽',
+                                    icon: const Icon(
+                                      Icons.check_circle_outline,
+                                    ),
+                                    onPressed: () => settleItem(
+                                      id: item.id,
+                                      sourceType: 'extra_work',
+                                      providerId: item.providerId,
+                                      title: item.typeName,
+                                    ),
+                                  );
+                                },
+                              ),
                               Text(
                                 '${item.amount.toStringAsFixed(0)} ₽',
                                 style: const TextStyle(
@@ -295,6 +428,32 @@ class _WorksScreenState extends State<WorksScreen> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            FutureBuilder<double>(
+                              future: item.paidBy == 'INSTALLER'
+                                  ? widget.repository.expenseOutstanding(
+                                      item.id,
+                                    )
+                                  : Future.value(0),
+                              builder: (context, snapshot) {
+                                if (!snapshot.hasData) {
+                                  return const SizedBox.shrink();
+                                }
+                                if (snapshot.data! <= 0) {
+                                  return const Text('Погашено');
+                                }
+                                return IconButton(
+                                  tooltip:
+                                      'Погасить расход: ${snapshot.data!.toStringAsFixed(2)} ₽',
+                                  icon: const Icon(Icons.check_circle_outline),
+                                  onPressed: () => settleItem(
+                                    id: item.id,
+                                    sourceType: 'expense',
+                                    providerId: item.providerId,
+                                    title: item.description,
+                                  ),
+                                );
+                              },
+                            ),
                             Text(
                               '${item.amount.toStringAsFixed(0)} ₽',
                               style: const TextStyle(

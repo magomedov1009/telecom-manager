@@ -20,11 +20,18 @@ class ClientsScreen extends StatefulWidget {
 class _ClientsScreenState extends State<ClientsScreen> {
   late Future<List<ClientListItem>> clients;
   final search = TextEditingController();
+  bool canDeleteRecords = false;
 
   @override
   void initState() {
     super.initState();
     clients = widget.repository.clients();
+    loadPermissions();
+  }
+
+  Future<void> loadPermissions() async {
+    final user = await widget.repository.currentUser();
+    if (mounted) setState(() => canDeleteRecords = user?.role == 'admin');
   }
 
   void reload() {
@@ -76,6 +83,17 @@ class _ClientsScreenState extends State<ClientsScreen> {
                 icon: const Icon(Icons.edit_outlined),
                 label: const Text('Редактировать клиента'),
               ),
+              if (canDeleteRecords) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () => deleteClient(client),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Удалить клиента'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
               const Text(
                 'История подключений',
@@ -114,6 +132,45 @@ class _ClientsScreenState extends State<ClientsScreen> {
           _ClientSheet(repository: widget.repository, initial: client),
     );
     if (saved == true) reload();
+  }
+
+  Future<void> deleteClient(ClientListItem client) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить клиента?'),
+        content: const Text(
+          'Клиент и подключения без списанных материалов будут удалены. '
+          'Если по любому подключению списывали материалы, удаление будет запрещено.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await widget.repository.deleteClient(client.id);
+      if (!mounted) return;
+      Navigator.pop(context);
+      reload();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.toString().replaceFirst('Invalid argument(s): ', ''),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> addNewConnection() async {

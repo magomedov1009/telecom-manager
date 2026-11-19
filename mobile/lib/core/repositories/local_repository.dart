@@ -6,6 +6,33 @@ import 'package:cryptography/cryptography.dart';
 
 import '../database/app_database.dart';
 
+List<Map<String, Object?>> _decodeFiberJson(Object? value) {
+  Object? decoded = value;
+  if (value is String) {
+    try {
+      decoded = jsonDecode(value);
+    } catch (_) {
+      decoded = const [];
+    }
+  }
+  if (decoded is! List) return const [];
+  return decoded
+      .whereType<Map>()
+      .map((item) => Map<String, Object?>.from(item))
+      .toList();
+}
+
+Map<String, Object?>? _decodeFiberMap(Object? value) {
+  if (value is Map) return Map<String, Object?>.from(value);
+  if (value is! String || value.isEmpty) return null;
+  try {
+    final decoded = jsonDecode(value);
+    return decoded is Map ? Map<String, Object?>.from(decoded) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 ({String description, String? comment}) _unpackLegacyExpense(
   String description,
   String? comment,
@@ -370,6 +397,65 @@ class FinanceSummary {
   double get iOweOffice => balance < 0 ? -balance : 0;
 }
 
+class ConnectionSettlementPreview {
+  const ConnectionSettlementPreview({
+    required this.connectionClaims,
+    required this.alreadyPaidByOffice,
+    required this.amountToClose,
+    required this.alreadyClosed,
+  });
+
+  final double connectionClaims;
+  final double alreadyPaidByOffice;
+  final double amountToClose;
+  final bool alreadyClosed;
+}
+
+class _OfficeClaimBalance {
+  const _OfficeClaimBalance({
+    required this.type,
+    required this.claimDate,
+    required this.amount,
+    required this.remaining,
+  });
+
+  final String type;
+  final DateTime claimDate;
+  final double amount;
+  final double remaining;
+}
+
+class _OfficeClaimEvent {
+  const _OfficeClaimEvent({
+    required this.date,
+    required this.id,
+    required this.amount,
+    this.claimType,
+    this.paymentTarget,
+  });
+
+  final DateTime date;
+  final String id;
+  final double amount;
+  final String? claimType;
+  final String? paymentTarget;
+
+  bool get isClaim => claimType != null;
+}
+
+class _MutableOfficeClaim {
+  _MutableOfficeClaim({
+    required this.type,
+    required this.date,
+    required this.amount,
+  }) : remaining = amount;
+
+  final String type;
+  final DateTime date;
+  final double amount;
+  double remaining;
+}
+
 class FinanceJournalItem {
   const FinanceJournalItem({
     required this.id,
@@ -398,6 +484,7 @@ class FinanceJournalItem {
 class ExpenseItem {
   const ExpenseItem({
     required this.id,
+    required this.providerId,
     required this.category,
     required this.description,
     required this.amount,
@@ -408,6 +495,7 @@ class ExpenseItem {
   });
 
   final String id;
+  final String providerId;
   final String category;
   final String description;
   final double amount;
@@ -420,6 +508,7 @@ class ExpenseItem {
 class ExtraWorkItem {
   const ExtraWorkItem({
     required this.id,
+    required this.providerId,
     required this.typeName,
     required this.providerName,
     required this.amount,
@@ -428,6 +517,7 @@ class ExtraWorkItem {
   });
 
   final String id;
+  final String providerId;
   final String typeName;
   final String providerName;
   final double amount;
@@ -607,6 +697,11 @@ class ProviderManagementReport {
   final List<ManagementExpenseItem> expenses;
 
   double get officeResult => officeIncome - installerPaidExpenses;
+  double get onuQuantity => materials
+      .where((item) =>
+          item.name.toLowerCase().contains('onu') ||
+          item.name.toLowerCase().contains('ону'))
+      .fold<double>(0, (total, item) => total + item.quantity);
 }
 
 class SyncQueueItem {
@@ -624,6 +719,32 @@ class SyncQueueItem {
   final Map<String, Object?> payload;
 }
 
+class FiberWorkLogItem {
+  const FiberWorkLogItem({
+    required this.id,
+    required this.objectName,
+    required this.workDate,
+    required this.cableSpans,
+    required this.splices,
+    required this.notes,
+    required this.mapData,
+  });
+
+  final String id;
+  final String objectName;
+  final DateTime workDate;
+  final List<Map<String, Object?>> cableSpans;
+  final List<Map<String, Object?>> splices;
+  final String? notes;
+  final Map<String, Object?>? mapData;
+
+  double get totalCableMeters => cableSpans.fold<double>(
+    0,
+    (sum, span) => sum + ((span['length_m'] as num?)?.toDouble() ?? 0),
+  );
+  int get totalSplices => splices.length;
+}
+
 class LocalRepository {
   LocalRepository(this.database, {this.seedDemoCatalog = false});
 
@@ -632,6 +753,304 @@ class LocalRepository {
   /// Used only by tests and development previews. Production starts clean.
   final bool seedDemoCatalog;
   final Uuid _uuid = const Uuid();
+
+  String _officeClaimKey(String type, String id) => '$type:$id';
+
+  String _connectionSettlementMarker(DateTime from, DateTime to) =>
+      'Закрытие расчёта подключений ${from.toIso8601String().substring(0, 10)} — ${to.toIso8601String().substring(0, 10)}';
+
+  Future<ConnectionSettlementPreview> connectionSettlementPreview({
+    required String providerId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+  }) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final end = DateTime(
+      dateTo.year,
+      dateTo.month,
+      dateTo.day + 1,
+    ).toUtc().toIso8601String();
+    final marker = _connectionSettlementMarker(dateFrom, dateTo);
+    final closedRows = await db.rawQuery(
+      '''
+      SELECT id
+      FROM finance_transactions
+      WHERE organization_id = ? AND provider_id = ? AND deleted_at IS NULL
+        AND transaction_type = 'PAYMENT_FROM_OFFICE' AND comment = ?
+        AND occurred_at < ? LIMIT 1
+      ''',
+      [orgId, providerId, marker, end],
+    );
+    final balances = await _officeClaimBalances(
+      db: db,
+      orgId: orgId,
+      providerId: providerId,
+      throughDate: dateTo,
+    );
+    final connectionClaims = balances.values
+        .where((claim) => claim.type == 'connection')
+        .fold<double>(0, (sum, claim) => sum + claim.amount);
+    final amountToClose = balances.values
+        .where((claim) => claim.type == 'connection')
+        .fold<double>(0, (sum, claim) => sum + claim.remaining);
+    return ConnectionSettlementPreview(
+      connectionClaims: connectionClaims,
+      alreadyPaidByOffice: connectionClaims - amountToClose,
+      amountToClose: amountToClose,
+      alreadyClosed: closedRows.isNotEmpty,
+    );
+  }
+
+  Future<void> closeConnectionSettlement({
+    required String providerId,
+    required DateTime dateFrom,
+    required DateTime dateTo,
+  }) async {
+    if (dateTo.isBefore(dateFrom)) {
+      throw ArgumentError('Период указан неверно');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final marker = _connectionSettlementMarker(dateFrom, dateTo);
+    final preview = await connectionSettlementPreview(
+      providerId: providerId,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+    if (preview.alreadyClosed) {
+      throw StateError('Расчёт подключений за этот период уже закрыт');
+    }
+    if (preview.amountToClose <= 0.005) {
+      throw StateError('За выбранный период нет неоплаченного остатка');
+    }
+    await db.transaction((transaction) async {
+      final duplicate = await transaction.query(
+        'finance_transactions',
+        columns: ['id'],
+        where:
+            'organization_id = ? AND provider_id = ? AND comment = ? AND deleted_at IS NULL',
+        whereArgs: [orgId, providerId, marker],
+        limit: 1,
+      );
+      if (duplicate.isNotEmpty) {
+        throw StateError('Расчёт подключений за этот период уже закрыт');
+      }
+      final balances = await _officeClaimBalances(
+        db: transaction,
+        orgId: orgId,
+        providerId: providerId,
+        throughDate: dateTo,
+      );
+      final occurred = DateTime(
+        dateTo.year,
+        dateTo.month,
+        dateTo.day,
+        12,
+      ).toUtc().toIso8601String();
+      for (final entry in balances.entries.where(
+        (entry) =>
+            entry.value.type == 'connection' && entry.value.remaining > 0.005,
+      )) {
+        final connectionId = entry.key.substring('connection:'.length);
+        final row = <String, Object?>{
+          'id': _uuid.v7(),
+          'organization_id': orgId,
+          'provider_id': providerId,
+          'connection_id': connectionId,
+          'transaction_type': 'PAYMENT_FROM_OFFICE',
+          'amount': entry.value.remaining,
+          'comment': marker,
+          'occurred_at': occurred,
+          'created_at': now,
+          'updated_at': now,
+          'version': 1,
+          'sync_state': 'pending',
+        };
+        await transaction.insert('finance_transactions', row);
+        await _enqueue(
+          transaction,
+          organizationId: orgId,
+          entityType: 'finance_transaction',
+          entityId: row['id']! as String,
+          operation: 'upsert',
+          payload: row,
+          now: now,
+        );
+      }
+    });
+  }
+
+  /// Applies unlinked historical office payments to the oldest open claims.
+  /// Payments linked to a source record stay on that exact item.
+  Future<Map<String, _OfficeClaimBalance>> _officeClaimBalances({
+    required DatabaseExecutor db,
+    required String orgId,
+    required String providerId,
+    DateTime? throughDate,
+  }) async {
+    final through = throughDate == null
+        ? null
+        : DateTime(
+            throughDate.year,
+            throughDate.month,
+            throughDate.day + 1,
+          ).toUtc().toIso8601String();
+    final claimRows = await db.rawQuery(
+      '''
+      SELECT expense.id, 'expense' claim_type, expense.expense_date claim_date,
+             expense.amount
+      FROM expenses expense
+      WHERE expense.organization_id = ? AND expense.provider_id = ?
+        AND expense.paid_by = 'INSTALLER' AND expense.deleted_at IS NULL
+        ${through != null ? 'AND expense.expense_date < ?' : ''}
+      UNION ALL
+      SELECT connection.id, 'connection' claim_type,
+             connection.connection_date claim_date,
+             MAX(connection.installer_amount + connection.office_amount -
+                 connection.price, 0) amount
+      FROM connections connection
+      JOIN clients client ON client.id = connection.client_id
+      WHERE connection.organization_id = ? AND client.provider_id = ?
+        AND connection.deleted_at IS NULL AND client.deleted_at IS NULL
+        AND connection.installer_amount + connection.office_amount >
+            connection.price
+        ${through != null ? 'AND connection.connection_date < ?' : ''}
+      UNION ALL
+      SELECT work.id, 'extra_work' claim_type, work.work_date claim_date,
+             work.installer_amount amount
+      FROM extra_works work
+      WHERE work.organization_id = ? AND work.provider_id = ?
+        AND work.deleted_at IS NULL AND work.installer_amount > 0
+        ${through != null ? 'AND work.work_date < ?' : ''}
+      ORDER BY claim_date, claim_type, id
+      ''',
+      [
+        orgId,
+        providerId,
+        ?through,
+        orgId,
+        providerId,
+        ?through,
+        orgId,
+        providerId,
+        ?through,
+      ],
+    );
+    final paymentRows = await db.rawQuery(
+      '''
+      SELECT id, occurred_at, amount, connection_id, expense_id, extra_work_id
+      FROM finance_transactions
+      WHERE organization_id = ? AND provider_id = ?
+        AND transaction_type = 'PAYMENT_FROM_OFFICE' AND deleted_at IS NULL
+        ${through != null ? 'AND occurred_at < ?' : ''}
+      ORDER BY occurred_at, id
+      ''',
+      [orgId, providerId, ?through],
+    );
+
+    final events = <_OfficeClaimEvent>[];
+    for (final row in claimRows) {
+      final type = row['claim_type']! as String;
+      final id = row['id']! as String;
+      events.add(
+        _OfficeClaimEvent(
+          date: DateTime.parse(row['claim_date']! as String).toUtc(),
+          id: 'claim:$type:$id',
+          amount: (row['amount']! as num).toDouble(),
+          claimType: type,
+        ),
+      );
+    }
+    for (final row in paymentRows) {
+      final connectionId = row['connection_id'] as String?;
+      final expenseId = row['expense_id'] as String?;
+      final extraWorkId = row['extra_work_id'] as String?;
+      events.add(
+        _OfficeClaimEvent(
+          date: DateTime.parse(row['occurred_at']! as String).toUtc(),
+          id: 'payment:${row['id']! as String}',
+          amount: (row['amount']! as num).toDouble(),
+          paymentTarget: connectionId != null
+              ? _officeClaimKey('connection', connectionId)
+              : expenseId != null
+              ? _officeClaimKey('expense', expenseId)
+              : extraWorkId != null
+              ? _officeClaimKey('extra_work', extraWorkId)
+              : null,
+        ),
+      );
+    }
+    events.sort((a, b) {
+      final byDate = a.date.compareTo(b.date);
+      if (byDate != 0) return byDate;
+      if (a.isClaim != b.isClaim) return a.isClaim ? -1 : 1;
+      return a.id.compareTo(b.id);
+    });
+
+    final claims = <String, _MutableOfficeClaim>{};
+    final accruedClaims = <String>[];
+    final deferredLinkedPayments = <String, double>{};
+    var unallocatedManualPayments = 0.0;
+    for (final event in events) {
+      if (event.isClaim) {
+        final key = _officeClaimKey(
+          event.claimType!,
+          event.id.substring('claim:${event.claimType}:'.length),
+        );
+        final claim = _MutableOfficeClaim(
+          type: event.claimType!,
+          date: event.date,
+          amount: event.amount,
+        );
+        claims[key] = claim;
+        accruedClaims.add(key);
+        final generalPaid = unallocatedManualPayments
+            .clamp(0, claim.remaining)
+            .toDouble();
+        claim.remaining -= generalPaid;
+        unallocatedManualPayments -= generalPaid;
+        final linkedPaid = (deferredLinkedPayments.remove(key) ?? 0)
+            .clamp(0, claim.remaining)
+            .toDouble();
+        claim.remaining -= linkedPaid;
+      } else if (event.paymentTarget != null) {
+        final claim = claims[event.paymentTarget];
+        if (claim == null) {
+          deferredLinkedPayments.update(
+            event.paymentTarget!,
+            (value) => value + event.amount,
+            ifAbsent: () => event.amount,
+          );
+        } else {
+          claim.remaining = (claim.remaining - event.amount)
+              .clamp(0, claim.amount)
+              .toDouble();
+        }
+      } else {
+        var remainingPayment = event.amount;
+        for (final key in accruedClaims) {
+          if (remainingPayment <= 0) break;
+          final claim = claims[key]!;
+          final applied = remainingPayment.clamp(0, claim.remaining).toDouble();
+          claim.remaining -= applied;
+          remainingPayment -= applied;
+        }
+        unallocatedManualPayments += remainingPayment;
+      }
+    }
+
+    return {
+      for (final entry in claims.entries)
+        entry.key: _OfficeClaimBalance(
+          type: entry.value.type,
+          claimDate: entry.value.date,
+          amount: entry.value.amount,
+          remaining: entry.value.remaining,
+        ),
+    };
+  }
 
   Future<void> initialize() async {
     final db = await database.instance;
@@ -2233,24 +2652,6 @@ class LocalRepository {
         .toList();
     final result = <ProviderManagementReport>[];
 
-    Future<double> financeSum(
-      String selectedProviderId,
-      String expression, {
-      bool cumulative = false,
-    }) async {
-      final rows = await db.rawQuery(
-        '''
-        SELECT COALESCE(SUM($expression), 0) amount
-        FROM finance_transactions
-        WHERE organization_id = ? AND provider_id = ? AND deleted_at IS NULL
-          ${!cumulative && fromTime != null ? 'AND occurred_at >= ?' : ''}
-          ${toExclusive != null ? 'AND occurred_at < ?' : ''}
-        ''',
-        [orgId, selectedProviderId, if (!cumulative) ?fromTime, ?toExclusive],
-      );
-      return (rows.single['amount']! as num).toDouble();
-    }
-
     for (final provider in selectedProviders) {
       final connectionRows = await db.rawQuery(
         '''
@@ -2289,71 +2690,26 @@ class LocalRepository {
         installerIncome += connection.installerAmount;
       }
 
-      // Office reimbursements settle the oldest installer claims first. Keep
-      // this ledger separate from money the installer has to transfer to the
-      // office; otherwise an office reimbursement can create a false reverse
-      // debt.
-      final claimRows = await db.rawQuery(
-        '''
-        SELECT 'EXPENSE' claim_type, expense_date claim_date, amount
-        FROM expenses
-        WHERE organization_id = ? AND provider_id = ?
-          AND paid_by = 'INSTALLER' AND deleted_at IS NULL
-          ${toDate != null ? 'AND expense_date <= ?' : ''}
-        UNION ALL
-        SELECT 'CONNECTION_COMPENSATION' claim_type,
-               connection.connection_date claim_date,
-               MAX(connection.installer_amount + connection.office_amount - connection.price, 0) amount
-        FROM connections connection
-        JOIN clients client ON client.id = connection.client_id
-        WHERE connection.organization_id = ? AND client.provider_id = ?
-          AND connection.deleted_at IS NULL AND client.deleted_at IS NULL
-          AND connection.installer_amount + connection.office_amount > connection.price
-          ${toDate != null ? 'AND connection.connection_date <= ?' : ''}
-        UNION ALL
-        SELECT 'EXTRA_WORK' claim_type, substr(occurred_at, 1, 10) claim_date,
-               amount
-        FROM finance_transactions
-        WHERE organization_id = ? AND provider_id = ? AND deleted_at IS NULL
-          AND transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER'
-          AND amount > 0
-          ${toExclusive != null ? 'AND occurred_at < ?' : ''}
-        ORDER BY claim_date
-        ''',
-        [
-          orgId,
-          provider.id,
-          ?toDate,
-          orgId,
-          provider.id,
-          ?toDate,
-          orgId,
-          provider.id,
-          ?toExclusive,
-        ],
+      // Linked payments clear their exact item. Historical manual office
+      // payments are allocated FIFO, oldest open installer claims first.
+      final claimBalances = await _officeClaimBalances(
+        db: db,
+        orgId: orgId,
+        providerId: provider.id,
+        throughDate: dateTo,
       );
-      final cumulativePaidFromOffice = await financeSum(
-        provider.id,
-        "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
-        cumulative: true,
-      );
-      var paymentRemainder = cumulativePaidFromOffice;
       var installerPaidExpenses = 0.0;
       var unpaidExtraWorks = 0.0;
-      for (final claim in claimRows) {
-        final amount = (claim['amount']! as num).toDouble();
-        final paid = paymentRemainder.clamp(0, amount).toDouble();
-        paymentRemainder -= paid;
-        final unpaid = amount - paid;
-        final claimDate = claim['claim_date']! as String;
+      for (final claim in claimBalances.values) {
+        final claimDate = claim.claimDate.toIso8601String().substring(0, 10);
         final inSelectedPeriod =
             (fromDate == null || claimDate.compareTo(fromDate) >= 0) &&
             (toDate == null || claimDate.compareTo(toDate) <= 0);
         if (!inSelectedPeriod) continue;
-        if (claim['claim_type'] == 'EXPENSE') {
-          installerPaidExpenses += unpaid;
-        } else if (claim['claim_type'] == 'EXTRA_WORK') {
-          unpaidExtraWorks += unpaid;
+        if (claim.type == 'expense') {
+          installerPaidExpenses += claim.remaining;
+        } else if (claim.type == 'extra_work') {
+          unpaidExtraWorks += claim.remaining;
         }
       }
       final sharedFinance = await financeSummary(
@@ -2370,12 +2726,18 @@ class LocalRepository {
       final materialRows = await db.rawQuery(
         '''
         SELECT material.name, material.unit_name,
-               COALESCE(SUM(ABS(movement.quantity)), 0) quantity
+               COALESCE(SUM(-movement.quantity), 0) quantity
         FROM inventory_transactions movement
         JOIN materials material ON material.id = movement.material_id
         WHERE movement.organization_id = ? AND movement.provider_id = ?
-          AND movement.deleted_at IS NULL AND movement.quantity < 0
-          AND movement.operation_type = 'CONNECTION'
+          AND movement.deleted_at IS NULL
+          AND (
+            movement.operation_type = 'CONNECTION'
+            OR (
+              movement.operation_type IN ('ADJUSTMENT', 'RETURN')
+              AND movement.connection_id IS NOT NULL
+            )
+          )
           ${fromTime != null ? 'AND movement.occurred_at >= ?' : ''}
           ${toExclusive != null ? 'AND movement.occurred_at < ?' : ''}
         GROUP BY material.id, material.name, material.unit_name
@@ -2841,6 +3203,10 @@ class LocalRepository {
   }
 
   Future<void> deleteConnection(String connectionId) async {
+    final user = await currentUser();
+    if (user?.role != 'admin') {
+      throw ArgumentError('Удалять подключения может только администратор');
+    }
     final db = await database.instance;
     final orgId = await organizationId;
     final now = DateTime.now().toUtc().toIso8601String();
@@ -2855,6 +3221,26 @@ class LocalRepository {
         throw ArgumentError('Подключение не найдено');
       }
       final connection = connectionRows.single;
+      final materialRows = await transaction.query(
+        'connection_materials',
+        columns: ['id'],
+        where: 'connection_id = ?',
+        whereArgs: [connectionId],
+        limit: 1,
+      );
+      final usageRows = await transaction.query(
+        'inventory_transactions',
+        columns: ['id'],
+        where: 'connection_id = ? AND operation_type = ? AND quantity < 0',
+        whereArgs: [connectionId, 'CONNECTION'],
+        limit: 1,
+      );
+      if (materialRows.isNotEmpty || usageRows.isNotEmpty) {
+        throw ArgumentError(
+          'Удаление заблокировано: у подключения есть связанное списание материала. '
+          'Сначала исправьте ошибочный расход или обратитесь к администратору.',
+        );
+      }
       final inventoryRows = await transaction.query(
         'inventory_transactions',
         where:
@@ -2919,6 +3305,73 @@ class LocalRepository {
       await softDelete('connections', 'connection');
       // Preserve the original connection row in the delete payload.
       assert(connection['id'] == connectionId);
+    });
+  }
+
+  Future<void> deleteClient(String clientId) async {
+    final user = await currentUser();
+    if (user?.role != 'admin') {
+      throw ArgumentError('Удалять клиентов может только администратор');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final clients = await db.query(
+      'clients',
+      where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [clientId, orgId],
+      limit: 1,
+    );
+    if (clients.isEmpty) throw ArgumentError('Клиент не найден');
+    final linkedConnections = await db.query(
+      'connections',
+      columns: ['id'],
+      where: 'client_id = ? AND organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [clientId, orgId],
+    );
+    for (final connection in linkedConnections) {
+      final connectionId = connection['id']! as String;
+      final materialRows = await db.query(
+        'connection_materials',
+        columns: ['id'],
+        where: 'connection_id = ?',
+        whereArgs: [connectionId],
+        limit: 1,
+      );
+      final usageRows = await db.query(
+        'inventory_transactions',
+        columns: ['id'],
+        where: 'connection_id = ? AND operation_type = ? AND quantity < 0',
+        whereArgs: [connectionId, 'CONNECTION'],
+        limit: 1,
+      );
+      if (materialRows.isNotEmpty || usageRows.isNotEmpty) {
+        throw ArgumentError(
+          'Удаление заблокировано: по подключению этого клиента есть расход материала. '
+          'Сначала исправьте ошибочный расход или обратитесь к администратору.',
+        );
+      }
+    }
+    for (final connection in linkedConnections) {
+      await deleteConnection(connection['id']! as String);
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final row = clients.single;
+      await transaction.update(
+        'clients',
+        {'deleted_at': now, 'updated_at': now, 'sync_state': 'pending'},
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [clientId, orgId],
+      );
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'client',
+        entityId: clientId,
+        operation: 'delete',
+        payload: {...row, 'deleted_at': now},
+        now: now,
+      );
     });
   }
 
@@ -3618,7 +4071,13 @@ class LocalRepository {
         JOIN warehouses source ON source.id = transaction_row.warehouse_id
         WHERE transaction_row.organization_id = ?
           AND transaction_row.deleted_at IS NULL
-          AND transaction_row.operation_type IN ('CONNECTION', 'ADJUSTMENT')
+          AND (
+            transaction_row.operation_type = 'CONNECTION'
+            OR (
+              transaction_row.operation_type IN ('ADJUSTMENT', 'RETURN')
+              AND transaction_row.connection_id IS NOT NULL
+            )
+          )
           AND transaction_row.provider_id IS NOT NULL
         UNION ALL
         SELECT source.provider_id AS creditor_id,
@@ -3633,6 +4092,9 @@ class LocalRepository {
           AND transaction_row.deleted_at IS NULL
           AND transaction_row.operation_type = 'TRANSFER_OUT'
           AND transaction_row.quantity < 0
+          AND transaction_row.deleted_at IS NULL
+          AND source.provider_id IS NOT NULL
+          AND destination.provider_id IS NOT NULL
         UNION ALL
         SELECT settlement.creditor_provider_id AS creditor_id,
                settlement.material_id,
@@ -3879,26 +4341,29 @@ class LocalRepository {
     final paidToOffice = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
     );
-    final useRunningBalance = dateFrom == null;
+    // Finance activity cards honor both period bounds, but the debt card must
+    // show the outstanding balance carried into the selected period as well.
+    // This matches the web calculation and keeps unpaid amounts from
+    // disappearing when a month is selected.
     final paidFromOfficeBalance = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_FROM_OFFICE' THEN amount ELSE 0 END",
-      cumulative: useRunningBalance,
+      cumulative: true,
     );
     final paidToOfficeBalance = await sum(
       "CASE WHEN transaction_type = 'PAYMENT_TO_OFFICE' THEN ABS(amount) ELSE 0 END",
-      cumulative: useRunningBalance,
+      cumulative: true,
     );
     final adjustments = await sum(
       "CASE WHEN transaction_type = 'ADJUSTMENT' THEN amount ELSE 0 END",
-      cumulative: useRunningBalance,
+      cumulative: true,
     );
     final extraWorkInstaller = await sum(
       "CASE WHEN transaction_type = 'EXTRA_WORK' AND accrual_to = 'INSTALLER' AND amount > 0 THEN amount ELSE 0 END",
-      cumulative: useRunningBalance,
+      cumulative: true,
     );
     final officeAccruedBalance = await sum(
       "CASE WHEN transaction_type = 'CONNECTION' AND accrual_to = 'OFFICE' AND amount > 0 THEN amount ELSE 0 END",
-      cumulative: useRunningBalance,
+      cumulative: true,
     );
     final expenseFrom = dateFrom?.toIso8601String().substring(0, 10);
     final expenseTo = dateTo?.toIso8601String().substring(0, 10);
@@ -3913,10 +4378,9 @@ class LocalRepository {
       WHERE connection.organization_id = ? AND connection.deleted_at IS NULL
         AND client.deleted_at IS NULL
         ${providerId != null ? 'AND client.provider_id = ?' : ''}
-        ${!useRunningBalance && expenseFrom != null ? 'AND connection.connection_date >= ?' : ''}
         ${expenseTo != null ? 'AND connection.connection_date <= ?' : ''}
       ''',
-      [orgId, ?providerId, if (!useRunningBalance) ?expenseFrom, ?expenseTo],
+      [orgId, ?providerId, ?expenseTo],
     );
     final connectionCompensation = (compensationRows.single['amount']! as num)
         .toDouble();
@@ -3956,7 +4420,6 @@ class LocalRepository {
       "paid_by = 'INSTALLER'",
       'deleted_at IS NULL',
       if (providerId != null) 'provider_id = ?',
-      if (!useRunningBalance && expenseFrom != null) 'expense_date >= ?',
       if (expenseTo != null) 'expense_date <= ?',
     ].join(' AND ');
     final debtExpenseRows = await db.rawQuery(
@@ -3964,7 +4427,7 @@ class LocalRepository {
       SELECT COALESCE(SUM(amount), 0) AS amount FROM expenses
       WHERE $debtExpenseWhere
       ''',
-      [orgId, ?providerId, if (!useRunningBalance) ?expenseFrom, ?expenseTo],
+      [orgId, ?providerId, ?expenseTo],
     );
     final debtInstallerExpenses = (debtExpenseRows.single['amount']! as num)
         .toDouble();
@@ -4065,6 +4528,7 @@ class LocalRepository {
     required double amount,
     required String providerId,
     String? comment,
+    DateTime? occurredAt,
   }) async {
     const allowed = {'PAYMENT_TO_OFFICE', 'PAYMENT_FROM_OFFICE', 'ADJUSTMENT'};
     if (!allowed.contains(transactionType)) {
@@ -4076,6 +4540,7 @@ class LocalRepository {
     final db = await database.instance;
     final orgId = await organizationId;
     final now = DateTime.now().toUtc().toIso8601String();
+    final occurred = (occurredAt ?? DateTime.now()).toUtc().toIso8601String();
     final signedAmount = transactionType == 'PAYMENT_TO_OFFICE'
         ? -amount
         : amount;
@@ -4086,7 +4551,7 @@ class LocalRepository {
       'transaction_type': transactionType,
       'amount': signedAmount,
       'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
-      'occurred_at': now,
+      'occurred_at': occurred,
       'created_at': now,
       'updated_at': now,
       'version': 1,
@@ -4112,6 +4577,7 @@ class LocalRepository {
     required double amount,
     required String providerId,
     String? comment,
+    DateTime? occurredAt,
   }) async {
     const allowed = {'PAYMENT_TO_OFFICE', 'PAYMENT_FROM_OFFICE', 'ADJUSTMENT'};
     if (!allowed.contains(transactionType) || amount <= 0) {
@@ -4136,6 +4602,8 @@ class LocalRepository {
         'transaction_type': transactionType,
         'amount': transactionType == 'PAYMENT_TO_OFFICE' ? -amount : amount,
         'comment': comment?.trim().isEmpty == true ? null : comment?.trim(),
+        if (occurredAt != null)
+          'occurred_at': occurredAt.toUtc().toIso8601String(),
         'updated_at': now,
         'version': version,
         'sync_state': 'pending',
@@ -4153,6 +4621,106 @@ class LocalRepository {
         entityId: transactionId,
         operation: 'upsert',
         payload: {...rows.single, ...values},
+        now: now,
+      );
+    });
+  }
+
+  Future<double> expenseOutstanding(String expenseId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT expense.provider_id
+      FROM expenses expense
+      WHERE expense.id = ? AND expense.organization_id = ?
+        AND expense.deleted_at IS NULL AND expense.paid_by = 'INSTALLER'
+    ''',
+      [expenseId, orgId],
+    );
+    if (rows.isEmpty) return 0;
+    final providerId = rows.single['provider_id']! as String;
+    final balances = await _officeClaimBalances(
+      db: db,
+      orgId: orgId,
+      providerId: providerId,
+    );
+    return balances[_officeClaimKey('expense', expenseId)]?.remaining ?? 0;
+  }
+
+  Future<double> extraWorkOutstanding(String extraWorkId) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.rawQuery(
+      '''
+      SELECT work.provider_id
+      FROM extra_works work
+      WHERE work.id = ? AND work.organization_id = ? AND work.deleted_at IS NULL
+    ''',
+      [extraWorkId, orgId],
+    );
+    if (rows.isEmpty) return 0;
+    final providerId = rows.single['provider_id']! as String;
+    final balances = await _officeClaimBalances(
+      db: db,
+      orgId: orgId,
+      providerId: providerId,
+    );
+    return balances[_officeClaimKey('extra_work', extraWorkId)]?.remaining ?? 0;
+  }
+
+  Future<void> settleWorkItem({
+    required String sourceType,
+    required String sourceId,
+    required String providerId,
+    required double amount,
+    required DateTime paidAt,
+  }) async {
+    if (!{'expense', 'extra_work'}.contains(sourceType) || amount <= 0) {
+      throw ArgumentError('Некорректная сумма погашения');
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final occurred = paidAt.toUtc().toIso8601String();
+    final row = <String, Object?>{
+      'id': _uuid.v7(),
+      'organization_id': orgId,
+      'provider_id': providerId,
+      if (sourceType == 'expense') 'expense_id': sourceId,
+      if (sourceType == 'extra_work') 'extra_work_id': sourceId,
+      'transaction_type': 'PAYMENT_FROM_OFFICE',
+      'amount': amount,
+      'comment': sourceType == 'expense'
+          ? 'Погашение расхода'
+          : 'Оплата допработы',
+      'occurred_at': occurred,
+      'created_at': now,
+      'updated_at': now,
+      'version': 1,
+      'sync_state': 'pending',
+    };
+    await db.transaction((transaction) async {
+      final balances = await _officeClaimBalances(
+        db: transaction,
+        orgId: orgId,
+        providerId: providerId,
+      );
+      final remaining =
+          balances[_officeClaimKey(sourceType, sourceId)]?.remaining ?? 0.0;
+      if (remaining <= 0 || amount > remaining + 0.001) {
+        throw StateError(
+          'Сумма превышает остаток долга (${remaining.toStringAsFixed(2)} ₽)',
+        );
+      }
+      await transaction.insert('finance_transactions', row);
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'finance_transaction',
+        entityId: row['id']! as String,
+        operation: 'upsert',
+        payload: row,
         now: now,
       );
     });
@@ -4404,7 +4972,7 @@ class LocalRepository {
     final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
-      SELECT work.id, work.amount, work.work_date, work.comment,
+      SELECT work.id, work.provider_id, work.amount, work.work_date, work.comment,
              type.name type_name, provider.name provider_name
       FROM extra_works work
       JOIN extra_work_types type ON type.id = work.work_type_id
@@ -4421,6 +4989,7 @@ class LocalRepository {
         .map(
           (row) => ExtraWorkItem(
             id: row['id']! as String,
+            providerId: row['provider_id']! as String,
             typeName: row['type_name']! as String,
             providerName: row['provider_name']! as String,
             amount: (row['amount']! as num).toDouble(),
@@ -4453,7 +5022,7 @@ class LocalRepository {
     final to = dateTo?.toIso8601String().substring(0, 10);
     final rows = await db.rawQuery(
       '''
-      SELECT expense.id, expense.category, expense.description, expense.amount,
+      SELECT expense.id, expense.provider_id, expense.category, expense.description, expense.amount,
              expense.paid_by, expense.expense_date, expense.comment,
              provider.name provider_name
       FROM expenses expense
@@ -4473,6 +5042,7 @@ class LocalRepository {
       );
       return ExpenseItem(
         id: row['id']! as String,
+        providerId: row['provider_id']! as String,
         category: row['category']! as String,
         description: unpacked.description,
         amount: (row['amount']! as num).toDouble(),
@@ -4584,7 +5154,8 @@ class LocalRepository {
       if (rows.isEmpty) throw ArgumentError('Расход не найден');
       final oldFinance = await transaction.query(
         'finance_transactions',
-        where: 'expense_id = ? AND deleted_at IS NULL',
+        where:
+            "expense_id = ? AND transaction_type = 'EXPENSE' AND deleted_at IS NULL",
         whereArgs: [expenseId],
       );
       for (final old in oldFinance) {
@@ -4720,7 +5291,9 @@ class LocalRepository {
       for (final table in ['extra_work_materials', 'finance_transactions']) {
         final oldRows = await transaction.query(
           table,
-          where: 'extra_work_id = ? AND deleted_at IS NULL',
+          where: table == 'finance_transactions'
+              ? "extra_work_id = ? AND transaction_type = 'EXTRA_WORK' AND deleted_at IS NULL"
+              : 'extra_work_id = ? AND deleted_at IS NULL',
           whereArgs: [extraWorkId],
         );
         for (final old in oldRows) {
@@ -5044,6 +5617,167 @@ class LocalRepository {
     );
   }
 
+  Future<List<FiberWorkLogItem>> fiberWorkLogs() async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final rows = await db.query(
+      'fiber_work_logs',
+      where: 'organization_id = ? AND deleted_at IS NULL',
+      whereArgs: [orgId],
+      orderBy: 'work_date DESC, created_at DESC',
+    );
+    return rows
+        .map(
+          (row) => FiberWorkLogItem(
+            id: row['id']! as String,
+            objectName: row['object_name']! as String,
+            workDate: DateTime.parse(row['work_date']! as String),
+            cableSpans: _decodeFiberJson(row['cable_spans']),
+            splices: _decodeFiberJson(row['splices']),
+            notes: row['notes'] as String?,
+            mapData: _decodeFiberMap(row['map_data']),
+          ),
+        )
+        .toList();
+  }
+
+  Future<String> saveFiberWorkLog({
+    String? id,
+    required String objectName,
+    required DateTime workDate,
+    required List<Map<String, Object?>> cableSpans,
+    required List<Map<String, Object?>> splices,
+    String? notes,
+    Map<String, Object?>? mapData,
+  }) async {
+    final cleanName = objectName.trim();
+    if (cleanName.isEmpty) throw ArgumentError('Укажите объект или монтажку');
+    if (cableSpans.any(
+      (span) =>
+          (span['from_closure']?.toString().trim().isEmpty ?? true) ||
+          (span['to_closure']?.toString().trim().isEmpty ?? true) ||
+          ((span['length_m'] as num?)?.toDouble() ?? 0) <= 0,
+    )) {
+      throw ArgumentError('Проверьте муфты и метраж каждого отрезка');
+    }
+    if (splices.any(
+      (splice) =>
+          (splice['closure']?.toString().trim().isEmpty ?? true) ||
+          (splice['cable_mark']?.toString().trim().isEmpty ?? true) ||
+          ((splice['fiber_number'] as num?)?.toInt() ?? 0) < 1,
+    )) {
+      throw ArgumentError(
+        'Проверьте муфту, кабель и номер каждого сваренного волокна',
+      );
+    }
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final entityId = id ?? _uuid.v7();
+    await db.transaction((transaction) async {
+      final existing = id == null
+          ? <Map<String, Object?>>[]
+          : await transaction.query(
+              'fiber_work_logs',
+              where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+              whereArgs: [entityId, orgId],
+              limit: 1,
+            );
+      final version = existing.isEmpty
+          ? 1
+          : (existing.single['version']! as num).toInt() + 1;
+      final row = <String, Object?>{
+        'id': entityId,
+        'organization_id': orgId,
+        'object_name': cleanName,
+        'work_date': DateTime(
+          workDate.year,
+          workDate.month,
+          workDate.day,
+        ).toIso8601String().substring(0, 10),
+        'cable_spans': jsonEncode(cableSpans),
+        'splices': jsonEncode(splices),
+        'notes': notes?.trim().isEmpty == true ? null : notes?.trim(),
+        'map_data': mapData == null ? null : jsonEncode(mapData),
+        'created_at': existing.isEmpty ? now : existing.single['created_at'],
+        'updated_at': now,
+        'deleted_at': null,
+        'version': version,
+        'sync_state': 'pending',
+      };
+      if (existing.isEmpty) {
+        await transaction.insert('fiber_work_logs', row);
+      } else {
+        await transaction.update(
+          'fiber_work_logs',
+          row,
+          where: 'id = ? AND organization_id = ?',
+          whereArgs: [entityId, orgId],
+        );
+      }
+      final payload = <String, Object?>{
+        ...row,
+        'cable_spans': cableSpans,
+        'splices': splices,
+        'map_data': mapData,
+      };
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'fiber_work_log',
+        entityId: entityId,
+        operation: 'upsert',
+        payload: payload,
+        now: now,
+      );
+    });
+    return entityId;
+  }
+
+  Future<void> deleteFiberWorkLog(String id) async {
+    final db = await database.instance;
+    final orgId = await organizationId;
+    final now = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((transaction) async {
+      final rows = await transaction.query(
+        'fiber_work_logs',
+        where: 'id = ? AND organization_id = ? AND deleted_at IS NULL',
+        whereArgs: [id, orgId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return;
+      final row = Map<String, Object?>.from(rows.single);
+      final version = (row['version']! as num).toInt() + 1;
+      await transaction.update(
+        'fiber_work_logs',
+        {
+          'deleted_at': now,
+          'updated_at': now,
+          'version': version,
+          'sync_state': 'pending',
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      row['deleted_at'] = now;
+      row['updated_at'] = now;
+      row['version'] = version;
+      row['sync_state'] = 'pending';
+      row['cable_spans'] = _decodeFiberJson(row['cable_spans']);
+      row['splices'] = _decodeFiberJson(row['splices']);
+      row['map_data'] = _decodeFiberMap(row['map_data']);
+      await _enqueue(
+        transaction,
+        organizationId: orgId,
+        entityType: 'fiber_work_log',
+        entityId: id,
+        operation: 'delete',
+        payload: row,
+        now: now,
+      );
+    });
+  }
+
   Future<int> pendingChanges() async {
     final db = await database.instance;
     final orgId = await organizationId;
@@ -5097,6 +5831,7 @@ class LocalRepository {
       'extra_works': 'extra_work',
       'extra_work_materials': 'extra_work_material',
       'expenses': 'expense',
+      'fiber_work_logs': 'fiber_work_log',
     };
     final result = <Map<String, Object?>>[];
     for (final entry in entities.entries) {
@@ -5106,12 +5841,18 @@ class LocalRepository {
         whereArgs: [orgId],
       );
       for (final row in rows) {
+        final payload = Map<String, Object?>.from(row);
+        if (entry.key == 'fiber_work_logs') {
+          payload['cable_spans'] = _decodeFiberJson(payload['cable_spans']);
+          payload['splices'] = _decodeFiberJson(payload['splices']);
+          payload['map_data'] = _decodeFiberMap(payload['map_data']);
+        }
         result.add({
           'entity_type': entry.value,
           'entity_id': row['id']! as String,
           'operation': 'upsert',
           'version': (row['version'] as num?)?.toInt() ?? 1,
-          'payload': Map<String, Object?>.from(row),
+          'payload': payload,
         });
       }
     }
@@ -5162,6 +5903,7 @@ class LocalRepository {
       'extra_work': 'extra_works',
       'extra_work_material': 'extra_work_materials',
       'expense': 'expenses',
+      'fiber_work_log': 'fiber_work_logs',
     };
     await db.transaction((transaction) async {
       final rows = await transaction.query(
@@ -5239,6 +5981,18 @@ class LocalRepository {
       'extra_work': 'extra_works',
       'extra_work_material': 'extra_work_materials',
       'expense': 'expenses',
+      'fiber_work_log': 'fiber_work_logs',
+    };
+    const booleanFields = {
+      'providers': {'is_active'},
+      'warehouses': {'is_active'},
+      'materials': {'is_active'},
+      'users': {'is_active'},
+      'extra_work_types': {
+        'is_active',
+        'requires_materials',
+        'requires_equipment',
+      },
     };
     const priorities = {
       'provider': 10,
@@ -5309,21 +6063,58 @@ class LocalRepository {
         if (payload.containsKey('sync_state')) {
           payload['sync_state'] = 'synced';
         }
+        if (table == 'fiber_work_logs') {
+          payload['cable_spans'] = jsonEncode(
+            _decodeFiberJson(payload['cable_spans']),
+          );
+          payload['splices'] = jsonEncode(_decodeFiberJson(payload['splices']));
+          final mapData = payload['map_data'];
+          payload['map_data'] = mapData == null
+              ? null
+              : jsonEncode(_decodeFiberMap(mapData));
+        }
+        for (final field in booleanFields[table] ?? const <String>{}) {
+          if (payload[field] is bool) {
+            payload[field] = payload[field] == true ? 1 : 0;
+          }
+        }
+        var localEntityId = entityId;
+        var existing = await transaction.query(
+          table,
+          columns: ['id'],
+          where: 'id = ?',
+          whereArgs: [entityId],
+          limit: 1,
+        );
+        if (existing.isEmpty && change['entity_type'] == 'user') {
+          // A newly linked device has a local user row before its first pull.
+          // The server can identify the same account with a different row ID,
+          // while SQLite also enforces (organization_id, username). Match the
+          // account by username and update its local row instead of inserting
+          // a duplicate user.
+          final username = payload['username']?.toString().trim();
+          if (username != null && username.isNotEmpty) {
+            existing = await transaction.query(
+              'users',
+              columns: ['id'],
+              where: 'organization_id = ? AND username = ?',
+              whereArgs: [orgId, username],
+              limit: 1,
+            );
+            if (existing.isNotEmpty) {
+              localEntityId = existing.single['id']! as String;
+              payload['id'] = localEntityId;
+            }
+          }
+        }
         if (change['operation'] == 'delete') {
           await transaction.update(
             table,
             {'deleted_at': DateTime.now().toUtc().toIso8601String()},
             where: 'id = ?',
-            whereArgs: [entityId],
+            whereArgs: [localEntityId],
           );
         } else {
-          final existing = await transaction.query(
-            table,
-            columns: ['id'],
-            where: 'id = ?',
-            whereArgs: [entityId],
-            limit: 1,
-          );
           if (existing.isEmpty) {
             await transaction.insert(table, payload);
           } else {
@@ -5334,8 +6125,8 @@ class LocalRepository {
             await transaction.update(
               table,
               payload,
-              where: 'id = ?',
-              whereArgs: [entityId],
+              where: 'id = ? AND organization_id = ?',
+              whereArgs: [localEntityId, orgId],
             );
           }
         }
