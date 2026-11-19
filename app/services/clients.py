@@ -6,6 +6,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.clients import Client, Connection, ConnectionMaterial, Provider
+from app.models.enums import InventoryTransactionType, UserRole
+from app.models.inventory import InventoryTransaction
 from app.models.users import User
 from app.services.access import AccessScope, apply_user_scope, get_access_scope
 from app.services.inventory import format_quantity
@@ -48,6 +50,36 @@ class ClientDetailData:
     status: str
     connection_date: object | None
     note: str
+
+
+class ClientDeletionError(ValueError):
+    pass
+
+
+def delete_client(db: Session, *, client: Client, user: User) -> None:
+    if user.role != UserRole.ADMIN:
+        raise ClientDeletionError("Удалять клиентов может только администратор")
+    material_rows = db.scalar(
+        select(func.count(ConnectionMaterial.id))
+        .join(Connection, Connection.id == ConnectionMaterial.connection_id)
+        .where(Connection.client_id == client.id)
+    ) or 0
+    inventory_usage = db.scalar(
+        select(func.count(InventoryTransaction.id))
+        .join(Connection, Connection.id == InventoryTransaction.connection_id)
+        .where(
+            Connection.client_id == client.id,
+            InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+            InventoryTransaction.quantity < 0,
+        )
+    ) or 0
+    if material_rows or inventory_usage:
+        raise ClientDeletionError(
+            "Удаление заблокировано: по подключению этого клиента есть расход материала. "
+            "Сначала исправьте ошибочный расход или обратитесь к администратору."
+        )
+    db.delete(client)
+    db.commit()
 
 
 def normalize_filters(search: str | None, provider: str | None) -> dict:

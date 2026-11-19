@@ -216,6 +216,181 @@ class _FinanceScreenState extends State<FinanceScreen> {
   String money(double value) =>
       '${value.toStringAsFixed(value == value.roundToDouble() ? 0 : 2)} ₽';
 
+  String dateLabel(DateTime value) =>
+      '${value.day}.${value.month}.${value.year}';
+
+  Future<void> showConnectionSettlement() async {
+    final providers = await widget.repository.providers();
+    if (!mounted || providers.isEmpty) return;
+    final today = DateTime.now();
+    final lastMonthEnd = DateTime(today.year, today.month, 0);
+    final lastMonthStart = DateTime(lastMonthEnd.year, lastMonthEnd.month, 1);
+    var selectedProvider = providerId ?? providers.first.id;
+    var selectedFrom = dateFrom ?? lastMonthStart;
+    var selectedTo = dateTo ?? lastMonthEnd;
+    ConnectionSettlementPreview? preview;
+    String? dialogError;
+    var saving = false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> chooseDate(bool from) async {
+            final selected = await showDatePicker(
+              context: context,
+              initialDate: from ? selectedFrom : selectedTo,
+              firstDate: DateTime(2020),
+              lastDate: DateTime(2100),
+            );
+            if (selected == null) return;
+            setDialogState(() {
+              if (from) {
+                selectedFrom = selected;
+                if (selectedTo.isBefore(selectedFrom)) selectedTo = selected;
+              } else {
+                selectedTo = selected;
+                if (selectedFrom.isAfter(selectedTo)) selectedFrom = selected;
+              }
+              preview = null;
+              dialogError = null;
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Закрыть расчёт за подключения'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedProvider,
+                    decoration: const InputDecoration(labelText: 'Провайдер'),
+                    items: providers
+                        .map(
+                          (item) => DropdownMenuItem(
+                            value: item.id,
+                            child: Text(item.name),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) => setDialogState(() {
+                      selectedProvider = value ?? selectedProvider;
+                      preview = null;
+                      dialogError = null;
+                    }),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('С периода'),
+                    subtitle: Text(dateLabel(selectedFrom)),
+                    trailing: const Icon(Icons.calendar_month),
+                    onTap: () => chooseDate(true),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('По период'),
+                    subtitle: Text(dateLabel(selectedTo)),
+                    trailing: const Icon(Icons.event),
+                    onTap: () => chooseDate(false),
+                  ),
+                  const Text(
+                    'Будет учтена только неоплаченная сумма офиса за подключения. '
+                    'Расходы, допработы и материалы останутся без изменений.',
+                  ),
+                  if (preview != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Долг офиса по подключениям до конца периода: '
+                      '${money(preview!.connectionClaims)}',
+                    ),
+                    Text(
+                      'Уже выплачено офисом по подключениям: '
+                      '${money(preview!.alreadyPaidByOffice)}',
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'К закрытию: ${money(preview!.amountToClose)}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                  if (dialogError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      dialogError!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Отмена'),
+              ),
+              if (preview == null)
+                FilledButton(
+                  onPressed: () async {
+                    try {
+                      final value = await widget.repository
+                          .connectionSettlementPreview(
+                            providerId: selectedProvider,
+                            dateFrom: selectedFrom,
+                            dateTo: selectedTo,
+                          );
+                      setDialogState(() {
+                        preview = value;
+                        dialogError = value.alreadyClosed
+                            ? 'Этот период уже закрыт.'
+                            : value.amountToClose <= 0.005
+                            ? 'Неоплаченного остатка за период нет.'
+                            : null;
+                      });
+                    } catch (error) {
+                      setDialogState(() => dialogError = error.toString());
+                    }
+                  },
+                  child: const Text('Проверить сумму'),
+                )
+              else
+                FilledButton(
+                  onPressed:
+                      saving ||
+                          preview!.alreadyClosed ||
+                          preview!.amountToClose <= 0.005
+                      ? null
+                      : () async {
+                          setDialogState(() => saving = true);
+                          try {
+                            await widget.repository.closeConnectionSettlement(
+                              providerId: selectedProvider,
+                              dateFrom: selectedFrom,
+                              dateTo: selectedTo,
+                            );
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                            if (mounted) reload();
+                          } catch (error) {
+                            setDialogState(() {
+                              saving = false;
+                              dialogError = error.toString();
+                            });
+                          }
+                        },
+                  child: Text(saving ? 'Сохраняю…' : 'Закрыть расчёт'),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -294,6 +469,21 @@ class _FinanceScreenState extends State<FinanceScreen> {
                   ),
                 ),
               ),
+              if (widget.role == 'admin') ...[
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.task_alt),
+                    title: const Text('Расчёт за подключения'),
+                    subtitle: const Text(
+                      'Отметить выплату офиса по подключениям до конца периода. '
+                      'Расходы и допработы не меняются.',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: showConnectionSettlement,
+                  ),
+                ),
+              ],
               if (providerId != null ||
                   transactionType != null ||
                   dateFrom != null ||
@@ -556,6 +746,7 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
   late Future<List<LookupItem>> providers;
   String type = 'PAYMENT_TO_OFFICE';
   String? providerId;
+  late DateTime occurredAt;
   bool saving = false;
   String? error;
 
@@ -569,6 +760,7 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
   void initState() {
     super.initState();
     providers = widget.repository.providers();
+    occurredAt = widget.existing?.occurredAt ?? DateTime.now();
     final existing = widget.existing;
     if (existing != null) {
       type = existing.type;
@@ -644,6 +836,22 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
               },
             ),
             const SizedBox(height: 12),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.calendar_month),
+              label: Text(
+                'Дата операции: ${occurredAt.day}.${occurredAt.month}.${occurredAt.year}',
+              ),
+              onPressed: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: occurredAt,
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime.now().add(const Duration(days: 365)),
+                );
+                if (picked != null) setState(() => occurredAt = picked);
+              },
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: amount,
               keyboardType: const TextInputType.numberWithOptions(
@@ -702,6 +910,7 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
           amount: value,
           providerId: providerId!,
           comment: comment.text,
+          occurredAt: occurredAt,
         );
       } else {
         await widget.repository.updateManualFinanceTransaction(
@@ -710,6 +919,7 @@ class _FinanceOperationSheetState extends State<_FinanceOperationSheet> {
           amount: value,
           providerId: providerId!,
           comment: comment.text,
+          occurredAt: occurredAt,
         );
       }
       if (mounted) Navigator.pop(context, true);

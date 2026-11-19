@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Кабель и сварки | {{ app_name }}{% endblock %}
+{% block page_heading %}Кабель и сварки{% endblock %}
+{% block page_description %}Личный журнал метража и сваренных волокон — отдельно от финансовых и складских отчётов.{% endblock %}
+
+{% block content %}
+  <div class="row g-3 mb-4">
+    <div class="col-md-6"><div class="card"><div class="card-body"><div class="text-secondary">Общий метраж кабеля</div><div class="h1 mb-0">{{ '%.2f'|format(total_meters) }} м</div></div></div></div>
+    <div class="col-md-6"><div class="card"><div class="card-body"><div class="text-secondary">Сварено волокон</div><div class="h1 mb-0">{{ total_splices }}</div></div></div></div>
+  </div>
+
+  {% if not logs %}
+    <div class="card"><div class="card-body text-center py-5">
+      <i class="bi bi-bezier2 display-5 text-secondary"></i>
+      <h2 class="h3 mt-3">Журнал пока пуст</h2>
+      <p class="text-secondary mb-0">Добавь объект в приложении и синхронизируй его — здесь появятся отрезки кабеля и сварки.</p>
+    </div></div>
+  {% else %}
+    <div class="d-flex justify-content-end mb-3 d-print-none"><button class="btn btn-outline-primary" onclick="window.print()"><i class="bi bi-printer me-1"></i>Печать / сохранить</button></div>
+    <div class="d-grid gap-3">
+      {% for log in logs %}
+        <section class="card">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div><h2 class="card-title mb-1">{{ log.object_name }}</h2><div class="text-secondary">{{ log.work_date.strftime('%d.%m.%Y') }}</div></div>
+            <div class="text-end"><div class="fw-bold">{{ '%.2f'|format(log.cable_spans|sum(attribute='length_m')) }} м</div><div class="text-secondary">{{ log.splices|length }} волокон</div></div>
+          </div>
+          <div class="card-body">
+            <h3 class="h4">Отрезки кабеля</h3>
+            {% if log.cable_spans %}
+              <div class="table-responsive"><table class="table table-vcenter"><thead><tr><th>Метка</th><th>От муфты</th><th>До муфты</th><th>Волокон в кабеле</th><th class="text-end">Метраж</th></tr></thead><tbody>
+              {% for span in log.cable_spans %}<tr><td>{{ span.get('cable_mark', '—') }}</td><td>{{ span.get('from_closure', '—') }}</td><td>{{ span.get('to_closure', '—') }}</td><td>{{ span.get('fiber_count', 0) }}</td><td class="text-end">{{ span.get('length_m', 0) }} м</td></tr>{% endfor %}
+              </tbody></table></div>
+            {% else %}<p class="text-secondary">Отрезков нет.</p>{% endif %}
+            <h3 class="h4 mt-4">Сваренные волокна</h3>
+            {% if log.splices %}
+              <div class="table-responsive"><table class="table table-vcenter"><thead><tr><th>Муфта</th><th>Кабель</th><th>Волокно</th><th>Цвет</th><th>Соединение</th></tr></thead><tbody>
+              {% for splice in log.splices %}<tr><td>{{ splice.get('closure', '—') }}</td><td>{{ splice.get('cable_mark', '—') }}</td><td>№ {{ splice.get('fiber_number', '—') }}</td><td>{{ splice.get('fiber_color_name', '—') }}</td><td>{% if splice.get('connected_cable_mark') %}{{ splice.get('connected_cable_mark') }}, № {{ splice.get('connected_fiber_number', '—') }}{% else %}—{% endif %}</td></tr>{% endfor %}
+              </tbody></table></div>
+            {% else %}<p class="text-secondary">Сварок нет.</p>{% endif %}
+            {% if log.notes %}<div class="mt-3"><strong>Примечание:</strong> {{ log.notes }}</div>{% endif %}
+          </div>
+        </section>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}

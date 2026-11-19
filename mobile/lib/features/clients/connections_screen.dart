@@ -22,10 +22,17 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
   String? warehouseId;
   DateTime? dateFrom;
   DateTime? dateTo;
+  bool canDeleteRecords = false;
   @override
   void initState() {
     super.initState();
     reload();
+    loadPermissions();
+  }
+
+  Future<void> loadPermissions() async {
+    final user = await widget.repository.currentUser();
+    if (mounted) setState(() => canDeleteRecords = user?.role == 'admin');
   }
 
   void reload() => setState(
@@ -113,12 +120,16 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                             await remove(item);
                           }
                         },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'edit', child: Text('Изменить')),
-                          PopupMenuItem(
-                            value: 'delete',
-                            child: Text('Удалить'),
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Изменить'),
                           ),
+                          if (canDeleteRecords)
+                            const PopupMenuItem(
+                              value: 'delete',
+                              child: Text('Удалить'),
+                            ),
                         ],
                       ),
                     ),
@@ -312,7 +323,8 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Удалить подключение?'),
         content: const Text(
-          'Материалы вернутся на склад, финансовые начисления будут отменены.',
+          'Подключение можно удалить, только если по нему не списывали материалы. '
+          'Для защиты складского учёта списанные материалы нужно сначала исправить в журнале.',
         ),
         actions: [
           TextButton(
@@ -327,9 +339,20 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
       ),
     );
     if (confirmed == true) {
-      await widget.repository.deleteConnection(item.id);
-      widget.onChanged();
-      reload();
+      try {
+        await widget.repository.deleteConnection(item.id);
+        widget.onChanged();
+        reload();
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              error.toString().replaceFirst('Invalid argument(s): ', ''),
+            ),
+          ),
+        );
+      }
     }
   }
 }

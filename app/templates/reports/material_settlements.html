@@ -1,0 +1,47 @@
+<div class="alert alert-light border">
+  <i class="bi bi-info-circle me-2"></i>
+  Долг по каждому материалу переносится из месяца в месяц. В таблице отдельно видны входящий остаток, изменения за выбранный период и остаток на его конец.
+</div>
+<div class="card border-0 shadow-sm">
+  <div class="card-header bg-white d-flex justify-content-between align-items-center">
+    <h3 class="h5 mb-0">Долги по материалам</h3>
+    <span class="badge text-bg-light text-dark border">Позиций: {{ data.material_settlements.total }}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-striped table-hover align-middle mb-0">
+      <thead><tr><th>Должник</th><th>Кредитор</th><th>Материал</th><th class="text-end">Перенос с начала</th><th class="text-end">Добавлено</th><th class="text-end">Погашено</th><th class="text-end">Встречный зачёт</th><th class="text-end">Остаток</th><th>Погасить</th></tr></thead>
+      <tbody>
+        {% for row in data.material_settlements.items %}
+        <tr>
+          <td class="fw-semibold">{{ row.debtor.name }}</td><td>{{ row.creditor.name }}</td>
+          <td>{{ row.material.name }} <span class="text-secondary small">{{ row.unit }}</span></td>
+          <td class="text-end">{{ format_quantity(row.opening_quantity) }}</td>
+          <td class="text-end">{{ format_quantity(row.period_added) }}</td>
+          <td class="text-end">{{ format_quantity(row.period_settled) }}</td>
+          <td class="text-end">{{ format_quantity(row.period_offset) }}</td>
+          <td class="text-end fw-bold text-warning">{{ format_quantity(row.quantity) }} {{ row.unit }}</td>
+          <td>
+            {% if user.role.value == 'admin' %}
+            <form method="post" action="/reports/material-settlements/close" class="d-flex flex-column gap-1">
+              <input type="hidden" name="debtor_id" value="{{ row.debtor.id }}"><input type="hidden" name="creditor_id" value="{{ row.creditor.id }}"><input type="hidden" name="material_id" value="{{ row.material.id }}">
+              <input type="hidden" name="period" value="{{ data.filters.period }}"><input type="hidden" name="date_from" value="{{ data.filters.date_from.isoformat() if data.filters.date_from else '' }}"><input type="hidden" name="date_to" value="{{ data.filters.date_to.isoformat() if data.filters.date_to else '' }}"><input type="hidden" name="provider_id" value="{{ data.filters.provider_id or '' }}"><input type="hidden" name="search" value="{{ data.filters.search or '' }}">
+              <label class="form-check small mb-0"><input class="form-check-input" type="checkbox" name="confirm" value="yes" required><span class="form-check-label">Погашено</span></label>
+              <input class="form-control form-control-sm" type="date" name="settlement_date" value="{{ data.period.date_to.isoformat() if data.period.date_to else data.today.isoformat() }}" required>
+              <button class="btn btn-sm btn-outline-success">Закрыть остаток</button>
+            </form>
+            {% else %}<span class="text-secondary">Только администратор</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}<tr><td colspan="9" class="text-center text-secondary py-4">На конец выбранного периода долгов по материалам нет</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ pagination(data.material_settlements, 'material_settlements') }}
+<div class="card border-0 shadow-sm mt-4">
+  <div class="card-header bg-white"><h3 class="h5 mb-0">Журнал погашений</h3></div>
+  <div class="table-responsive"><table class="table table-striped align-middle mb-0">
+    <thead><tr><th>Дата</th><th>Кто закрыл</th><th>Кому</th><th>Материал</th><th class="text-end">Количество</th><th>Комментарий</th></tr></thead>
+    <tbody>{% for item in data.material_settlement_history %}<tr><td>{{ item.created_at.strftime('%d.%m.%Y') }}</td><td>{{ item.debtor }}</td><td>{{ item.creditor }}</td><td>{{ item.material }}</td><td class="text-end">{{ format_quantity(item.quantity) }} {{ item.unit }}</td><td>{{ item.comment or '—' }}</td></tr>{% else %}<tr><td colspan="6" class="text-center text-secondary py-4">Погашений за выбранный период нет</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>

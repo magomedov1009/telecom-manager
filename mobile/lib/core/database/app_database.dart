@@ -17,7 +17,7 @@ class AppDatabase {
     _database = await factory.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 13,
+        version: 15,
         onConfigure: (db) async => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _createSchema,
         onUpgrade: _upgradeSchema,
@@ -154,6 +154,7 @@ class AppDatabase {
     await _createFinanceTables(db);
     await _createWorkAndExpenseTables(db);
     await _createMaterialDebtSettlements(db);
+    await _createFiberWorkLogs(db);
     await _createUsersTable(db);
     await db.execute('''
       CREATE TABLE sync_queue (
@@ -264,6 +265,12 @@ class AppDatabase {
     }
     if (oldVersion < 13) {
       await _createMaterialDebtSettlements(db);
+    }
+    if (oldVersion < 14) {
+      await _createFiberWorkLogs(db, includeMapData: false);
+    }
+    if (oldVersion < 15) {
+      await db.execute('ALTER TABLE fiber_work_logs ADD COLUMN map_data TEXT');
     }
   }
 
@@ -418,6 +425,33 @@ class AppDatabase {
     ''');
     await db.execute(
       'CREATE INDEX IF NOT EXISTS ix_material_debt_settlements_org ON material_debt_settlements(organization_id, occurred_at)',
+    );
+  }
+
+  Future<void> _createFiberWorkLogs(
+    Database db, {
+    bool includeMapData = true,
+  }) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS fiber_work_logs (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL REFERENCES organizations(id),
+        object_name TEXT NOT NULL,
+        work_date TEXT NOT NULL,
+        cable_spans TEXT NOT NULL,
+        splices TEXT NOT NULL,
+        notes TEXT,
+        ${includeMapData ? 'map_data TEXT,' : ''}
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        sync_state TEXT NOT NULL DEFAULT 'pending'
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS ix_fiber_work_logs_org_date '
+      'ON fiber_work_logs(organization_id, work_date)',
     );
   }
 

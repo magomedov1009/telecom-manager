@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.orm import Session, aliased, joinedload
 
 from app.models.clients import Client, Connection, ExtraWork, ExtraWorkType, Provider
@@ -258,12 +258,13 @@ def inventory_page(inventory: dict, search: str | None, page: int, sort: str, di
     return paginate_rows(rows, page, sort_key, direction, per_page)
 
 
-def material_settlements(
+def _material_settlements_for_period(
     db: Session,
     period: dict,
     provider_id: int | None,
     search: str | None,
     scope: AccessScope | None = None,
+    include_zero: bool = False,
 ) -> list[dict]:
     """Return net material debts caused by cross-provider use and transfers."""
     source_warehouse = aliased(Warehouse)
@@ -274,11 +275,19 @@ def material_settlements(
             InventoryTransaction.provider_id.label("debtor_id"),
             source_warehouse.provider_id.label("creditor_id"),
             InventoryTransaction.material_id,
-            func.coalesce(func.sum(func.abs(InventoryTransaction.quantity)), 0).label("quantity"),
+            func.coalesce(func.sum(-InventoryTransaction.quantity), 0).label("quantity"),
         )
         .join(source_warehouse, source_warehouse.id == InventoryTransaction.warehouse_id)
         .where(
-            InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+            or_(
+                InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+                and_(
+                    InventoryTransaction.operation_type.in_(
+                        [InventoryTransactionType.ADJUSTMENT, InventoryTransactionType.RETURN]
+                    ),
+                    InventoryTransaction.connection_id.is_not(None),
+                ),
+            ),
             InventoryTransaction.provider_id.is_not(None),
             source_warehouse.provider_id.is_not(None),
             InventoryTransaction.provider_id != source_warehouse.provider_id,
@@ -306,6 +315,7 @@ def material_settlements(
         )
         .where(
             InventoryTransaction.operation_type == InventoryTransactionType.TRANSFER_OUT,
+            InventoryTransaction.quantity < 0,
             source_warehouse.provider_id.is_not(None),
             destination_warehouse.provider_id.is_not(None),
             source_warehouse.provider_id != destination_warehouse.provider_id,
@@ -368,7 +378,7 @@ def material_settlements(
         )
         forward_total = forward["connections"] + forward["transfers"] - forward["settlements"]
         reverse_total = reverse["connections"] + reverse["transfers"] - reverse["settlements"]
-        if forward_total == reverse_total:
+        if forward_total == reverse_total and not include_zero:
             continue
         if forward_total < reverse_total:
             debtor_id, creditor_id = creditor_id, debtor_id
@@ -392,6 +402,7 @@ def material_settlements(
                 "material": material,
                 "connections": forward["connections"],
                 "transfers": forward["transfers"],
+                "settlements": forward["settlements"] - reverse["settlements"],
                 "offset": reverse_total + forward["settlements"],
                 "quantity": forward_total - reverse_total,
                 "unit": get_unit_label(material),
@@ -405,6 +416,274 @@ def material_settlements(
             row["material"].name.lower(),
         ),
     )
+
+
+def material_settlements(
+    db: Session,
+    period: dict,
+    provider_id: int | None,
+    search: str | None,
+    scope: AccessScope | None = None,
+) -> list[dict]:
+    """Show opening material debt, this-period movement, and carried balance."""
+    def period_ending_at(end_date: date | None) -> dict:
+        return {
+            "date_from": None,
+            "date_to": end_date,
+            "start": None,
+            "end": datetime.combine(end_date, time.max) if end_date else None,
+        }
+
+    opening_rows: list[dict] = []
+    if period["date_from"] is not None:
+        opening_rows = _material_settlements_for_period(
+            db,
+            period_ending_at(period["date_from"] - timedelta(days=1)),
+            provider_id,
+            search,
+            scope,
+        )
+    closing_rows = _material_settlements_for_period(
+        db, period_ending_at(period["date_to"]), provider_id, search, scope
+    )
+    monthly_rows = _material_settlements_for_period(
+        db, period, provider_id, search, scope, include_zero=True
+    )
+    def index(rows: list[dict]) -> dict[tuple[int, int, int], dict]:
+        return {
+            (row["debtor"].id, row["creditor"].id, row["material"].id): row
+            for row in rows
+        }
+
+    opening = index(opening_rows)
+    closing = index(closing_rows)
+    monthly = index(monthly_rows)
+    combined = []
+    for key, row in closing.items():
+        debtor_id, creditor_id, material_id = key
+        open_row = opening.get(key)
+        if open_row is not None:
+            opening_amount = open_row["quantity"]
+        else:
+            opposite = opening.get((creditor_id, debtor_id, material_id))
+            opening_amount = -opposite["quantity"] if opposite else Decimal("0")
+        month_row = monthly.get(key)
+        reverse_month = monthly.get((creditor_id, debtor_id, material_id))
+        added = Decimal("0")
+        settled = Decimal("0")
+        if month_row:
+            added += month_row["connections"] + month_row["transfers"]
+            settled += month_row.get("settlements", Decimal("0"))
+        if reverse_month:
+            added -= reverse_month["connections"] + reverse_month["transfers"]
+            settled -= reverse_month.get("settlements", Decimal("0"))
+        row["opening_quantity"] = max(opening_amount, Decimal("0"))
+        row["period_added"] = max(added, Decimal("0"))
+        row["period_settled"] = settled
+        row["period_offset"] = max(
+            (month_row["offset"] - month_row.get("settlements", Decimal("0")))
+            if month_row
+            else Decimal("0"),
+            Decimal("0"),
+        )
+        combined.append(row)
+    return combined
+
+
+def _office_claim_balances(
+    db: Session,
+    provider_id: int,
+    period: dict,
+    scope: AccessScope | None = None,
+) -> dict[tuple[str, int], dict]:
+    """Return remaining installer claims after linked and legacy office payments.
+
+    Linked payouts settle their exact expense/extra work. Historical payouts
+    without a source are allocated to the oldest open claim, in transaction
+    date order, so reports agree with the overall finance balance.
+    """
+    end_date = period.get("date_to")
+    events: list[tuple[datetime, int, str, dict]] = []
+
+    expense_query = select(Expense.id, Expense.created_at, Expense.amount).where(
+        Expense.provider_id == provider_id,
+        Expense.paid_by == PaidBy.INSTALLER,
+    )
+    expense_query = apply_user_scope(expense_query, Expense.user_id, scope)
+    if end_date is not None:
+        expense_query = expense_query.where(
+            Expense.created_at <= datetime.combine(end_date, time.max)
+        )
+    for identifier, created_at, amount in db.execute(expense_query):
+        claim_date = created_at.replace(tzinfo=None)
+        events.append(
+            (
+                claim_date,
+                0,
+                f"expense:{identifier}",
+                {
+                    "kind": "claim",
+                    "type": "expense",
+                    "id": identifier,
+                    "date": claim_date.date(),
+                    "amount": Decimal(amount),
+                },
+            )
+        )
+
+    connection_query = (
+        select(
+            Connection.id,
+            Connection.connection_date,
+            Connection.installer_amount,
+            Connection.office_amount,
+            Connection.price,
+        )
+        .join(Client, Client.id == Connection.client_id)
+        .where(Client.provider_id == provider_id)
+    )
+    connection_query = apply_user_scope(
+        connection_query, Connection.installer_id, scope
+    )
+    if end_date is not None:
+        connection_query = connection_query.where(
+            Connection.connection_date <= end_date
+        )
+    for identifier, claim_date, installer, office, price in db.execute(
+        connection_query
+    ):
+        amount = max(
+            Decimal(installer) + Decimal(office) - Decimal(price), Decimal("0")
+        )
+        if amount <= 0:
+            continue
+        claim_datetime = datetime.combine(claim_date, time.min)
+        events.append(
+            (
+                claim_datetime,
+                0,
+                f"connection:{identifier}",
+                {
+                    "kind": "claim",
+                    "type": "connection",
+                    "id": identifier,
+                    "date": claim_date,
+                    "amount": amount,
+                },
+            )
+        )
+
+    work_query = select(
+        ExtraWork.id,
+        ExtraWork.work_date,
+        ExtraWork.installer_amount,
+    ).where(
+        ExtraWork.provider_id == provider_id,
+        ExtraWork.installer_amount > 0,
+    )
+    work_query = apply_user_scope(work_query, ExtraWork.installer_id, scope)
+    if end_date is not None:
+        work_query = work_query.where(ExtraWork.work_date <= end_date)
+    for identifier, claim_date, amount in db.execute(work_query):
+        claim_datetime = datetime.combine(claim_date, time.min)
+        events.append(
+            (
+                claim_datetime,
+                0,
+                f"extra_work:{identifier}",
+                {
+                    "kind": "claim",
+                    "type": "extra_work",
+                    "id": identifier,
+                    "date": claim_date,
+                    "amount": Decimal(amount),
+                },
+            )
+        )
+
+    payment_query = select(
+        FinanceTransaction.id,
+        FinanceTransaction.created_at,
+        FinanceTransaction.amount,
+        FinanceTransaction.connection_id,
+        FinanceTransaction.expense_id,
+        FinanceTransaction.extra_work_id,
+    ).where(
+        FinanceTransaction.provider_id == provider_id,
+        FinanceTransaction.transaction_type
+        == FinanceTransactionType.PAYMENT_FROM_OFFICE,
+        FinanceTransaction.amount > 0,
+    )
+    payment_query = apply_user_scope(
+        payment_query, FinanceTransaction.user_id, scope
+    )
+    if end_date is not None:
+        payment_query = payment_query.where(
+            FinanceTransaction.created_at
+            <= datetime.combine(end_date, time.max)
+        )
+    for identifier, created_at, amount, connection_id, expense_id, extra_work_id in db.execute(
+        payment_query
+    ):
+        payment_date = created_at.replace(tzinfo=None)
+        target = (
+            ("connection", connection_id)
+            if connection_id is not None
+            else ("expense", expense_id)
+            if expense_id is not None
+            else ("extra_work", extra_work_id)
+            if extra_work_id is not None
+            else None
+        )
+        events.append(
+            (
+                payment_date,
+                1,
+                f"payment:{identifier}",
+                {
+                    "kind": "payment",
+                    "target": target,
+                    "amount": Decimal(amount),
+                },
+            )
+        )
+
+    events.sort(key=lambda event: (event[0], event[1], event[2]))
+    claims: dict[tuple[str, int], dict] = {}
+    accrued: list[tuple[str, int]] = []
+    deferred_linked: dict[tuple[str, int], Decimal] = {}
+    general_credit = Decimal("0")
+    for _, _, _, event in events:
+        if event["kind"] == "claim":
+            key = (event["type"], event["id"])
+            claim = {**event, "remaining": event["amount"]}
+            claims[key] = claim
+            accrued.append(key)
+            applied = min(general_credit, claim["remaining"])
+            claim["remaining"] -= applied
+            general_credit -= applied
+            linked_credit = deferred_linked.pop(key, Decimal("0"))
+            claim["remaining"] -= min(linked_credit, claim["remaining"])
+        elif event["target"] is not None:
+            key = event["target"]
+            claim = claims.get(key)
+            if claim is None:
+                deferred_linked[key] = deferred_linked.get(key, Decimal("0")) + event["amount"]
+            else:
+                claim["remaining"] = max(
+                    claim["remaining"] - event["amount"], Decimal("0")
+                )
+        else:
+            payment = event["amount"]
+            for key in accrued:
+                if payment <= 0:
+                    break
+                claim = claims[key]
+                applied = min(payment, claim["remaining"])
+                claim["remaining"] -= applied
+                payment -= applied
+            general_credit += payment
+    return claims
 
 
 def provider_cards(db: Session, period: dict, provider_id: int | None, search: str | None, scope: AccessScope | None = None) -> list[dict]:
@@ -448,72 +727,49 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
                 ).order_by(Expense.created_at.desc(), Expense.id.desc())
             )
         )
-        unpaid_expense_query = select(
-            func.coalesce(func.sum(Expense.amount), 0)
-        ).where(
-            Expense.provider_id == provider.id,
-            Expense.paid_by == PaidBy.INSTALLER,
+        claim_balances = _office_claim_balances(
+            db, provider.id, period, scope
         )
-        unpaid_expense_query = apply_user_scope(
-            apply_datetime_period(
-                unpaid_expense_query,
-                Expense.created_at,
-                period,
+        selected_claims = [
+            claim
+            for claim in claim_balances.values()
+            if (period["date_from"] is None or claim["date"] >= period["date_from"])
+            and (period["date_to"] is None or claim["date"] <= period["date_to"])
+        ]
+        unpaid_expenses = sum(
+            (
+                claim["remaining"]
+                for claim in selected_claims
+                if claim["type"] == "expense"
             ),
-            Expense.user_id,
-            scope,
+            Decimal("0"),
         )
-        unpaid_expenses = decimal_scalar(db, unpaid_expense_query)
-
-        extra_work_query_total = select(
-            func.coalesce(func.sum(ExtraWork.installer_amount), 0)
-        ).where(ExtraWork.provider_id == provider.id)
-        extra_work_query_total = apply_user_scope(
-            apply_date_period(
-                extra_work_query_total,
-                ExtraWork.work_date,
-                period,
+        unpaid_extra_works = sum(
+            (
+                claim["remaining"]
+                for claim in selected_claims
+                if claim["type"] == "extra_work"
             ),
-            ExtraWork.installer_id,
-            scope,
-        )
-        extra_work_accrued = decimal_scalar(db, extra_work_query_total)
-        paid_extra_query = select(
-            func.coalesce(func.sum(FinanceTransaction.amount), 0)
-        ).where(
-            FinanceTransaction.provider_id == provider.id,
-            FinanceTransaction.transaction_type
-            == FinanceTransactionType.PAYMENT_FROM_OFFICE,
-            FinanceTransaction.amount > 0,
-        )
-        paid_extra_query = apply_user_scope(
-            apply_datetime_period(
-                paid_extra_query,
-                FinanceTransaction.created_at,
-                period,
-            ),
-            FinanceTransaction.user_id,
-            scope,
-        )
-        paid_from_office = decimal_scalar(db, paid_extra_query)
-        unpaid_extra_works = max(
-            extra_work_accrued - paid_from_office,
             Decimal("0"),
         )
 
         usage_query = (
             select(
                 Material,
-                func.coalesce(
-                    func.sum(func.abs(InventoryTransaction.quantity)),
-                    0,
-                ).label("quantity"),
+                func.coalesce(func.sum(-InventoryTransaction.quantity), 0).label("quantity"),
             )
             .join(Material, Material.id == InventoryTransaction.material_id)
             .where(
                 InventoryTransaction.provider_id == provider.id,
-                InventoryTransaction.operation_type
-                == InventoryTransactionType.CONNECTION,
+                or_(
+                    InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+                    and_(
+                        InventoryTransaction.operation_type.in_(
+                            [InventoryTransactionType.ADJUSTMENT, InventoryTransactionType.RETURN]
+                        ),
+                        InventoryTransaction.connection_id.is_not(None),
+                    ),
+                ),
             )
             .group_by(Material.id)
             .order_by(Material.item_type, Material.name)
@@ -535,6 +791,15 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
             }
             for material, quantity in db.execute(usage_query)
         ]
+        onu_usage = sum(
+            (
+                row["quantity"]
+                for row in material_usage
+                if "onu" in row["material"].name.casefold()
+                or "ону" in row["material"].name.casefold()
+            ),
+            Decimal("0"),
+        )
         cards.append({
             "provider": provider,
             "connections": len(provider_connections),
@@ -548,6 +813,7 @@ def provider_cards(db: Session, period: dict, provider_id: int | None, search: s
             "office_net": office_total - unpaid_expenses,
             "unpaid_extra_works": unpaid_extra_works,
             "material_usage": material_usage,
+            "onu_usage": onu_usage,
             "office_owes_me": finance.office_owes_me,
             "i_owe_office": finance.i_owe_office,
             "settlement_closed": finance.office_owes_me == 0 and finance.i_owe_office == 0,
@@ -652,6 +918,7 @@ def get_reports_data(db: Session, *, period_key: str, date_from: date | None, da
     export_query = report_query(filters, active_tab, None, page_data.sort if page_data else None, page_data.direction if page_data else None)
     return {
         "period": period,
+        "today": date.today(),
         "period_labels": PERIOD_LABELS,
         "providers": list(db.scalars(select(Provider).where(Provider.is_active.is_(True)).order_by(Provider.name))),
         "selected_provider": selected_provider.name if selected_provider else "\u0412\u0441\u0435 \u043f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440\u044b",
@@ -687,24 +954,22 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
             rows.append([
                 item["provider"].name,
                 item["connections"],
-                item["connection_total"],
                 item["office_total"],
-                item["installer_total"],
                 item["unpaid_expenses"],
                 item["office_net"],
                 item["unpaid_extra_works"],
+                item["onu_usage"],
                 item["office_owes_me"],
                 item["i_owe_office"],
             ])
         return "providers", [
             "Провайдер",
             "Подключения",
-            "Сумма подключений",
             "Доля офиса",
-            "Доля монтажника",
             "Расходы не оплачены офисом",
             "Доход офиса минус расходы",
             "Допработы к выплате",
+            "Расход ONU, шт.",
             "Офис должен монтажнику",
             "Монтажник должен офису",
         ], rows
@@ -728,10 +993,10 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
                 row["debtor"].name,
                 row["creditor"].name,
                 row["material"].name,
-                row["connections"],
-                row["transfers"],
-                row["offset"],
-                "",
+                row["opening_quantity"],
+                row["period_added"],
+                row["period_settled"],
+                row["period_offset"],
                 row["quantity"],
                 row["unit"],
                 "",
@@ -748,14 +1013,14 @@ def rows_for_export(db: Session, data: dict, tab: str) -> tuple[str, list[str], 
                 "",
                 "",
                 "",
-                item["quantity"],
                 "",
+                item["quantity"],
                 item["unit"],
                 item["comment"] or "",
             ]
             for item in data["material_settlement_history"]
         ])
-        return "material-settlements", ["Операция", "Дата", "Кто должен", "Кому должен", "Материал", "Подключения", "Перемещения", "Встречный зачет", "Списано", "Итого", "Ед. изм.", "Комментарий"], rows
+        return "material-settlements", ["Операция", "Дата", "Кто должен", "Кому должен", "Материал", "Перенос с начала", "Добавлено за период", "Погашено за период", "Встречный зачёт", "Остаток на конец", "Ед. изм.", "Комментарий"], rows
     rows = [[i.created_at, FINANCE_TYPE_LABELS.get(i.transaction_type, i.transaction_type.value), i.provider.name if i.provider else "", i.amount, i.comment or "", i.user.full_name if i.user else ""] for i in data["finance_page"].items]
     return "finance", ["\u0414\u0430\u0442\u0430", "\u0422\u0438\u043f", "\u041f\u0440\u043e\u0432\u0430\u0439\u0434\u0435\u0440", "\u0421\u0443\u043c\u043c\u0430", "\u041a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0439", "\u041f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044c"], rows
 

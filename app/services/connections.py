@@ -509,6 +509,23 @@ def update_connection(
 def delete_connection(db: Session, *, connection: Connection, user: User) -> None:
     if user.role != UserRole.ADMIN:
         raise ConnectionError("Удалять подключения может только администратор")
+    material_rows = db.scalar(
+        select(func.count(ConnectionMaterial.id)).where(
+            ConnectionMaterial.connection_id == connection.id
+        )
+    ) or 0
+    inventory_usage = db.scalar(
+        select(func.count(InventoryTransaction.id)).where(
+            InventoryTransaction.connection_id == connection.id,
+            InventoryTransaction.operation_type == InventoryTransactionType.CONNECTION,
+            InventoryTransaction.quantity < 0,
+        )
+    ) or 0
+    if material_rows or inventory_usage:
+        raise ConnectionError(
+            "Удаление заблокировано: у подключения есть связанное списание материала. "
+            "Сначала исправьте ошибочный расход или обратитесь к администратору."
+        )
     reverse_connection_materials(db, connection=connection, user=user)
     db.delete(connection)
     db.commit()
